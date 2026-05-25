@@ -7,7 +7,7 @@ This document describes the core execution layer of Synapse, covering the runtim
 ## 1. Subsystem Architecture
 
 ### Runtime Architecture
-The Synapse runtime coordinates the local event sourcing system, the filesystem watchers, Git tracking, and the cognitive engines.
+The Synapse runtime coordinates the local event sourcing system, the filesystem watchers, Git tracking, and the evolution engines.
 
 ```mermaid
 graph TD
@@ -19,8 +19,8 @@ graph TD
     Daemon --> ProjectionEngine[Projection Engine]
 ```
 
-- **WHY**: A daemon-driven architecture ensures that filesystem modifications and Git commit state transitions are captured in real-time, matching cognitive state directly with workspace snapshots.
-- **HOW**: The daemon initializes file monitors (Watchdog) and repository connections (GitPython) in separate task loops, feeding changes through the `CognitiveTransactionEngine` to commit events.
+- **WHY**: A daemon-driven architecture ensures that filesystem modifications and Git commit state transitions are captured in real-time, matching context state directly with workspace snapshots.
+- **HOW**: The daemon initializes file monitors (Watchdog) and repository connections (GitPython) in separate task loops, feeding changes through the `TransactionEngine` to commit events.
 - **TRADEOFFS**: Running a local background daemon consumes low but constant memory. If the repository is massive, scanning can cause initial CPU spikes (throttled by config file limits).
 - **FAILURE MODES**: If the daemon crashes, events are not captured in real-time. Upon restart, Synapse traverses the Git history to reconcile any missed commits, recovering gracefully.
 
@@ -46,7 +46,7 @@ graph LR
 
 ## 2. Pipeline & Workflow Diagrams
 
-### Cognitive Replay Workflow
+### Temporal Replay Workflow
 Replays raw transaction events from a given event sequence to reconstruct the exact state of the context DAG.
 
 ```mermaid
@@ -67,7 +67,7 @@ sequenceDiagram
     Replay-->>CLI: return ReplayResult (State Hash, Diagnostics)
 ```
 
-- **WHY**: Replayability is the foundation of cognitive determinism. We must guarantee that replaying the event log yields the exact same context state hash.
+- **WHY**: Replayability is the foundation of temporal context determinism. We must guarantee that replaying the event log yields the exact same context state hash.
 - **HOW**: The `ReplayEngine` loops through transaction logs sequentially, loading context objects, recalculating hashes, and comparing them against stored records to identify state divergence.
 - **FAILURE MODES**: If a local context object is manually edited or corrupted on disk, the state hash verification fails, yielding a diagnostic report marking the corrupted context hash.
 

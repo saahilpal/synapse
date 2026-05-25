@@ -1,8 +1,8 @@
 # Vision
 
-Synapse is a **temporal cognitive operating system for software systems**: a local runtime that gives AI-assisted development tools a durable, versioned, replayable understanding of how a software project evolves.
+Synapse is a **temporal source context management substrate and causal software evolution graph**: a local infrastructure that preserves a durable, versioned, replayable understanding of how a software project evolves.
 
-The long-term ambition is not to make an all-purpose AI brain. Synapse should become a small, reliable context operating system for engineering teams: one that understands repository structure, code intent, documentation, architectural decisions, assumptions, risks, and temporal change.
+The long-term ambition is not to make an all-purpose AI brain. Synapse exists as a small, reliable temporal source context substrate for engineering teams and AI agents: one that preserves repository structure, code intent, documentation, architectural decisions, assumptions, risks, and temporal change.
 
 ## Product Thesis
 
@@ -13,12 +13,12 @@ Synapse exists to make that possible with local infrastructure developers can tr
 ## What Synapse Optimizes For
 
 - Cognitive efficiency over maximum intelligence.
-- Temporal cognition over static repository understanding.
-- Meaningful context evolution over raw transcript storage.
-- Bounded cognition over unbounded accumulation.
+- Temporal context evolution over static repository understanding.
+- Causal software evolution over raw transcript storage.
+- Bounded context over unbounded accumulation.
 - Local control over remote dependency.
 - Git-synchronized evolution over static project summaries.
-- Provenance, confidence evolution, and semantic lineage over opaque recall.
+- Provenance, validation state evolution, and semantic lineage over opaque recall.
 - Explicit rollback over silent mutation.
 
 ## Non-Goals
@@ -37,7 +37,7 @@ Synapse exists to make that possible with local infrastructure developers can tr
 flowchart LR
     Repo[Repository reality]
     Meaning[Extracted meaning]
-    Time[Temporal cognition]
+    Time[Temporal context runtime]
     Agents[AI-assisted development]
 
     Repo --> Meaning
@@ -48,4 +48,4 @@ flowchart LR
 
 The system should feel like:
 
-> Git + temporal cognition + semantic lineage + developer runtime for evolving software understanding.
+> Git + temporal source context substrate + causal evolution graph + developer runtime for evolving software understanding.

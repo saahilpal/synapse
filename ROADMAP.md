@@ -1,6 +1,6 @@
 # Roadmap
 
-The roadmap favors temporal cognition over broad automation. Each phase must preserve local-first operation, deterministic replay, and bounded cognition growth.
+The roadmap favors temporal context management over broad automation. Each phase must preserve local-first operation, deterministic replay, and bounded context growth.
 
 ## Phase 1: Foundation
 
@@ -16,25 +16,25 @@ The roadmap favors temporal cognition over broad automation. Each phase must pre
 - Watchdog filesystem watcher.
 - GitPython repository state reader.
 - Append-only SQLite WAL event store.
-- Content-addressed cognition objects using msgpack.
-- Markdown cognition engine using `markdown-it-py`.
+- Content-addressed semantic annotations using msgpack.
+- Markdown extraction engine using `markdown-it-py`.
 - Initial Context DAG with replay.
 
-## Phase 3: Cognitive Evolution
+## Phase 3: Temporal Context Evolution
 
 - Cognitive Evolution Engine.
 - Semantic Git diffs.
 - Temporal Context DAG queries.
 - Assumption Engine.
-- Confidence evolution.
+- Validation state evolution.
 - Drift timelines.
 
-## Phase 4: Structured Cognition Projections
+## Phase 4: Causal Graph Projections
 
 - Commit-linked context deltas.
-- Rollback and checkout-aware cognition rewinds.
-- Branch cognition inheritance.
-- Cognitive merge conflict detection.
+- Rollback and checkout-aware context rewinds.
+- Branch context inheritance.
+- Causal merge conflict detection.
 - Tree-sitter structural parsing.
 - NetworkX graph projection.
 - Qdrant semantic retrieval integration.

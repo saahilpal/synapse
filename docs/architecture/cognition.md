@@ -1,12 +1,12 @@
-# Cognition, Evolution, & Confidence Engine
+# Semantic Annotations, Evolution, & Validation State
 
-This document outlines the cognitive structures of Synapse, explaining how semantic objects are extracted, how confidence decays and propagates, and how branch context merges are resolved.
+This document outlines the temporal structures of Synapse, explaining how semantic annotations are extracted, how validation states are calculated, and how branch context merges are resolved.
 
 ---
 
 ## 1. Subsystem Architecture
 
-### Cognition & Ingestion Pipeline
+### Ingestion & Structure Ingestion Pipeline
 Extracts semantic observations from repository source files and Markdown documentation.
 
 ```mermaid
@@ -16,7 +16,7 @@ flowchart TD
     Filters --> Markdown[Markdown Ingestion]
     Filters --> Parser[Tree-sitter AST Parser]
     
-    Manifests --> Builder[Cognition Builder]
+    Manifests --> Builder[Context Substrate Builder]
     Markdown --> Builder
     Parser --> Builder
     
@@ -31,7 +31,7 @@ flowchart TD
 
 ---
 
-### Confidence & Drift Engine
+### Validation State & Drift Engine
 Tracks fact validity, freshness decay, contradictions, and workspace divergence.
 
 ```mermaid
@@ -40,7 +40,7 @@ graph TD
     Freshness[Freshness Decay] --> Score
     Trust[Provenance Trust] --> Score
     Contradict[Contradiction Count] --> Score
-    Score --> FinalScore[Final Confidence Score]
+    Score --> FinalScore[Validation State]
     
     FinalScore --> Propagate[Propagate Upstream Trust]
     Propagate --> GitDiff[Compare Scan vs Git HEAD]
@@ -94,8 +94,8 @@ flowchart TD
 
 ---
 
-### Branch Cognition Merge Flow
-Detects cognitive merge conflicts between diverging branches.
+### Branch Context Merge Flow
+Detects causal merge conflicts between diverging branches.
 
 ```mermaid
 flowchart TD
@@ -113,5 +113,5 @@ flowchart TD
     Overlap -- No --> AutoMerge[Mark as Cleanly Auto-Mergeable]
 ```
 
-- **WHY**: Like git conflicts, cognitive understanding can diverge on different development branches (e.g. branch A assumes sqlite, branch B assumes postgres).
+- **WHY**: Like git conflicts, contextual understanding can diverge on different development branches (e.g. branch A assumes sqlite, branch B assumes postgres).
 - **HOW**: Traverses parent edges in the context DAG to find the lowest common ancestor, compares left and right deltas, and identifies overlapping mutations.

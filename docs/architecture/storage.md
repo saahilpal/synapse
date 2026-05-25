@@ -18,7 +18,7 @@ graph TD
     Tx -- Success --> TxCommit[Commit DB Transaction]
 ```
 
-- **WHY**: Local architectural intelligence must be durable, audit-safe, and rollbackable. An append-only log guarantees that context history cannot be silently overwritten or tampered with.
+- **WHY**: Local source context substrate must be durable, audit-safe, and rollbackable. An append-only log guarantees that context history cannot be silently overwritten or tampered with.
 - **HOW**: `SQLiteEventStore` stores events, context lists, active heads, and indexing targets. The transaction engine wraps writes in database transactions, rollbacking all states upon write failure.
 - **TRADEOFFS**: Writing both context logs and object stores increases disk I/O; mitigated by using SQLite WAL mode and bulk inserts.
 

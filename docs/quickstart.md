@@ -1,6 +1,6 @@
 # Quickstart & Onboarding Guide
 
-Welcome to Synapse—a Temporal Cognitive Operating System for Software Systems. This guide walks you through the one-command onboarding flow and explains how to scan a repository, commit context nodes, query history, and launch the monochrome visualization UI.
+Welcome to Synapse—a Temporal Source Context Management Substrate and Causal Software Evolution Graph. This guide walks you through the one-command onboarding flow and explains how to scan a repository, commit context nodes, query history, and launch the monochrome visualization UI.
 
 ---
 
