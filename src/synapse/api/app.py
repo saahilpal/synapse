@@ -17,8 +17,8 @@ from synapse.security.validation import InputValidator
 
 def create_app(runtime: SynapseRuntime) -> FastAPI:
     app = FastAPI(
-        title="Synapse Cognition visualizer",
-        description="Temporal Cognitive Operating System for Software Systems",
+        title="Synapse Context Visualizer",
+        description="Temporal Source Context Management Substrate for Software Systems",
         version="0.1.0",
     )
 

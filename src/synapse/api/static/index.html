@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synapse Cognition visualizer</title>
+    <title>Synapse Context Visualizer</title>
     <!-- Google Fonts: Inter and Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,7 +18,7 @@
         <header class="app-header">
             <div class="header-logo">
                 <span class="logo-accent">Synapse</span>
-                <span class="logo-subtitle">Cognitive Explorer</span>
+                <span class="logo-subtitle">Context Explorer</span>
             </div>
             
             <div class="timeline-container">
@@ -142,7 +142,10 @@
 
                 <div class="sidebar-section" id="detail-panel" style="display: none;">
                     <div class="detail-header">
-                        <span class="detail-type" id="detail-type">MODULE</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <span class="detail-type" id="detail-type">MODULE</span>
+                            <span id="detail-validation-state" class="validation-badge assumed">Assumed</span>
+                        </div>
                         <h2 id="detail-title">No Node Selected</h2>
                     </div>
 
@@ -177,9 +180,9 @@
                     </div>
                 </div>
 
-                <!-- Fast Cognition Actions Panel -->
+                <!-- Fast Context Actions Panel -->
                 <div class="sidebar-section bottom-actions">
-                    <h3>Cognitive Inputs</h3>
+                    <h3>Context Inputs</h3>
                     <div class="action-buttons">
                         <button class="btn btn-secondary" id="btn-add-note">➕ Add Note</button>
                         <button class="btn btn-secondary" id="btn-add-incident">🚨 Log Incident</button>
@@ -192,7 +195,7 @@
     <!-- Modals for inputs -->
     <div class="modal-backdrop" id="modal-note" style="display: none;">
         <div class="modal-card">
-            <h3>Add Manual note to Cognition</h3>
+            <h3>Add Manual note to Context</h3>
             <div class="form-group">
                 <label for="note-message">Note message</label>
                 <textarea id="note-message" class="form-input" rows="4" placeholder="Enter context update, assumption notes, or architectural documentation..."></textarea>

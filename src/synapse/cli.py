@@ -17,7 +17,7 @@ from synapse.runtime.service import SynapseRuntime
 
 app = typer.Typer(
     name="synapse",
-    help="Temporal cognition runtime for software systems.",
+    help="Temporal source context management substrate and causal software evolution graph.",
     no_args_is_help=True,
 )
 
@@ -95,7 +95,7 @@ def start(
     low_power: Annotated[bool, typer.Option(help="Run daemon in low-power mode.")] = False,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Start the local cognitive runtime daemon."""
+    """Start the local temporal context runtime daemon."""
 
     mode = RuntimeMode.LOW_POWER if low_power else RuntimeMode.ACTIVE
     settings = _settings(path, json_output=json_output, mode=mode)
@@ -108,7 +108,7 @@ def status(
     path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Show current cognitive runtime status."""
+    """Show current temporal context runtime status."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.status(), json_output=json_output)
@@ -116,7 +116,7 @@ def status(
 
 @app.command()
 def note(
-    message: Annotated[str, typer.Argument(help="Manual cognition note.")],
+    message: Annotated[str, typer.Argument(help="Manual context note.")],
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
@@ -196,7 +196,7 @@ def merge_conflicts(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Evaluate branch divergence and detect cognitive merge conflicts."""
+    """Evaluate branch divergence and detect causal merge conflicts."""
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.detect_conflicts(left, right), json_output=json_output)
 
@@ -206,7 +206,7 @@ def compact(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Trigger cognition database compaction and cold archival."""
+    """Trigger context database compaction and cold archival."""
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.compact(), json_output=json_output)
 
@@ -227,7 +227,7 @@ def lineage(
     path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Run cognition lineage fsck checks."""
+    """Run context lineage integrity checks."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.lineage(), json_output=json_output)
@@ -252,7 +252,7 @@ def timeline(
     limit: Annotated[int, typer.Option(help="Maximum number of timeline events.")] = 50,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Show cognitive evolution timeline."""
+    """Show temporal context and causal evolution timeline."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit({"events": runtime.timeline(branch=branch, limit=limit)}, json_output=json_output)
@@ -305,7 +305,7 @@ def confidence(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Show confidence(t) for a cognition object."""
+    """Show validation state and confidence for a semantic annotation."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.confidence_evolution(stable_id), json_output=json_output)
@@ -317,7 +317,7 @@ def confidence_decay(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Query confidence decay for a cognition object."""
+    """Query validation and confidence decay for a semantic annotation."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.query_confidence_decay(stable_id), json_output=json_output)
@@ -333,7 +333,7 @@ def replay_cognition(
     branch: Annotated[str | None, typer.Option(help="Replay branch timeline.")] = None,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Replay semantic, assumption, and confidence evolution."""
+    """Replay semantic, assumption, and validation state evolution."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(
@@ -349,7 +349,7 @@ def branch_divergence(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Inspect cognitive divergence between two branch heads."""
+    """Inspect causal and semantic divergence between two branch heads."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(
@@ -364,7 +364,7 @@ def temporal_graph(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Reconstruct temporal cognition facts at a context head."""
+    """Reconstruct temporal context facts at a context head."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.temporal_graph(context_hash), json_output=json_output)
@@ -377,7 +377,7 @@ def incident(
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Link an incident to the active cognition state."""
+    """Link an incident to the active context state."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit(runtime.record_incident(title=title, summary=summary), json_output=json_output)
@@ -385,12 +385,12 @@ def incident(
 
 @app.command("search")
 def search(
-    query: Annotated[str, typer.Argument(help="Cognition query.")],
+    query: Annotated[str, typer.Argument(help="Semantic context query.")],
     path: Annotated[str, typer.Option(help="Repository path.")] = ".",
     limit: Annotated[int, typer.Option(help="Maximum results.")] = 20,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Search semantic cognition objects."""
+    """Search semantic annotations."""
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
     _emit({"results": runtime.search_cognition(query, limit=limit)}, json_output=json_output)
@@ -402,7 +402,7 @@ def ui(
     host: Annotated[str, typer.Option(help="Host to run the UI server on.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to run the UI server on.")] = 9876,
 ) -> None:
-    """Start the Synapse Visual Cognition UI and API server."""
+    """Start the Synapse Visual Context UI and API server."""
     import uvicorn
 
     from synapse.api.app import create_app
