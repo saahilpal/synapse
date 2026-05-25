@@ -243,45 +243,102 @@ def run(
     path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
     host: Annotated[str, typer.Option(help="Host to run the UI server on.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to run the UI server on.")] = 9876,
+    skip_validation: Annotated[bool, typer.Option(help="Skip validation checks.")] = False,
 ) -> None:
-    """Start the Synapse daemon, MCP server, and UI all at once."""
+    """Start the Synapse runtime with daemon, MCP, and UI services.
+
+    This command:
+    1. Validates configuration completeness
+    2. Tests provider connectivity
+    3. Starts the background daemon
+    4. Starts the MCP server
+    5. Starts the lightweight UI
+    6. Shows health status
+
+    Example:
+        synapse run .
+        synapse run . --port 9999
+    """
     import subprocess
     import sys
     import time
 
-    typer.secho(f"Starting Synapse all-in-one run for {path}...", fg=typer.colors.CYAN, bold=True)
+    typer.secho("Starting Synapse Runtime", fg=typer.colors.CYAN, bold=True)
 
-    # Bootstrap first to ensure database is ready
-    runtime = SynapseRuntime(_settings(path))
+    settings = _settings(path)
+
+    # Validate configuration first
+    if not skip_validation:
+        typer.echo("\nValidating configuration...")
+        errors = settings.validate_configuration()
+        if errors:
+            typer.secho("Configuration errors found:", fg=typer.colors.RED, bold=True)
+            for error in errors:
+                typer.secho(f"  ✗ {error}", fg=typer.colors.RED)
+            typer.echo(f"\nRun 'synapse setup {path}' to configure Synapse.")
+            raise typer.Exit(code=1)
+        typer.secho("✓ Configuration valid.", fg=typer.colors.GREEN)
+
+        # Test provider connectivity
+        typer.echo("\nTesting provider connectivity...")
+        try:
+            from synapse.provider.factory import get_llm_provider
+
+            provider = get_llm_provider(settings)
+            typer.secho("✓ LLM provider accessible.", fg=typer.colors.GREEN)
+        except Exception as e:
+            typer.secho(f"✗ Provider error: {e}", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+    # Bootstrap runtime
+    typer.echo("\nBootstrapping storage...")
+    runtime = SynapseRuntime(settings)
     runtime.bootstrap()
+    typer.secho("✓ Storage ready.", fg=typer.colors.GREEN)
 
-    # Run daemon, mcp, and UI as subprocesses
+    # Start services
+    typer.echo("\nStarting services...")
     commands = [
-        [sys.executable, "-m", "synapse.cli", "start", path],
-        [sys.executable, "-m", "synapse.cli", "mcp", "start", path],
-        [sys.executable, "-m", "synapse.cli", "ui", path, "--host", host, "--port", str(port)],
+        ("Daemon", [sys.executable, "-m", "synapse.cli", "start", path]),
+        ("MCP Server", [sys.executable, "-m", "synapse.cli", "mcp", "start", path]),
+        (
+            "UI Server",
+            [sys.executable, "-m", "synapse.cli", "ui", path, "--host", host, "--port", str(port)],
+        ),
     ]
 
     processes = []
     try:
-        for cmd in commands:
-            p = subprocess.Popen(cmd)
-            processes.append(p)
+        for name, cmd in commands:
+            p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            processes.append((name, p))
+            time.sleep(0.5)  # Stagger startup
 
-        typer.secho("✓ Daemon running.", fg=typer.colors.GREEN)
-        typer.secho("✓ MCP Server running.", fg=typer.colors.GREEN)
-        typer.secho(f"✓ UI running at http://{host}:{port}", fg=typer.colors.GREEN)
-        typer.secho("Press Ctrl+C to stop all services.\n", fg=typer.colors.YELLOW)
+        typer.secho("\n✓ Services started successfully!", fg=typer.colors.GREEN, bold=True)
+        for name, _ in processes:
+            typer.secho(f"  ✓ {name} running", fg=typer.colors.GREEN)
+
+        typer.secho(f"\nUI available at: http://{host}:{port}", fg=typer.colors.CYAN)
+
+        typer.secho("\nNext steps:", fg=typer.colors.CYAN)
+        typer.echo(f'  • Generate context: synapse task-context "your task" {path}')
+        typer.echo(f"  • Check status: synapse status {path}")
+        typer.echo("  • Press Ctrl+C to stop all services\n")
 
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         typer.secho("\nShutting down services...", fg=typer.colors.YELLOW)
-        for p in processes:
+        for name, p in processes:
             p.terminate()
-        for p in processes:
-            p.wait()
-        typer.secho("Done.", fg=typer.colors.GREEN)
+        for name, p in processes:
+            p.wait(timeout=5)
+        typer.secho("All services stopped.", fg=typer.colors.GREEN)
+    except Exception as e:
+        typer.secho(f"Error: {e}", fg=typer.colors.RED)
+        for _, p in processes:
+            p.terminate()
+        raise typer.Exit(code=1)
 
 
 @mcp_app.command("install")
@@ -291,61 +348,89 @@ def mcp_install(
     ],
     repo_path: Annotated[str, typer.Option(help="Repository path to bind to.")] = ".",
 ) -> None:
-    """Generate or install MCP configuration for supported agents."""
-    import sys
-    from pathlib import Path
+    """Auto-configure Synapse MCP in your IDE or agent.
 
+    Supported agents: cursor, claude, roo, cline
+
+    Examples:
+        synapse mcp install cursor
+        synapse mcp install claude
+        synapse mcp install roo .
+        synapse mcp install cline .
+    """
+    import sys
+
+    from synapse.mcp.installer import MCPConfigError, get_mcp_installers
+
+    agent = agent.lower()
     repo_abs = Path(repo_path).resolve().as_posix()
     executable = sys.executable
 
-    mcp_config = {
-        "mcpServers": {
-            "synapse": {
-                "command": executable,
-                "args": ["-m", "synapse.cli", "mcp", "start", repo_abs],
+    # Build the MCP server command
+    mcp_command = " ".join([executable, "-m", "synapse.cli", "mcp", "start", repo_abs])
+
+    installers = get_mcp_installers()
+    if agent not in installers:
+        typer.secho(
+            f"Unknown agent: {agent}. Supported: {', '.join(installers.keys())}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    typer.secho(
+        f"Installing Synapse MCP for {agent.capitalize()}...",
+        fg=typer.colors.CYAN,
+        bold=True,
+    )
+
+    try:
+        from typing import cast
+
+        installer_class = installers[agent]
+        # Dynamically call the installer class's static method
+        config_path, success = cast(Any, installer_class).install(mcp_command)
+
+        if success:
+            typer.secho(f"✓ Successfully configured {agent.capitalize()}!", fg=typer.colors.GREEN)
+            typer.echo(f"  Config: {config_path}")
+            typer.echo(f"  Synapse repo: {repo_abs}")
+
+            # Show next steps
+            typer.secho("\nNext steps:", fg=typer.colors.CYAN)
+            if agent == "cursor":
+                typer.echo("  1. Restart Cursor")
+                typer.echo("  2. Open the Composer or Chat")
+                typer.echo("  3. Synapse MCP tools will be available")
+            elif agent == "claude":
+                typer.echo("  1. Restart Claude Desktop")
+                typer.echo("  2. Start a new conversation")
+                typer.echo("  3. Synapse tools will appear in the available tools list")
+            elif agent in ("roo", "cline"):
+                typer.echo(f"  1. Restart your {agent.capitalize()} extension")
+                typer.echo("  2. Synapse tools will be available in the agent")
+
+            typer.secho("\n✓ MCP Installation complete!", fg=typer.colors.GREEN)
+        else:
+            typer.secho(f"Installation failed for {agent}.", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+    except MCPConfigError as e:
+        typer.secho(f"Configuration error: {e}", fg=typer.colors.RED)
+        typer.echo("\nManual installation:")
+        typer.echo(f"Add the following to your {agent} config:")
+        mcp_config = {
+            "mcpServers": {
+                "synapse": {
+                    "command": executable,
+                    "args": ["-m", "synapse.cli", "mcp", "start", repo_abs],
+                }
             }
         }
-    }
-
-    agent = agent.lower()
-    config_path = None
-
-    import platform
-
-    is_mac = platform.system() == "Darwin"
-
-    if agent == "claude":
-        if is_mac:
-            config_path = Path(
-                "~/Library/Application Support/Claude/claude_desktop_config.json"
-            ).expanduser()
-    elif agent in ["roo", "cline"]:
-        if is_mac:
-            config_path = Path(
-                "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
-            ).expanduser()
-
-    if config_path and config_path.parent.exists():
-        typer.secho(f"Found config at {config_path}", fg=typer.colors.BLUE)
-        current_config = {}
-        if config_path.exists():
-            try:
-                current_config = json.loads(config_path.read_text())
-            except Exception:
-                pass
-
-        if "mcpServers" not in current_config:
-            current_config["mcpServers"] = {}
-
-        current_config["mcpServers"]["synapse"] = mcp_config["mcpServers"]["synapse"]
-        config_path.write_text(json.dumps(current_config, indent=2))
-        typer.secho(f"✓ Installed Synapse MCP for {agent.capitalize()}.", fg=typer.colors.GREEN)
-    else:
-        typer.secho(
-            f"Could not automatically locate config for {agent}. Please add the following JSON to your MCP configuration:",
-            fg=typer.colors.YELLOW,
-        )
         typer.echo(json.dumps(mcp_config, indent=2))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        typer.secho(f"Error during installation: {e}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
 
 @mcp_app.command("start")
