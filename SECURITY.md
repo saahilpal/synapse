@@ -1,32 +1,32 @@
 # Security Policy
 
-Synapse handles repository context, architectural notes, and agent-facing memory. Treat it as sensitive local infrastructure.
-
-## Supported Versions
-
-The project is pre-release. Security fixes will target `main` until the first stable release policy is created.
+Synapse handles repository structure, source summaries, manual notes, and agent-facing context. Treat the local `.synapse/` directory as sensitive development infrastructure.
 
 ## Security Principles
 
 - Local-first by default.
-- Explicit trust levels for all cognition sources.
-- No silent promotion of untrusted agent output into durable truth.
-- Permission-gated write operations through MCP and API surfaces.
-- Provenance required for every durable fact.
-- Derived indexes must be rebuildable and disposable.
+- Parser output and Git state are structural truth.
+- AI-generated overlays are annotations only.
+- All durable objects carry provenance.
+- Agent and API outputs are bounded and redacted.
+- Derived indexes and projections are rebuildable.
+
+## Threat Classes
+
+- Prompt injection or context poisoning through Markdown and manual notes.
+- Secret exposure through retrieved snippets, metadata, logs, or API responses.
+- Unauthorized mutation through agent-facing tool calls.
+- Path traversal in API filters or UI requests.
+- Object-store or SQLite corruption.
+
+## Controls
+
+- `SecretRedactor` recursively scrubs common credential keys and token patterns.
+- `InputValidator` clamps limits and enforces repository path containment.
+- `IngestionSanitizer` rejects unsafe manual note content.
+- SQLite runs locally in WAL mode.
+- `synapse doctor` verifies database health, object integrity, and replay diagnostics.
 
 ## Reporting Vulnerabilities
 
 Until a formal security contact exists, open a private maintainer channel or create a minimal public issue that does not disclose exploit details. Include the affected command, interface, or storage path and the expected trust boundary.
-
-## Threat Classes
-
-- Context poisoning through malicious docs, notes, or agent output.
-- Tool poisoning through MCP descriptions or prompt injection.
-- Unauthorized mutation of local cognition state.
-- Exfiltration of repository-sensitive context.
-- Cache tampering or replay corruption.
-- Confused-deputy behavior across agents.
-
-See the security subsystem docs under `docs/security/` for detailed controls.
-

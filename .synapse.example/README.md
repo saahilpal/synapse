@@ -7,8 +7,5 @@ Synapse stores local runtime state in `.synapse/`. Real runtime state is ignored
   synapse.db
   objects/
   snapshots/
-  graph/
-  vector/
   logs/
 ```
-
