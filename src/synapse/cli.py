@@ -85,7 +85,9 @@ def setup(
     typer.secho("Welcome to Synapse AI Context Runtime", fg=typer.colors.CYAN, bold=True)
     typer.echo("This wizard will bootstrap your local AI environment.\n")
 
-    env_file = Path(path) / ".env"
+    env_dir = Path("~/.synapse").expanduser()
+    env_dir.mkdir(parents=True, exist_ok=True)
+    env_file = env_dir / ".env"
 
     # 1. Choose Provider
     provider = typer.prompt(
@@ -149,6 +151,116 @@ SYNAPSE_ANTHROPIC_API_KEY={anthropic_key}
     typer.echo(f"  1. Start the daemon: synapse start {path}")
     typer.echo(f"  2. Open the UI: synapse ui {path}")
     typer.echo(f'  3. Try a search: synapse search "What does this repository do?" {path}\n')
+
+
+@app.command()
+def run(
+    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
+    host: Annotated[str, typer.Option(help="Host to run the UI server on.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to run the UI server on.")] = 9876,
+) -> None:
+    """Start the Synapse daemon, MCP server, and UI all at once."""
+    import subprocess
+    import sys
+    import time
+
+    typer.secho(f"Starting Synapse all-in-one run for {path}...", fg=typer.colors.CYAN, bold=True)
+
+    # Bootstrap first to ensure database is ready
+    runtime = SynapseRuntime(_settings(path))
+    runtime.bootstrap()
+
+    # Run daemon, mcp, and UI as subprocesses
+    commands = [
+        [sys.executable, "-m", "synapse.cli", "start", path],
+        [sys.executable, "-m", "synapse.cli", "mcp", "start", path],
+        [sys.executable, "-m", "synapse.cli", "ui", path, "--host", host, "--port", str(port)],
+    ]
+
+    processes = []
+    try:
+        for cmd in commands:
+            p = subprocess.Popen(cmd)
+            processes.append(p)
+
+        typer.secho("✓ Daemon running.", fg=typer.colors.GREEN)
+        typer.secho("✓ MCP Server running.", fg=typer.colors.GREEN)
+        typer.secho(f"✓ UI running at http://{host}:{port}", fg=typer.colors.GREEN)
+        typer.secho("Press Ctrl+C to stop all services.\n", fg=typer.colors.YELLOW)
+
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        typer.secho("\nShutting down services...", fg=typer.colors.YELLOW)
+        for p in processes:
+            p.terminate()
+        for p in processes:
+            p.wait()
+        typer.secho("Done.", fg=typer.colors.GREEN)
+
+
+@mcp_app.command("install")
+def mcp_install(
+    agent: Annotated[
+        str, typer.Argument(help="Agent to install for (cursor, claude, roo, cline).")
+    ],
+    repo_path: Annotated[str, typer.Option(help="Repository path to bind to.")] = ".",
+) -> None:
+    """Generate or install MCP configuration for supported agents."""
+    import sys
+    from pathlib import Path
+
+    repo_abs = Path(repo_path).resolve().as_posix()
+    executable = sys.executable
+
+    mcp_config = {
+        "mcpServers": {
+            "synapse": {
+                "command": executable,
+                "args": ["-m", "synapse.cli", "mcp", "start", repo_abs],
+            }
+        }
+    }
+
+    agent = agent.lower()
+    config_path = None
+
+    import platform
+
+    is_mac = platform.system() == "Darwin"
+
+    if agent == "claude":
+        if is_mac:
+            config_path = Path(
+                "~/Library/Application Support/Claude/claude_desktop_config.json"
+            ).expanduser()
+    elif agent in ["roo", "cline"]:
+        if is_mac:
+            config_path = Path(
+                "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+            ).expanduser()
+
+    if config_path and config_path.parent.exists():
+        typer.secho(f"Found config at {config_path}", fg=typer.colors.BLUE)
+        current_config = {}
+        if config_path.exists():
+            try:
+                current_config = json.loads(config_path.read_text())
+            except Exception:
+                pass
+
+        if "mcpServers" not in current_config:
+            current_config["mcpServers"] = {}
+
+        current_config["mcpServers"]["synapse"] = mcp_config["mcpServers"]["synapse"]
+        config_path.write_text(json.dumps(current_config, indent=2))
+        typer.secho(f"✓ Installed Synapse MCP for {agent.capitalize()}.", fg=typer.colors.GREEN)
+    else:
+        typer.secho(
+            f"Could not automatically locate config for {agent}. Please add the following JSON to your MCP configuration:",
+            fg=typer.colors.YELLOW,
+        )
+        typer.echo(json.dumps(mcp_config, indent=2))
 
 
 @mcp_app.command("start")
@@ -291,7 +403,7 @@ def search(
     typer.secho(f"Retrieving context for: '{query}'...", fg=typer.colors.BLUE)
 
     try:
-        answer, sources = runtime.query_hybrid(query)
+        answer, sources, trace = runtime.query_hybrid(query)
         if json_output:
             _emit({"answer": answer, "sources": sources}, json_output=True)
             return

@@ -119,7 +119,13 @@ Visualize your codebase's structure, track historical commits, and inspect seman
 
 Synapse implements the **Model Context Protocol**, allowing seamless integration with tools like Claude Desktop, Cursor, or your own custom agents.
 
-To start the MCP Server over standard I/O (required for Claude Desktop/Cursor configs):
+To automatically install the required MCP configuration for your IDE:
+```bash
+synapse mcp install cursor
+# Supported: cursor, claude, roo, cline
+```
+
+Alternatively, you can manually start the MCP Server over standard I/O:
 ```bash
 synapse mcp start .
 ```
@@ -150,6 +156,13 @@ Dive deeper into Synapse's architecture and advanced workflows:
 We welcome contributions! Synapse is designed to be an infrastructure-grade project.
 Please read our [Contributing Guide](CONTRIBUTING.md) to learn about our development workflow, testing standards, and PR process.
 
+- Report a bug or request a feature: [GitHub Issues](https://github.com/synapse/synapse/issues)
+- Read our [Code of Conduct](CODE_OF_CONDUCT.md)
+- Security reporting: [Security Policy](SECURITY.md)
+
+## License
+
+Synapse is open-source software licensed under the [MIT License](LICENSE.md).
 - Report a bug or request a feature: [GitHub Issues](https://github.com/synapse/synapse/issues)
 - Read our [Code of Conduct](CODE_OF_CONDUCT.md)
 - Security reporting: [Security Policy](SECURITY.md)

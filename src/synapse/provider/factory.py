@@ -16,13 +16,16 @@ def get_llm_provider(settings: SynapseSettings) -> LLMProvider:
 
     provider_name = str(settings.llm_provider).lower().strip()
 
+    if provider_name == "mock":
+        return MockLLMProvider()
+
     if provider_name == "openai":
         if settings.openai_api_key:
             return OpenAIProvider(
                 api_key=settings.openai_api_key,
                 default_model=settings.llm_model,
             )
-        return MockLLMProvider()
+        raise ValueError("SYNAPSE_OPENAI_API_KEY is required for the openai provider.")
 
     if provider_name == "gemini":
         if settings.gemini_api_key:
@@ -30,7 +33,7 @@ def get_llm_provider(settings: SynapseSettings) -> LLMProvider:
                 api_key=settings.gemini_api_key,
                 default_model=settings.llm_model,
             )
-        return MockLLMProvider()
+        raise ValueError("SYNAPSE_GEMINI_API_KEY is required for the gemini provider.")
 
     if provider_name == "anthropic":
         if settings.anthropic_api_key:
@@ -38,7 +41,7 @@ def get_llm_provider(settings: SynapseSettings) -> LLMProvider:
                 api_key=settings.anthropic_api_key,
                 default_model=settings.llm_model,
             )
-        return MockLLMProvider()
+        raise ValueError("SYNAPSE_ANTHROPIC_API_KEY is required for the anthropic provider.")
 
     if provider_name == "ollama":
         return OllamaProvider(
@@ -46,7 +49,7 @@ def get_llm_provider(settings: SynapseSettings) -> LLMProvider:
             default_model=settings.llm_model,
         )
 
-    return MockLLMProvider()
+    raise ValueError(f"Unknown LLM provider: {provider_name}")
 
 
 def get_embed_provider(settings: SynapseSettings) -> LLMProvider:
@@ -57,13 +60,16 @@ def get_embed_provider(settings: SynapseSettings) -> LLMProvider:
     provider_name = str(settings.embed_provider or settings.llm_provider).lower().strip()
     model = settings.embed_model or settings.llm_model
 
+    if provider_name == "mock":
+        return MockLLMProvider()
+
     if provider_name == "openai":
         if settings.openai_api_key:
             return OpenAIProvider(
                 api_key=settings.openai_api_key,
                 default_model=model,
             )
-        return MockLLMProvider()
+        raise ValueError("SYNAPSE_OPENAI_API_KEY is required for openai embeddings.")
 
     if provider_name == "gemini":
         if settings.gemini_api_key:
@@ -71,7 +77,7 @@ def get_embed_provider(settings: SynapseSettings) -> LLMProvider:
                 api_key=settings.gemini_api_key,
                 default_model=model,
             )
-        return MockLLMProvider()
+        raise ValueError("SYNAPSE_GEMINI_API_KEY is required for gemini embeddings.")
 
     if provider_name == "ollama":
         return OllamaProvider(
@@ -79,4 +85,4 @@ def get_embed_provider(settings: SynapseSettings) -> LLMProvider:
             default_model=model,
         )
 
-    return MockLLMProvider()
+    raise ValueError(f"Unknown embedding provider: {provider_name}")

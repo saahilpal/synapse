@@ -292,18 +292,45 @@ class SQLiteEventStore:
         cursor = conn.execute("PRAGMA user_version")
         current_version = cursor.fetchone()[0]
 
-        if current_version < 5:
+        if current_version < 6:
             conn.executescript(
                 """
-                CREATE INDEX IF NOT EXISTS idx_projection_cache_lookup 
-                    ON projection_cache(context_hash, projection_kind, filters_hash);
+                CREATE TABLE IF NOT EXISTS embedding_cache (
+                    text_hash TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    embedding_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (text_hash, provider)
+                );
                 """
             )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                (5, datetime.now(UTC).isoformat()),
+                (6, datetime.now(UTC).isoformat()),
             )
-            conn.execute("PRAGMA user_version=5")
+            conn.execute("PRAGMA user_version=6")
+
+    def get_embedding(self, text_hash: str, provider: str) -> list[float] | None:
+        from typing import cast
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT embedding_json FROM embedding_cache WHERE text_hash = ? AND provider = ?",
+                (text_hash, provider),
+            ).fetchone()
+        if row is None:
+            return None
+        return cast(list[float], json.loads(str(row["embedding_json"])))
+
+    def put_embedding(self, text_hash: str, provider: str, embedding: list[float]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO embedding_cache (text_hash, provider, embedding_json, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (text_hash, provider, json.dumps(embedding), datetime.now(UTC).isoformat()),
+            )
 
     def record_object_ref(
         self,

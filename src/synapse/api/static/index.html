@@ -163,6 +163,7 @@
                 <div class="sidebar-section bottom-actions">
                     <h3>Context Inputs</h3>
                     <div class="action-buttons">
+                        <button class="btn btn-primary" id="btn-add-overlay" style="width: 100%; margin-bottom: 8px;">Generate AI Overlay</button>
                         <button class="btn btn-secondary" id="btn-add-note" style="width: 100%;">Add Manual Note</button>
                     </div>
                 </div>
@@ -171,6 +172,20 @@
     </div>
 
     <!-- Modals for inputs -->
+    <div class="modal-backdrop" id="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <h3>Generate AI Overlay</h3>
+            <p style="font-size: 13px; margin-bottom: 12px; color: var(--text-muted);">This will use the configured LLM to generate a persistent semantic annotation for the selected node.</p>
+            <div class="form-group">
+                <label for="overlay-instruction">Instruction for AI</label>
+                <textarea id="overlay-instruction" class="form-input" rows="2" placeholder="e.g. Explain the security assumptions of this module..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('modal-overlay')">Cancel</button>
+                <button class="btn btn-primary" id="submit-overlay-btn">Generate</button>
+            </div>
+        </div>
+    </div>
     <div class="modal-backdrop" id="modal-note" style="display: none;">
         <div class="modal-card">
             <h3>Add Manual Note to Context</h3>

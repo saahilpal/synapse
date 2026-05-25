@@ -44,8 +44,8 @@ class SynapseMCPFacade:
         return MCPToolResult({"results": self.runtime.search_context(query, limit=limit)})
 
     def get_context_for_task(self, *, task_description: str, limit: int = 4000) -> MCPToolResult:
-        response, sources = self.runtime.query_hybrid(task_description, max_tokens=limit)
-        return MCPToolResult({"response": response, "sources": sources})
+        response, sources, trace = self.runtime.query_hybrid(task_description, max_tokens=limit)
+        return MCPToolResult({"response": response, "sources": sources, "trace": trace})
 
     def explain_structure(self, *, module_path: str) -> MCPToolResult:
         status = self.runtime.status()
@@ -56,8 +56,8 @@ class SynapseMCPFacade:
         prompt = (
             f"Explain the structure, functions, classes, and dependencies of module: {module_path}"
         )
-        response, sources = self.runtime.query_hybrid(prompt, context_hash=context_hash)
-        return MCPToolResult({"explanation": response, "sources": sources})
+        response, sources, trace = self.runtime.query_hybrid(prompt, context_hash=context_hash)
+        return MCPToolResult({"explanation": response, "sources": sources, "trace": trace})
 
     def retrieve_related_context(self, *, stable_id: str, depth: int = 2) -> MCPToolResult:
         status = self.runtime.status()
@@ -162,35 +162,85 @@ class SynapseMCPServer:
         self._register_tools()
 
     def _register_tools(self) -> None:
+        import time
+
+        from synapse.observability import get_logger
+
+        logger = get_logger("mcp_server")
+
         @self.mcp.tool()
         def get_current_context() -> str:
             """Get the current repository context summary and active commit heads."""
             import json
 
-            return json.dumps(self.facade.get_context().content)
+            start = time.monotonic()
+            try:
+                res = self.facade.get_context().content
+                logger.info(
+                    "mcp_tool_invoked",
+                    tool="get_current_context",
+                    latency_ms=(time.monotonic() - start) * 1000,
+                )
+                return json.dumps(res)
+            except Exception as e:
+                logger.error("mcp_tool_error", tool="get_current_context", error=str(e))
+                return json.dumps({"error": str(e)})
 
         @self.mcp.tool()
         def search_context(query: str) -> str:
             """Search the repository context using hybrid semantic + structural search."""
             import json
 
-            return json.dumps(self.facade.search_context(query=query).content)
+            start = time.monotonic()
+            try:
+                res = self.facade.search_context(query=query).content
+                logger.info(
+                    "mcp_tool_invoked",
+                    tool="search_context",
+                    query=query,
+                    latency_ms=(time.monotonic() - start) * 1000,
+                )
+                return json.dumps(res)
+            except Exception as e:
+                logger.error("mcp_tool_error", tool="search_context", error=str(e))
+                return json.dumps({"error": str(e)})
 
         @self.mcp.tool()
         def get_context_for_task(task_description: str) -> str:
             """Provide an AI agent with grounded, synthesized context necessary to complete a task."""
             import json
 
-            return json.dumps(
-                self.facade.get_context_for_task(task_description=task_description).content
-            )
+            start = time.monotonic()
+            try:
+                res = self.facade.get_context_for_task(task_description=task_description).content
+                logger.info(
+                    "mcp_tool_invoked",
+                    tool="get_context_for_task",
+                    latency_ms=(time.monotonic() - start) * 1000,
+                )
+                return json.dumps(res)
+            except Exception as e:
+                logger.error("mcp_tool_error", tool="get_context_for_task", error=str(e))
+                return json.dumps({"error": str(e)})
 
         @self.mcp.tool()
         def explain_structure(module_path: str) -> str:
             """Ask Synapse to explain the structural boundaries and dependencies of a specific file/module."""
             import json
 
-            return json.dumps(self.facade.explain_structure(module_path=module_path).content)
+            start = time.monotonic()
+            try:
+                res = self.facade.explain_structure(module_path=module_path).content
+                logger.info(
+                    "mcp_tool_invoked",
+                    tool="explain_structure",
+                    module=module_path,
+                    latency_ms=(time.monotonic() - start) * 1000,
+                )
+                return json.dumps(res)
+            except Exception as e:
+                logger.error("mcp_tool_error", tool="explain_structure", error=str(e))
+                return json.dumps({"error": str(e)})
 
     async def run(self) -> None:
         await self.mcp.run_stdio_async()

@@ -43,6 +43,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Action buttons
     const btnAddNote = document.getElementById("btn-add-note");
     const submitNoteBtn = document.getElementById("submit-note-btn");
+    const btnAddOverlay = document.getElementById("btn-add-overlay");
+    const submitOverlayBtn = document.getElementById("submit-overlay-btn");
     const applyFiltersBtn = document.getElementById("apply-filters-btn");
 
     // Zoom Buttons
@@ -52,6 +54,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Connect Modals
     btnAddNote.addEventListener("click", () => showModal("modal-note"));
+    btnAddOverlay.addEventListener("click", () => {
+        if (!selectedNode) {
+            alert("Please select a node first.");
+            return;
+        }
+        document.getElementById("overlay-instruction").value = "Explain the purpose and dependencies of this component.";
+        showModal("modal-overlay");
+    });
 
     // Close modals on clicking background
     document.querySelectorAll(".modal-backdrop").forEach(el => {
@@ -331,6 +341,37 @@ document.addEventListener("DOMContentLoaded", () => {
         } finally {
             submitNoteBtn.disabled = false;
             submitNoteBtn.textContent = "Commit Note";
+        }
+    });
+
+    submitOverlayBtn.addEventListener("click", async () => {
+        const instruction = document.getElementById("overlay-instruction").value.trim();
+        if (!instruction || !selectedNode) return;
+
+        try {
+            submitOverlayBtn.disabled = true;
+            submitOverlayBtn.textContent = "Generating...";
+            
+            const res = await fetch("/api/v1/overlay", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ target_id: selectedNode.id, instruction: instruction })
+            });
+
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || "Failed to generate overlay");
+            }
+            
+            closeModal("modal-overlay");
+            alert("Overlay generated and committed successfully.");
+            
+            await bootstrap(); // Refresh timeline to show new overlay commit
+        } catch (err) {
+            alert("Error generating overlay: " + err.message);
+        } finally {
+            submitOverlayBtn.disabled = false;
+            submitOverlayBtn.textContent = "Generate";
         }
     });
 });

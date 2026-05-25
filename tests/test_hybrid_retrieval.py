@@ -111,7 +111,7 @@ def test_hybrid_retrieval_and_incremental_ingestion_flow(tmp_path: Path) -> None
 
     # 5. Run hybrid retrieval query
     query_str = "Explain the Authenticator class"
-    response, sources = runtime.query_hybrid(query_str, context_hash=context_hash_2)
+    response, sources, trace = runtime.query_hybrid(query_str, context_hash=context_hash_2)
     assert "Mock Explanation" in response
     assert len(sources) > 0
 

@@ -137,4 +137,21 @@ def create_app(runtime: SynapseRuntime) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    @app.post("/api/v1/overlay")
+    async def post_overlay(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+            target_id = str(body.get("target_id", "")).strip()
+            instruction = str(body.get("instruction", "Explain this module.")).strip()
+
+            if not target_id:
+                raise HTTPException(status_code=400, detail="Target ID is required.")
+
+            context_hash = runtime.add_overlay(
+                target_stable_id=target_id, prompt_instruction=instruction
+            )
+            return {"status": "ok", "context_hash": context_hash}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
     return app

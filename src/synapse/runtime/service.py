@@ -325,7 +325,7 @@ class SynapseRuntime:
         *,
         context_hash: str | None = None,
         max_tokens: int = 4000,
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         self.initialize_storage()
         if not context_hash:
             git_state = self.git.state()

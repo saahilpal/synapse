@@ -39,27 +39,31 @@ synapse commits .
 synapse search "authentication middleware" .
 ```
 
-## 4. Start the Daemon and API
-
-To ensure that your agents always have up-to-date context, start the Synapse daemon. This process watches for Git state changes and file system events, incrementally updating the graph.
-
-```bash
-synapse start .
-```
-
-## 5. Explore the UI
-
-Synapse includes a lightweight, D3-based visualizer for inspecting the bounded context graph and historical timeline.
+## 4. Integrate with your Agent
+Synapse is built to give context to your IDE. Install the MCP integration automatically:
 
 ```bash
-synapse ui . --host 127.0.0.1 --port 9876
+synapse mcp install cursor
+# also supports: claude, roo, cline
 ```
 
-Open `http://127.0.0.1:9876` in your browser to visually explore your repository's structure.
+## 5. Start the All-in-One Runtime
+You no longer need to start the UI, daemon, and MCP server separately. Just run:
+
+```bash
+synapse run .
+```
+
+This will automatically:
+- Start the file-watcher daemon to incrementally update context on file saves.
+- Start the MCP server so your IDE can query Synapse.
+- Start the Context Visualizer UI at `http://127.0.0.1:9876`.
+
+Open the UI in your browser to inspect the codebase graph, or open your IDE and ask it an architectural question to see the grounded retrieval in action.
 
 ---
 
 ### Next Steps
 
-- Learn how Synapse connects to AI agents via the [Model Context Protocol (MCP)](../README.md#agent-integration-mcp).
+- Learn how to build [Semantic Overlays](overlays.md) directly from the UI.
 - Deep dive into the [Retrieval Pipeline](retrieval.md).

@@ -38,6 +38,7 @@ class SynapseSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SYNAPSE_",
         env_nested_delimiter="__",
+        env_file=str(Path("~/.synapse/.env").expanduser()),
         extra="ignore",
     )
 

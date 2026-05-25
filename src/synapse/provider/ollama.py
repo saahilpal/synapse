@@ -48,7 +48,7 @@ class OllamaProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=45.0) as resp:
+            with urllib.request.urlopen(req, timeout=300.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             message = data["message"]
             # Ollama provides prompt_eval_count and eval_count
@@ -59,6 +59,9 @@ class OllamaProvider(LLMProvider):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8")
+            raise RuntimeError(f"Ollama generate HTTP error {exc.code}: {err_body}") from exc
         except Exception as exc:
             raise RuntimeError(f"Ollama generate failed: {exc}") from exc
 
@@ -78,9 +81,12 @@ class OllamaProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:
+            with urllib.request.urlopen(req, timeout=60.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             embedding = data["embedding"]
             return [float(x) for x in embedding]
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8")
+            raise RuntimeError(f"Ollama embed HTTP error {exc.code}: {err_body}") from exc
         except Exception as exc:
             raise RuntimeError(f"Ollama embed failed: {exc}") from exc
