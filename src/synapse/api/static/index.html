@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synapse Cognition visualizer</title>
+    <!-- Google Fonts: Inter and Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- D3.js library for high performance graph rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <link rel="stylesheet" href="/static/css/index.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Timeline Scrubber & Header -->
+        <header class="app-header">
+            <div class="header-logo">
+                <span class="logo-accent">Synapse</span>
+                <span class="logo-subtitle">Cognitive Explorer</span>
+            </div>
+            
+            <div class="timeline-container">
+                <div class="timeline-meta">
+                    <span id="timeline-current-title">Scrubbing context history...</span>
+                    <span id="timeline-commit-meta"></span>
+                </div>
+                <div class="timeline-scrubber-wrapper">
+                    <button id="timeline-play-btn" class="btn btn-icon-only timeline-play-btn" title="Play/Pause">▶</button>
+                    <select id="timeline-speed-select" class="form-input timeline-speed-select">
+                        <option value="2000">1x</option>
+                        <option value="1000">2x</option>
+                        <option value="500">4x</option>
+                    </select>
+                    <input type="range" id="timeline-scrubber" min="0" max="0" value="0">
+                    <div class="timeline-ticks" id="timeline-ticks"></div>
+                </div>
+            </div>
+            
+            <div class="status-badge" id="system-badge">
+                <div class="status-dot"></div>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-body">
+            <!-- Left Controls Sidebar -->
+            <aside class="sidebar left-sidebar">
+                <div class="sidebar-section">
+                    <h3>Projection Slices</h3>
+                    <div class="button-group-vertical" id="projection-selector">
+                        <button class="btn btn-tab active" data-kind="overview">
+                            <span class="btn-icon">👁️</span> Overview
+                        </button>
+                        <button class="btn btn-tab" data-kind="subsystem">
+                            <span class="btn-icon">📁</span> Subsystem
+                        </button>
+                        <button class="btn btn-tab" data-kind="replay">
+                            <span class="btn-icon">🔄</span> Replay DAG
+                        </button>
+                        <button class="btn btn-tab" data-kind="drift">
+                            <span class="btn-icon">⚠️</span> Drift Map
+                        </button>
+                        <button class="btn btn-tab" data-kind="assumption">
+                            <span class="btn-icon">💡</span> Assumptions
+                        </button>
+                        <button class="btn btn-tab" data-kind="incident">
+                            <span class="btn-icon">🚨</span> Incidents
+                        </button>
+                        <button class="btn btn-tab" data-kind="branch">
+                            <span class="btn-icon">🌿</span> Branch Comparison
+                        </button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section" id="filter-panel" style="display: none;">
+                    <h3>Projection Filters</h3>
+                    <div class="form-group" id="subsystem-filter-group" style="display: none;">
+                        <label for="subsystem-prefix">Folder Path Prefix</label>
+                        <input type="text" id="subsystem-prefix" placeholder="e.g. src/synapse/storage" class="form-input">
+                    </div>
+                    <div class="form-group" id="branch-filter-group" style="display: none;">
+                        <label for="compare-hash">Compare With Context</label>
+                        <select id="compare-hash" class="form-input"></select>
+                    </div>
+                    <button class="btn btn-primary" id="apply-filters-btn">Apply Filters</button>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>System Stats</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-val" id="stat-events">-</div>
+                            <div class="stat-lbl">Events</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-val" id="stat-contexts">-</div>
+                            <div class="stat-lbl">Contexts</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-val" id="stat-objects">-</div>
+                            <div class="stat-lbl">Objects</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center Graph Canvas Area -->
+            <section class="canvas-container">
+                <div class="canvas-header">
+                    <span id="canvas-title">Architecture Overview</span>
+                    <div class="canvas-actions">
+                        <button class="btn btn-icon-only" id="zoom-in-btn" title="Zoom In">➕</button>
+                        <button class="btn btn-icon-only" id="zoom-out-btn" title="Zoom Out">➖</button>
+                        <button class="btn btn-icon-only" id="reset-zoom-btn" title="Reset View">🎯</button>
+                    </div>
+                </div>
+                <div class="graph-svg-wrapper">
+                    <svg id="graph-svg"></svg>
+                    <!-- Floating Legend -->
+                    <div class="legend-panel">
+                        <div class="legend-item"><span class="legend-dot package"></span> Package</div>
+                        <div class="legend-item"><span class="legend-dot module"></span> Module</div>
+                        <div class="legend-item"><span class="legend-dot decision"></span> Decision</div>
+                        <div class="legend-item"><span class="legend-dot assumption"></span> Assumption</div>
+                        <div class="legend-item"><span class="legend-dot incident"></span> Incident</div>
+                        <div class="legend-item"><span class="legend-dot document"></span> Document</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Details Sidebar -->
+            <aside class="sidebar right-sidebar">
+                <div class="sidebar-section" id="detail-empty">
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <p>Hover or click a node in the graph projection to inspect details deeply.</p>
+                    </div>
+                </div>
+
+                <div class="sidebar-section" id="detail-panel" style="display: none;">
+                    <div class="detail-header">
+                        <span class="detail-type" id="detail-type">MODULE</span>
+                        <h2 id="detail-title">No Node Selected</h2>
+                    </div>
+
+                    <div class="detail-scrollable">
+                        <div class="confidence-meter-container">
+                            <div class="confidence-lbl">
+                                <span>Confidence rating</span>
+                                <strong id="detail-confidence-pct">0%</strong>
+                            </div>
+                            <div class="confidence-bar-bg">
+                                <div class="confidence-bar-fill" id="detail-confidence-fill"></div>
+                            </div>
+                            <p class="detail-rationale" id="detail-confidence-rationale"></p>
+                        </div>
+
+                        <div class="detail-group">
+                            <label>Stable ID</label>
+                            <code id="detail-id"></code>
+                        </div>
+
+                        <div class="detail-group">
+                            <label>Source path</label>
+                            <span class="detail-text" id="detail-source-uri"></span>
+                        </div>
+
+                        <div class="detail-group" id="detail-metadata-group">
+                            <label>Metadata</label>
+                            <div class="metadata-json-wrapper">
+                                <pre><code class="language-json" id="detail-metadata">{}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fast Cognition Actions Panel -->
+                <div class="sidebar-section bottom-actions">
+                    <h3>Cognitive Inputs</h3>
+                    <div class="action-buttons">
+                        <button class="btn btn-secondary" id="btn-add-note">➕ Add Note</button>
+                        <button class="btn btn-secondary" id="btn-add-incident">🚨 Log Incident</button>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Modals for inputs -->
+    <div class="modal-backdrop" id="modal-note" style="display: none;">
+        <div class="modal-card">
+            <h3>Add Manual note to Cognition</h3>
+            <div class="form-group">
+                <label for="note-message">Note message</label>
+                <textarea id="note-message" class="form-input" rows="4" placeholder="Enter context update, assumption notes, or architectural documentation..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('modal-note')">Cancel</button>
+                <button class="btn btn-primary" id="submit-note-btn">Commit Note</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="modal-incident" style="display: none;">
+        <div class="modal-card">
+            <h3>Log Incident Record</h3>
+            <div class="form-group">
+                <label for="incident-title">Incident Title</label>
+                <input type="text" id="incident-title" class="form-input" placeholder="e.g. Memory leak in pipeline thread workers">
+            </div>
+            <div class="form-group">
+                <label for="incident-summary">Incident Description</label>
+                <textarea id="incident-summary" class="form-input" rows="4" placeholder="Detail the root cause, symptoms, and impact on system entities..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('modal-incident')">Cancel</button>
+                <button class="btn btn-primary" id="submit-incident-btn">Record Incident</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="graph-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; color: var(--text-color); font-size: 12px; pointer-events: none; z-index: 9999; backdrop-filter: blur(8px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3); max-width: 280px;"></div>
+    <script src="/static/js/graph.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
