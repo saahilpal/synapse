@@ -9,38 +9,47 @@ Unlike traditional RAG (Retrieval-Augmented Generation) systems that rely on nai
 Synapse does **not** use AI to define structural truth. Parsers, Git state, content hashes, SQLite transactions, and object-store integrity checks own the durable state. AI providers may optionally summarize, annotate, and explain already extracted context through **semantic overlays**.
 
 ```mermaid
-architecture-beta
-    group source(Source)
-    service repo(Local Repository) in source
+flowchart TD
+    subgraph Source["Source"]
+        Repo[Local Repository]
+    end
     
-    group synapse(Synapse Core Engine)
-    service scanner(Incremental Scanner) in synapse
-    service parser(AST & Markdown Parser) in synapse
-    service engine(Transaction Engine) in synapse
-    service retrieve(Hybrid Retrieval) in synapse
+    subgraph Synapse["Synapse Core Engine"]
+        Scanner[Incremental Scanner]
+        Parser[AST & Markdown Parser]
+        Engine[Transaction Engine]
+        Retrieve[Hybrid Retrieval]
+    end
     
-    group storage(Durable State)
-    service sqlite(SQLite WAL Event Store) in storage
-    service objstore(Zlib Object Store) in storage
+    subgraph Storage["Durable State"]
+        SQLite[(SQLite WAL Event Store)]
+        ObjStore[(Zlib Object Store)]
+    end
 
-    group interface(Interfaces)
-    service mcp(MCP Server) in interface
-    service api(FastAPI) in interface
-    service cli(Typer CLI) in interface
+    subgraph Interfaces["Interfaces"]
+        MCP[MCP Server]
+        API[FastAPI]
+        CLI[Typer CLI]
+    end
     
-    repo:R --> L:scanner
-    scanner:R --> L:parser
-    parser:B --> T:engine
+    Repo --> Scanner
+    Scanner --> Parser
+    Parser --> Engine
     
-    engine:R --> L:sqlite
-    engine:R --> L:objstore
+    Engine --> SQLite
+    Engine --> ObjStore
     
-    retrieve:L --> R:sqlite
-    retrieve:L --> R:objstore
+    Retrieve --> SQLite
+    Retrieve --> ObjStore
     
-    retrieve:B --> T:mcp
-    retrieve:B --> T:api
-    retrieve:B --> T:cli
+    Retrieve --> MCP
+    Retrieve --> API
+    Retrieve --> CLI
+    
+    style Source fill:#0f172a,stroke:#3b82f6
+    style Synapse fill:#0f172a,stroke:#8b5cf6
+    style Storage fill:#0f172a,stroke:#10b981
+    style Interfaces fill:#0f172a,stroke:#e2e8f0
 ```
 
 *(Note: The diagram above illustrates logical data flow. The actual implementation runs within a unified Python runtime.)*
