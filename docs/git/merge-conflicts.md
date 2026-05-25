@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Cognitive merge conflicts occur when branch facts, assumptions, or architecture decisions cannot be safely combined.
+Causal merge conflicts occur when branch facts, assumptions, or architecture decisions cannot be safely combined.
 
 ## Architecture
 
@@ -55,11 +55,11 @@ Compare affected subgraphs rather than whole memory where possible. Use provenan
 
 ## Security Notes
 
-Only authorized users or policies can resolve conflicts that affect durable cognition.
+Only authorized users or policies can resolve conflicts that affect durable context state.
 
 ## Performance Considerations
 
-Merge analysis can be asynchronous after Git merge detection, but agents must be told when cognition is pending reconciliation.
+Merge analysis can be asynchronous after Git merge detection, but agents must be told when context is pending reconciliation.
 
 ## Future Extensibility
 

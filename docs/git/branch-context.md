@@ -1,8 +1,8 @@
-# Branch Cognition
+# Branch Context
 
 ## Purpose
 
-Branch cognition lets Synapse model different project realities on different Git branches without forcing contradictory facts into one memory.
+Branch context lets Synapse model different project realities on different Git branches without forcing contradictory facts into one state.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ A new branch inherits the parent context head. As branch-specific events are pro
 - Track active context head per branch.
 - Preserve branch-specific facts and assumptions.
 - Prevent accidental leakage across branches.
-- Detect cognitive merge conflicts.
+- Detect causal merge conflicts.
 - Support branch-aware queries.
 
 ## Data Flow
@@ -48,7 +48,7 @@ Git branch events update branch metadata; context versions carry branch identity
 - Detached HEAD.
 - Branch renamed.
 - Long-lived branch diverges far from main.
-- Cherry-pick copies a change without copying all cognition.
+- Cherry-pick copies a change without copying all context.
 
 ## Scalability Notes
 
@@ -64,5 +64,4 @@ Branch switches should activate existing projections quickly and enqueue expensi
 
 ## Future Extensibility
 
-Add branch cognition visualization in the Textual dashboard.
-
+Add branch context visualization in the Textual dashboard.

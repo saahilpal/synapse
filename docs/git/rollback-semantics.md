@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Rollback semantics define how Synapse restores an earlier cognitive state without deleting history.
+Rollback semantics define how Synapse restores an earlier context state without deleting history.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ Rollback reads context objects and events, activates a prior DAG node, and emits
 ## Edge Cases
 
 - Git checkout has no matching context object.
-- User rolls back cognition but not Git.
+- User rolls back context but not Git.
 - Revert commit semantically undoes prior work but remains a new Git commit.
 - Branch rollback crosses merge boundary.
 
@@ -62,5 +62,5 @@ Projection rebuild can be staged: immediately switch active head, then refresh e
 
 ## Future Extensibility
 
-Add dry-run rollback diffs and policy-based approval for team cognition.
+Add dry-run rollback diffs and policy-based approval for team context.
 
