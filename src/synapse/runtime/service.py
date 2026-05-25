@@ -3,46 +3,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from synapse.assumptions import AssumptionEngine, AssumptionRecord
-from synapse.cognition.dag import ContextDag
-from synapse.cognition.drift import DriftDetector, DriftFinding
-from synapse.cognition.extraction import RepositoryCognitionBuilder
-from synapse.cognition.objects import (
+from synapse.config import SynapseSettings
+from synapse.context.dag import ContextDag
+from synapse.context.extraction import RepositoryContextBuilder
+from synapse.context.objects import (
     Confidence,
     EventRecord,
     EventType,
     Provenance,
     SourceType,
-    utc_now,
 )
-from synapse.cognition.scanner import RepositoryScan, RepositoryScanner
-from synapse.compact import CognitionCompactor
-from synapse.config import SynapseSettings
-from synapse.evolution import (
-    BranchDivergence,
-    CognitiveEvolutionEngine,
-    CognitiveMergeManager,
-    CognitiveMergeReport,
-    CognitiveReasoningEngine,
-    CognitiveReplayState,
-    ConfidenceEvolution,
-    ReasoningReport,
-    SemanticDiff,
-    TimelineEvent,
-)
+from synapse.context.overlay import SemanticOverlaySystem
+from synapse.context.scanner import RepositoryScan, RepositoryScanner
 from synapse.git import GitRepository, GitState
-from synapse.health import ArchitectureHealthEngine, ArchitectureHealthReport
-from synapse.impact import SemanticImpactEngine, SemanticImpactReport
-from synapse.incidents import IncidentEngine, IncidentRecord, IncidentReplay
-from synapse.lineage import LineageReport, LineageVerifier
 from synapse.observability import get_logger
-from synapse.query import TemporalQueryEngine, TemporalQueryResult
-from synapse.runtime.replay import ReplayEngine, ReplayResult
+from synapse.projections.engine import ProjectionEngine
+from synapse.provider.factory import get_llm_provider
+from synapse.query.retrieval import HybridRetrievalEngine
+from synapse.replay import ReplayEngine, ReplayResult
 from synapse.runtime.snapshot import SnapshotEngine
 from synapse.security import IngestionSanitizer
 from synapse.storage import ObjectStore, SQLiteEventStore
-from synapse.temporal import TemporalGraphEngine, TemporalGraphState
-from synapse.transactions import CognitionCommitRequest, CognitiveTransactionEngine
+from synapse.transactions import ContextCommitRequest, ContextTransactionEngine
 
 
 @dataclass(frozen=True)
@@ -58,7 +40,7 @@ class RuntimeStatus:
 
 
 class SynapseRuntime:
-    """Application service that coordinates source-of-truth stores and cognition engines."""
+    """Application service that coordinates source-of-truth stores and core context engines."""
 
     def __init__(self, settings: SynapseSettings) -> None:
         self.settings = settings
@@ -68,68 +50,30 @@ class SynapseRuntime:
         self.event_store = SQLiteEventStore(settings.sqlite_path)
         self.dag = ContextDag(object_store=self.object_store, event_store=self.event_store)
         self.git = GitRepository(settings.repository_path)
-        self.builder = RepositoryCognitionBuilder()
-        self.evolution_engine = CognitiveEvolutionEngine(
+        self.builder = RepositoryContextBuilder()
+        self.transaction_engine = ContextTransactionEngine(
             event_store=self.event_store,
-            dag=self.dag,
-        )
-        self.assumption_engine = AssumptionEngine(
-            event_store=self.event_store,
-            evolution=self.evolution_engine,
+            object_store=self.object_store,
         )
         self.replay_engine = ReplayEngine(
             event_store=self.event_store,
             object_store=self.object_store,
         )
-        self.transaction_engine = CognitiveTransactionEngine(
-            event_store=self.event_store,
-            object_store=self.object_store,
-        )
-        self.lineage_verifier = LineageVerifier(
-            event_store=self.event_store,
-            object_store=self.object_store,
-        )
-        self.impact_engine = SemanticImpactEngine(evolution=self.evolution_engine)
-        self.query_engine = TemporalQueryEngine(
-            event_store=self.event_store,
-            evolution=self.evolution_engine,
-            assumptions=self.assumption_engine,
-        )
-        self.temporal_graph_engine = TemporalGraphEngine(
+        self.llm_provider = get_llm_provider(settings)
+        self.retrieval_engine = HybridRetrievalEngine(
             event_store=self.event_store,
             dag=self.dag,
+            llm_provider=self.llm_provider,
         )
-        from synapse.projections.engine import ProjectionEngine
-
+        self.overlay_system = SemanticOverlaySystem(self.llm_provider)
         self.projection_engine = ProjectionEngine(
             event_store=self.event_store,
             dag=self.dag,
-            temporal_graph=self.temporal_graph_engine,
-        )
-        self.incident_engine = IncidentEngine(
-            event_store=self.event_store,
-            evolution=self.evolution_engine,
-            assumptions=self.assumption_engine,
         )
         self.snapshot_engine = SnapshotEngine(
             event_store=self.event_store,
             object_store=self.object_store,
             replay_engine=self.replay_engine,
-        )
-        self.health_engine = ArchitectureHealthEngine(
-            event_store=self.event_store,
-            dag=self.dag,
-        )
-        self.reasoning_engine = CognitiveReasoningEngine(
-            event_store=self.event_store,
-            dag=self.dag,
-        )
-        self.merge_manager = CognitiveMergeManager(
-            event_store=self.event_store,
-            dag=self.dag,
-        )
-        self.compactor = CognitionCompactor(
-            event_store=self.event_store,
         )
         self.sanitizer = IngestionSanitizer()
         self.logger = get_logger("runtime")
@@ -164,13 +108,67 @@ class SynapseRuntime:
             max_file_bytes=self.settings.max_file_bytes,
         )
         scan = scanner.scan()
-        semantic_objects, graph_nodes, graph_edges = self.builder.build_from_scan(
-            scan=scan, git_state=git_state
-        )
-        payload = self._scan_payload(scan, git_state, reason)
+
         parent = self.event_store.get_active_head(git_state.effective_branch)
+        if parent:
+            ordered_ancestry = self.dag.ancestry(parent)
+            ancestry = set(ordered_ancestry)
+
+            node_rows = self.event_store.graph_nodes_for_contexts(ordered_ancestry)
+            edge_rows = self.event_store.graph_edges_for_contexts(ordered_ancestry)
+            sem_rows = self.event_store.semantic_objects_for_contexts(ordered_ancestry)
+
+            active_nodes: dict[str, dict[str, Any]] = {}
+            active_semantics: dict[str, dict[str, Any]] = {}
+            active_edges: dict[str, dict[str, Any]] = {}
+
+            nodes_by_ctx: dict[str, list[Any]] = {}
+            for r in node_rows:
+                nodes_by_ctx.setdefault(str(r["context_hash"]), []).append(r)
+            edges_by_ctx: dict[str, list[Any]] = {}
+            for r in edge_rows:
+                edges_by_ctx.setdefault(str(r["context_hash"]), []).append(r)
+            sems_by_ctx: dict[str, list[Any]] = {}
+            for r in sem_rows:
+                sems_by_ctx.setdefault(str(r["context_hash"]), []).append(r)
+
+            for ctx in reversed(ordered_ancestry):
+                for r in nodes_by_ctx.get(ctx, []):
+                    valid_to = r.get("valid_to_context")
+                    if valid_to and str(valid_to) in ancestry:
+                        active_nodes.pop(str(r["stable_id"]), None)
+                    else:
+                        active_nodes[str(r["stable_id"])] = dict(r)
+
+                for r in edges_by_ctx.get(ctx, []):
+                    valid_to = r.get("valid_to_context")
+                    if valid_to and str(valid_to) in ancestry:
+                        active_edges.pop(str(r["stable_id"]), None)
+                    else:
+                        active_edges[str(r["stable_id"])] = dict(r)
+
+                for r in sems_by_ctx.get(ctx, []):
+                    valid_to = r.get("valid_to_context")
+                    if valid_to and str(valid_to) in ancestry:
+                        active_semantics.pop(str(r["stable_id"]), None)
+                    else:
+                        active_semantics[str(r["stable_id"])] = dict(r)
+
+            semantic_objects, graph_nodes, graph_edges = self.builder.build_incremental_scan(
+                scan=scan,
+                git_state=git_state,
+                active_nodes=active_nodes,
+                active_semantics=active_semantics,
+                active_edges=active_edges,
+            )
+        else:
+            semantic_objects, graph_nodes, graph_edges = self.builder.build_from_scan(
+                scan=scan, git_state=git_state
+            )
+
+        payload = self._scan_payload(scan, git_state, reason)
         result = self.transaction_engine.commit_context_update(
-            CognitionCommitRequest(
+            ContextCommitRequest(
                 operation="index_repository",
                 event_type=EventType.REPOSITORY_SCANNED,
                 source=self.settings.repository_path.as_posix(),
@@ -221,7 +219,7 @@ class SynapseRuntime:
         )
         parent = self.event_store.get_active_head(git_state.effective_branch)
         result = self.transaction_engine.commit_context_update(
-            CognitionCommitRequest(
+            ContextCommitRequest(
                 operation="add_note",
                 event_type=EventType.MANUAL_NOTE_ADDED,
                 source="manual://note",
@@ -304,10 +302,6 @@ class SynapseRuntime:
         self.dag.rollback(branch=git_state.effective_branch, target_hash=target_hash)
 
     def diff(self, left_hash: str, right_hash: str) -> dict[str, Any]:
-        semantic = self.semantic_diff(left_hash, right_hash)
-        return semantic.model_dump(mode="json")
-
-    def dag_diff(self, left_hash: str, right_hash: str) -> dict[str, Any]:
         diff = self.dag.diff(left_hash, right_hash)
         return {
             "left": diff.left,
@@ -317,112 +311,43 @@ class SynapseRuntime:
             "unchanged": diff.unchanged,
         }
 
-    def semantic_diff(self, left_hash: str, right_hash: str) -> SemanticDiff:
-        self.initialize_storage()
-        return self.evolution_engine.semantic_diff(left_hash, right_hash)
-
-    def semantic_impact(self, left_hash: str, right_hash: str) -> SemanticImpactReport:
-        self.initialize_storage()
-        return self.impact_engine.analyze(left_context=left_hash, right_context=right_hash)
-
-    def timeline(self, *, branch: str | None = None, limit: int = 100) -> tuple[TimelineEvent, ...]:
-        self.initialize_storage()
-        return self.evolution_engine.timeline(branch=branch, limit=limit)
-
-    def branch_divergence(self, *, left_branch: str, right_branch: str) -> BranchDivergence:
-        self.initialize_storage()
-        return self.evolution_engine.branch_divergence(
-            left_branch=left_branch,
-            right_branch=right_branch,
-        )
-
-    def confidence_evolution(self, stable_id: str) -> ConfidenceEvolution:
-        self.initialize_storage()
-        return self.evolution_engine.confidence_evolution(stable_id)
-
-    def replay_cognition(
-        self,
-        *,
-        context_hash: str | None = None,
-        branch: str | None = None,
-    ) -> CognitiveReplayState:
-        self.initialize_storage()
-        return self.evolution_engine.replay_cognition(context_hash=context_hash, branch=branch)
-
-    def temporal_graph(self, context_hash: str) -> TemporalGraphState:
-        self.initialize_storage()
-        return self.temporal_graph_engine.reconstruct(context_hash)
-
-    def lineage(self) -> LineageReport:
-        self.initialize_storage()
-        return self.lineage_verifier.verify()
-
-    def query_confidence_decay(self, stable_id: str) -> TemporalQueryResult:
-        self.initialize_storage()
-        return self.query_engine.confidence_decay_for(stable_id)
-
-    def record_incident(
-        self,
-        *,
-        title: str,
-        summary: str,
-    ) -> IncidentRecord:
-        self.initialize_storage()
-        git_state = self.git.state()
-        return self.incident_engine.record(
-            title=title,
-            summary=summary,
-            branch=git_state.effective_branch,
-            git_commit_hash=git_state.head_commit,
-            occurred_at=utc_now(),
-        )
-
-    def replay_incident(self, incident: IncidentRecord) -> IncidentReplay:
-        self.initialize_storage()
-        return self.incident_engine.replay(incident)
-
-    def assumptions(self, *, context_hash: str | None = None) -> tuple[AssumptionRecord, ...]:
-        self.initialize_storage()
-        return self.assumption_engine.list_assumptions(context_hash=context_hash)
-
-    def invalidated_assumptions(
-        self,
-        *,
-        left_hash: str,
-        right_hash: str,
-        apply: bool = False,
-    ) -> tuple[AssumptionRecord, ...]:
-        self.initialize_storage()
-        return self.assumption_engine.invalidated_between(
-            left_context=left_hash,
-            right_context=right_hash,
-            apply=apply,
-        )
-
     def list_context_commits(self, *, limit: int = 50) -> list[dict[str, Any]]:
         self.initialize_storage()
         return self.dag.list_commits(limit=limit)
 
-    def search_cognition(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    def search_context(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
         self.initialize_storage()
         return self.event_store.search_semantic_objects(query=query, limit=limit)
 
-    def search_memory(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
-        return self.search_cognition(query, limit=limit)
-
-    def drift(self) -> tuple[DriftFinding, ...]:
+    def query_hybrid(
+        self,
+        query: str,
+        *,
+        context_hash: str | None = None,
+        max_tokens: int = 4000,
+    ) -> tuple[str, list[dict[str, Any]]]:
         self.initialize_storage()
-        git_state = self.git.state()
-        scanner = RepositoryScanner(
-            repository_path=self.settings.repository_path,
-            max_file_bytes=self.settings.max_file_bytes,
+        if not context_hash:
+            git_state = self.git.state()
+            context_hash = self.event_store.get_active_head(git_state.effective_branch)
+            if not context_hash:
+                raise ValueError("No active context exists to perform hybrid query.")
+        return self.retrieval_engine.retrieve(query, context_hash, max_tokens=max_tokens)
+
+    def add_overlay(
+        self,
+        target_stable_id: str,
+        prompt_instruction: str,
+        *,
+        actor: str = "agent",
+    ) -> str:
+        self.initialize_storage()
+        return self.overlay_system.generate_and_persist_overlay(
+            runtime=self,
+            target_stable_id=target_stable_id,
+            prompt_instruction=prompt_instruction,
+            actor=actor,
         )
-        scan = scanner.scan()
-        context_hash = self.event_store.get_active_head(git_state.effective_branch)
-        return DriftDetector(
-            event_store=self.event_store,
-            repository_path=self.settings.repository_path,
-        ).detect(scan=scan, context_hash=context_hash)
 
     def doctor(self) -> dict[str, Any]:
         self.initialize_storage()
@@ -445,7 +370,6 @@ class SynapseRuntime:
                     }
                 )
         replay = self.replay()
-        lineage = self.lineage()
         return {
             "database": health,
             "objects": object_results,
@@ -455,52 +379,7 @@ class SynapseRuntime:
                 "state_hash": replay.state_hash,
                 "diagnostics": [diagnostic.__dict__ for diagnostic in replay.diagnostics],
             },
-            "lineage": {
-                "ok": lineage.ok,
-                "context_count": lineage.context_count,
-                "edge_count": lineage.edge_count,
-                "active_head_count": lineage.active_head_count,
-                "findings": [finding.__dict__ for finding in lineage.findings],
-            },
         }
-
-    def analyze_health(self, context_hash: str | None = None) -> ArchitectureHealthReport:
-        self.initialize_storage()
-        if not context_hash:
-            git_state = self.git.state()
-            context_hash = self.event_store.get_active_head(git_state.effective_branch)
-            if not context_hash:
-                commits = self.event_store.list_context_commits(limit=1)
-                if commits:
-                    context_hash = commits[0]["context_hash"]
-                else:
-                    raise ValueError("No context commits exist to analyze health.")
-        return self.health_engine.analyze_health(context_hash)
-
-    def analyze_reasoning(self, context_hash: str | None = None) -> ReasoningReport:
-        self.initialize_storage()
-        if not context_hash:
-            git_state = self.git.state()
-            context_hash = self.event_store.get_active_head(git_state.effective_branch)
-            if not context_hash:
-                commits = self.event_store.list_context_commits(limit=1)
-                if commits:
-                    context_hash = commits[0]["context_hash"]
-                else:
-                    raise ValueError("No context commits exist to analyze reasoning.")
-        return self.reasoning_engine.analyze_reasoning(context_hash)
-
-    def detect_conflicts(
-        self, left_branch_or_hash: str, right_branch_or_hash: str
-    ) -> CognitiveMergeReport:
-        self.initialize_storage()
-        left_hash = self.event_store.get_active_head(left_branch_or_hash) or left_branch_or_hash
-        right_hash = self.event_store.get_active_head(right_branch_or_hash) or right_branch_or_hash
-        return self.merge_manager.detect_conflicts(left_hash, right_hash)
-
-    def compact(self) -> dict[str, Any]:
-        self.initialize_storage()
-        return self.compactor.compact()
 
     def _scan_payload(
         self,

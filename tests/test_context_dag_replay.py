@@ -3,15 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from synapse.cognition.dag import ContextDag
-from synapse.cognition.objects import (
+from synapse.context.dag import ContextDag
+from synapse.context.objects import (
     Confidence,
     Provenance,
     SemanticKind,
     SemanticObject,
     SourceType,
 )
-from synapse.runtime.replay import ReplayEngine
+from synapse.replay import ReplayEngine
 from synapse.storage.object_store import ObjectStore
 from synapse.storage.sqlite import SQLiteEventStore
 

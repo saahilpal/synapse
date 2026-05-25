@@ -9,19 +9,16 @@ from pydantic import BaseModel, Field
 class ProjectionKind(StrEnum):
     OVERVIEW = "overview"
     SUBSYSTEM = "subsystem"
-    REPLAY = "replay"
-    DRIFT = "drift"
-    ASSUMPTION = "assumption"
-    INCIDENT = "incident"
-    BRANCH = "branch"
+    HISTORY = "history"
+    COMPARE = "compare"
 
 
 class ProjectionNode(BaseModel):
     id: str
     label: str
-    kind: str  # e.g. "module", "decision", "assumption", "incident"
-    confidence: float = Field(ge=0.0, le=1.0)
-    status: str = "active"  # "active", "drifted", "invalidated", "incident"
+    kind: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    status: str = "active"
     validation_state: str = "assumed"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -31,7 +28,7 @@ class ProjectionEdge(BaseModel):
     from_id: str
     to_id: str
     relation: str
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     validation_state: str = "assumed"
     metadata: dict[str, Any] = Field(default_factory=dict)
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from synapse.cognition.objects import ContextObject, Snapshot
+from synapse.context.objects import ContextObject, Snapshot
 from synapse.serialization import pack_canonical, stable_hash, unpack_canonical
 
 OBJECT_MAGIC = b"SYNOBJ1\n"

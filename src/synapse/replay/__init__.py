@@ -1,4 +1,4 @@
-"""Replay correctness engine for deterministic cognition reconstruction."""
+"""Replay correctness engine for deterministic context reconstruction."""
 
 from synapse.replay.engine import ReplayEngine, decode_snapshot_object_hashes
 from synapse.replay.models import (

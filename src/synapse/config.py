@@ -19,7 +19,6 @@ class RuntimeMode(StrEnum):
     ACTIVE = "active"
     INDEXING = "indexing"
     LOW_POWER = "low-power"
-    REPLAY = "replay"
 
 
 class LoggingMode(StrEnum):
@@ -31,12 +30,6 @@ class IndexingMode(StrEnum):
     FAST = "fast"
     FULL = "full"
     OFF = "off"
-
-
-class EmbeddingProvider(StrEnum):
-    NONE = "none"
-    LOCAL = "local"
-    QDRANT = "qdrant"
 
 
 class SynapseSettings(BaseSettings):
@@ -69,8 +62,13 @@ class SynapseSettings(BaseSettings):
     retry_limit: int = Field(default=3, ge=0, le=20)
     low_power_mode: bool = Field(default=False, description="Defer expensive background work.")
 
-    embedding_provider: EmbeddingProvider = EmbeddingProvider.NONE
-    qdrant_url: str = "http://127.0.0.1:6333"
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key.")
+    gemini_api_key: str | None = Field(default=None, description="Gemini API key.")
+    ollama_url: str = Field(default="http://127.0.0.1:11434", description="Ollama API base URL.")
+    llm_provider: str = Field(
+        default="mock", description="Default LLM provider (openai, gemini, ollama, mock)."
+    )
+    llm_model: str = Field(default="mock-model", description="Default LLM model.")
 
     mcp_enabled: bool = False
     mcp_host: str = "127.0.0.1"
@@ -131,8 +129,9 @@ class SynapseSettings(BaseSettings):
             "indexing_mode": self.indexing_mode.value,
             "worker_concurrency": self.worker_concurrency,
             "queue_max_size": self.queue_max_size,
-            "embedding_provider": self.embedding_provider.value,
             "mcp_enabled": self.mcp_enabled,
             "mcp_host": self.mcp_host,
             "mcp_port": self.mcp_port,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
         }

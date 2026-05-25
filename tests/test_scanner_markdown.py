@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from synapse.cognition.markdown import MarkdownCognitionExtractor
-from synapse.cognition.objects import SemanticKind
-from synapse.cognition.scanner import RepositoryScanner
+from synapse.context.markdown import MarkdownContextExtractor
+from synapse.context.objects import SemanticKind
+from synapse.context.scanner import RepositoryScanner
 
 
-def test_scanner_and_markdown_extractor_find_first_class_cognition(tmp_path: Path) -> None:
+def test_scanner_and_markdown_extractor_find_context_annotations(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text(
         "# Architecture\n\n"
         "The runtime must keep MCP as an interface, not the brain.\n\n"
@@ -21,7 +21,7 @@ def test_scanner_and_markdown_extractor_find_first_class_cognition(tmp_path: Pat
     )
 
     scan = RepositoryScanner(repository_path=tmp_path).scan()
-    objects = MarkdownCognitionExtractor().extract_scan(scan)
+    objects = MarkdownContextExtractor().extract_scan(scan)
 
     assert scan.language_counts["markdown"] == 1
     assert scan.dependencies == ("pydantic",)

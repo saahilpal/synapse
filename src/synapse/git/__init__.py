@@ -1,4 +1,4 @@
-"""Git synchronization and branch cognition semantics."""
+"""Git state inspection for context commits."""
 
 from synapse.git.state import GitChange, GitChangeKind, GitIntegrationError, GitRepository, GitState
 

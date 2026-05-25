@@ -2,36 +2,36 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from synapse.cognition.dag import ContextDagError
-from synapse.cognition.objects import ContextObject, EventRecord
+from synapse.context.dag import ContextDagError
+from synapse.context.objects import ContextObject, EventRecord
 from synapse.serialization import stable_hash
 from synapse.storage.object_store import ObjectStore
 from synapse.storage.sqlite import SQLiteEventStore
 from synapse.transactions.models import (
-    CognitionCommitRequest,
-    CognitionCommitResult,
+    ContextCommitRequest,
+    ContextCommitResult,
     TransactionRecoveryFinding,
     TransactionStatus,
 )
 
 
-class CognitiveTransactionError(RuntimeError):
-    """Raised when an atomic cognition update cannot be completed."""
+class ContextTransactionError(RuntimeError):
+    """Raised when an atomic context update cannot be completed."""
 
 
-class CognitiveTransactionEngine:
+class ContextTransactionEngine:
     """Journaled transaction boundary for event + object + context writes.
 
     Filesystem objects cannot participate in SQLite transactions directly, so Synapse
     uses an explicit transaction journal. Recovery can then distinguish committed
-    cognition from interrupted writes and verify referenced objects during replay.
+    contexts from interrupted writes and verify referenced objects during replay.
     """
 
     def __init__(self, *, event_store: SQLiteEventStore, object_store: ObjectStore) -> None:
         self.event_store = event_store
         self.object_store = object_store
 
-    def commit_context_update(self, request: CognitionCommitRequest) -> CognitionCommitResult:
+    def commit_context_update(self, request: ContextCommitRequest) -> ContextCommitResult:
         idempotency_key = self.idempotency_key(request)
         existing = self.event_store.transaction_by_idempotency_key(idempotency_key)
         if existing and existing.get("status") == TransactionStatus.COMMITTED.value:
@@ -86,7 +86,7 @@ class CognitiveTransactionEngine:
                 confidence=request.confidence,
             )
             if not context.verify_hash():
-                raise CognitiveTransactionError(
+                raise ContextTransactionError(
                     f"context hash verification failed: {context.object_hash}"
                 )
             context_ref = self.object_store.put_context(context)
@@ -123,7 +123,7 @@ class CognitiveTransactionEngine:
                 error_message=str(exc),
             )
             raise
-        return CognitionCommitResult(
+        return ContextCommitResult(
             transaction_id=transaction_id,
             idempotency_key=idempotency_key,
             event=event,
@@ -150,7 +150,7 @@ class CognitiveTransactionEngine:
             )
         return tuple(findings)
 
-    def idempotency_key(self, request: CognitionCommitRequest) -> str:
+    def idempotency_key(self, request: ContextCommitRequest) -> str:
         return stable_hash(
             {
                 "operation": request.operation,
@@ -173,19 +173,19 @@ class CognitiveTransactionEngine:
         self,
         row: dict[str, object],
         idempotency_key: str,
-    ) -> CognitionCommitResult:
+    ) -> ContextCommitResult:
         event_sequence = _optional_int(row.get("event_sequence"))
         context_hash = row.get("context_hash")
         if event_sequence is None or context_hash is None:
-            raise CognitiveTransactionError("committed transaction is missing commit metadata")
+            raise ContextTransactionError("committed transaction is missing commit metadata")
         event = self.event_store.get_event_by_sequence(event_sequence)
         if event is None:
-            raise CognitiveTransactionError(
+            raise ContextTransactionError(
                 f"committed transaction references missing event: {event_sequence}"
             )
         envelope = self.object_store.get(str(context_hash))
         context = ContextObject(object_hash=str(context_hash), **envelope.payload)
-        return CognitionCommitResult(
+        return ContextCommitResult(
             transaction_id=str(row["transaction_id"]),
             idempotency_key=idempotency_key,
             event=event,

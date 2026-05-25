@@ -12,10 +12,9 @@ class MCPToolResult:
 
 
 class SynapseMCPFacade:
-    """Thin MCP-facing facade over runtime queries.
+    """Thin Model Context Protocol facade over Synapse context retrieval APIs.
 
-    This intentionally contains no cognition logic. A future official MCP SDK adapter can
-    register these methods as tools/resources without changing runtime behavior.
+    Provides a clean, secure boundary exposing persistence context tools to AI agents.
     """
 
     def __init__(self, runtime: SynapseRuntime) -> None:
@@ -24,14 +23,12 @@ class SynapseMCPFacade:
     def get_context(self) -> MCPToolResult:
         status = self.runtime.status()
         commits = self.runtime.list_context_commits(limit=10)
-        timeline = self.runtime.timeline(branch=status.branch, limit=10)
         return MCPToolResult(
             {
                 "active_context": status.active_context,
                 "branch": status.branch,
                 "git_commit": status.git_commit,
                 "recent_context_commits": commits,
-                "timeline": [event.model_dump(mode="json") for event in timeline],
             }
         )
 
@@ -39,38 +36,116 @@ class SynapseMCPFacade:
         return MCPToolResult({"commits": self.runtime.list_context_commits(limit=limit)})
 
     def diff_context(self, *, left_hash: str, right_hash: str) -> MCPToolResult:
-        return MCPToolResult(
-            self.runtime.semantic_diff(left_hash, right_hash).model_dump(mode="json")
+        return MCPToolResult(self.runtime.diff(left_hash, right_hash))
+
+    def search_context(self, *, query: str, limit: int = 20) -> MCPToolResult:
+        return MCPToolResult({"results": self.runtime.search_context(query, limit=limit)})
+
+    def get_context_for_task(self, *, task_description: str, limit: int = 4000) -> MCPToolResult:
+        response, sources = self.runtime.query_hybrid(task_description, max_tokens=limit)
+        return MCPToolResult({"response": response, "sources": sources})
+
+    def explain_structure(self, *, module_path: str) -> MCPToolResult:
+        status = self.runtime.status()
+        context_hash = status.active_context
+        if not context_hash:
+            return MCPToolResult({"error": "No active context exists."})
+
+        prompt = (
+            f"Explain the structure, functions, classes, and dependencies of module: {module_path}"
+        )
+        response, sources = self.runtime.query_hybrid(prompt, context_hash=context_hash)
+        return MCPToolResult({"explanation": response, "sources": sources})
+
+    def retrieve_related_context(self, *, stable_id: str, depth: int = 2) -> MCPToolResult:
+        status = self.runtime.status()
+        context_hash = status.active_context
+        if not context_hash:
+            return MCPToolResult({"error": "No active context exists."})
+
+        max_depth = max(0, min(depth, 5))
+        max_nodes = 500
+        active_nodes, _, active_edges = self.runtime.retrieval_engine.active_context_state(
+            context_hash
         )
 
-    def impact_context(self, *, left_hash: str, right_hash: str) -> MCPToolResult:
-        return MCPToolResult({"impact": self.runtime.semantic_impact(left_hash, right_hash)})
+        visited = {stable_id}
+        frontier = {stable_id}
+        related_edges = []
 
-    def verify_lineage(self) -> MCPToolResult:
-        return MCPToolResult({"lineage": self.runtime.lineage()})
+        for _ in range(max_depth):
+            next_frontier = set()
+            for edge in active_edges.values():
+                if len(visited) >= max_nodes:
+                    break
+                from_id = edge["from_id"]
+                to_id = edge["to_id"]
+                if from_id in frontier and to_id not in visited:
+                    next_frontier.add(to_id)
+                    visited.add(to_id)
+                    related_edges.append(edge)
+                elif to_id in frontier and from_id not in visited:
+                    next_frontier.add(from_id)
+                    visited.add(from_id)
+                    related_edges.append(edge)
+            frontier = next_frontier
 
-    def search_cognition(self, *, query: str, limit: int = 20) -> MCPToolResult:
-        return MCPToolResult({"results": self.runtime.search_cognition(query, limit=limit)})
+        related_nodes = [active_nodes[nid] for nid in visited if nid in active_nodes]
+        return MCPToolResult({"nodes": related_nodes, "edges": related_edges})
 
-    def search_memory(self, *, query: str, limit: int = 20) -> MCPToolResult:
-        return self.search_cognition(query=query, limit=limit)
+    def get_temporal_changes(self, *, since_commit: str) -> MCPToolResult:
+        status = self.runtime.status()
+        current_context = status.active_context
+        if not current_context:
+            return MCPToolResult({"error": "No active context exists."})
 
-    def timeline(self, *, branch: str | None = None, limit: int = 50) -> MCPToolResult:
-        return MCPToolResult(
-            {
-                "events": [
-                    event.model_dump(mode="json")
-                    for event in self.runtime.timeline(branch=branch, limit=limit)
-                ]
-            }
+        since_context = None
+        for row in self.runtime.list_context_commits(limit=100):
+            ctx_hash = str(row["context_hash"])
+            if ctx_hash.startswith(since_commit):
+                since_context = ctx_hash
+                break
+
+        if not since_context:
+            for row in self.runtime.list_context_commits(limit=100):
+                c_hash = row.get("git_commit_hash")
+                if c_hash and c_hash.startswith(since_commit):
+                    since_context = str(row["context_hash"])
+                    break
+
+        if not since_context:
+            for row in self.runtime.event_store.list_context_rows():
+                ctx_hash = str(row["context_hash"])
+                c_hash = row.get("git_commit_hash")
+                if ctx_hash.startswith(since_commit):
+                    since_context = ctx_hash
+                    break
+                if c_hash and c_hash.startswith(since_commit):
+                    since_context = ctx_hash
+                    break
+
+        if not since_context:
+            return MCPToolResult(
+                {"error": f"Commit/Context '{since_commit}' not found in context history."}
+            )
+
+        diff = self.runtime.diff(since_context, current_context)
+        return MCPToolResult(diff)
+
+    def get_valid_context_window(self, *, context_hash: str | None = None) -> MCPToolResult:
+        if not context_hash:
+            status = self.runtime.status()
+            context_hash = status.active_context
+        if not context_hash:
+            return MCPToolResult({"error": "No active context exists."})
+
+        active_nodes, active_semantics, active_edges = (
+            self.runtime.retrieval_engine.active_context_state(context_hash)
         )
-
-    def assumptions(self, *, context_hash: str | None = None) -> MCPToolResult:
         return MCPToolResult(
             {
-                "assumptions": [
-                    assumption.model_dump(mode="json")
-                    for assumption in self.runtime.assumptions(context_hash=context_hash)
-                ]
+                "active_nodes": list(active_nodes.values()),
+                "active_edges": list(active_edges.values()),
+                "active_semantics": list(active_semantics.values()),
             }
         )

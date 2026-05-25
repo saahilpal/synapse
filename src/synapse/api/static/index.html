@@ -49,28 +49,19 @@
             <!-- Left Controls Sidebar -->
             <aside class="sidebar left-sidebar">
                 <div class="sidebar-section">
-                    <h3>Projection Slices</h3>
+                    <h3>Context Views</h3>
                     <div class="button-group-vertical" id="projection-selector">
                         <button class="btn btn-tab active" data-kind="overview">
-                            <span class="btn-icon">👁️</span> Overview
+                            <span class="btn-icon">O</span> Overview
                         </button>
                         <button class="btn btn-tab" data-kind="subsystem">
-                            <span class="btn-icon">📁</span> Subsystem
+                            <span class="btn-icon">S</span> Subsystem
                         </button>
-                        <button class="btn btn-tab" data-kind="replay">
-                            <span class="btn-icon">🔄</span> Replay DAG
+                        <button class="btn btn-tab" data-kind="history">
+                            <span class="btn-icon">H</span> History
                         </button>
-                        <button class="btn btn-tab" data-kind="drift">
-                            <span class="btn-icon">⚠️</span> Drift Map
-                        </button>
-                        <button class="btn btn-tab" data-kind="assumption">
-                            <span class="btn-icon">💡</span> Assumptions
-                        </button>
-                        <button class="btn btn-tab" data-kind="incident">
-                            <span class="btn-icon">🚨</span> Incidents
-                        </button>
-                        <button class="btn btn-tab" data-kind="branch">
-                            <span class="btn-icon">🌿</span> Branch Comparison
+                        <button class="btn btn-tab" data-kind="compare">
+                            <span class="btn-icon">C</span> Compare
                         </button>
                     </div>
                 </div>
@@ -81,7 +72,7 @@
                         <label for="subsystem-prefix">Folder Path Prefix</label>
                         <input type="text" id="subsystem-prefix" placeholder="e.g. src/synapse/storage" class="form-input">
                     </div>
-                    <div class="form-group" id="branch-filter-group" style="display: none;">
+                    <div class="form-group" id="compare-filter-group" style="display: none;">
                         <label for="compare-hash">Compare With Context</label>
                         <select id="compare-hash" class="form-input"></select>
                     </div>
@@ -110,11 +101,11 @@
             <!-- Center Graph Canvas Area -->
             <section class="canvas-container">
                 <div class="canvas-header">
-                    <span id="canvas-title">Architecture Overview</span>
+                    <span id="canvas-title">Structural Overview</span>
                     <div class="canvas-actions">
-                        <button class="btn btn-icon-only" id="zoom-in-btn" title="Zoom In">➕</button>
-                        <button class="btn btn-icon-only" id="zoom-out-btn" title="Zoom Out">➖</button>
-                        <button class="btn btn-icon-only" id="reset-zoom-btn" title="Reset View">🎯</button>
+                        <button class="btn btn-icon-only" id="zoom-in-btn" title="Zoom In">+</button>
+                        <button class="btn btn-icon-only" id="zoom-out-btn" title="Zoom Out">-</button>
+                        <button class="btn btn-icon-only" id="reset-zoom-btn" title="Reset View">0</button>
                     </div>
                 </div>
                 <div class="graph-svg-wrapper">
@@ -123,9 +114,8 @@
                     <div class="legend-panel">
                         <div class="legend-item"><span class="legend-dot package"></span> Package</div>
                         <div class="legend-item"><span class="legend-dot module"></span> Module</div>
-                        <div class="legend-item"><span class="legend-dot decision"></span> Decision</div>
-                        <div class="legend-item"><span class="legend-dot assumption"></span> Assumption</div>
-                        <div class="legend-item"><span class="legend-dot incident"></span> Incident</div>
+                        <div class="legend-item"><span class="legend-dot class"></span> Class</div>
+                        <div class="legend-item"><span class="legend-dot function"></span> Function</div>
                         <div class="legend-item"><span class="legend-dot document"></span> Document</div>
                     </div>
                 </div>
@@ -135,8 +125,8 @@
             <aside class="sidebar right-sidebar">
                 <div class="sidebar-section" id="detail-empty">
                     <div class="empty-state">
-                        <div class="empty-icon">🔍</div>
-                        <p>Hover or click a node in the graph projection to inspect details deeply.</p>
+                        <div class="empty-icon">Inspect</div>
+                        <p>Click a structural node to inspect its source path and metadata.</p>
                     </div>
                 </div>
 
@@ -150,17 +140,6 @@
                     </div>
 
                     <div class="detail-scrollable">
-                        <div class="confidence-meter-container">
-                            <div class="confidence-lbl">
-                                <span>Confidence rating</span>
-                                <strong id="detail-confidence-pct">0%</strong>
-                            </div>
-                            <div class="confidence-bar-bg">
-                                <div class="confidence-bar-fill" id="detail-confidence-fill"></div>
-                            </div>
-                            <p class="detail-rationale" id="detail-confidence-rationale"></p>
-                        </div>
-
                         <div class="detail-group">
                             <label>Stable ID</label>
                             <code id="detail-id"></code>
@@ -184,8 +163,7 @@
                 <div class="sidebar-section bottom-actions">
                     <h3>Context Inputs</h3>
                     <div class="action-buttons">
-                        <button class="btn btn-secondary" id="btn-add-note">➕ Add Note</button>
-                        <button class="btn btn-secondary" id="btn-add-incident">🚨 Log Incident</button>
+                        <button class="btn btn-secondary" id="btn-add-note" style="width: 100%;">Add Manual Note</button>
                     </div>
                 </div>
             </aside>
@@ -195,32 +173,14 @@
     <!-- Modals for inputs -->
     <div class="modal-backdrop" id="modal-note" style="display: none;">
         <div class="modal-card">
-            <h3>Add Manual note to Context</h3>
+            <h3>Add Manual Note to Context</h3>
             <div class="form-group">
                 <label for="note-message">Note message</label>
-                <textarea id="note-message" class="form-input" rows="4" placeholder="Enter context update, assumption notes, or architectural documentation..."></textarea>
+                <textarea id="note-message" class="form-input" rows="4" placeholder="Enter context update, overlay notes, or architectural documentation..."></textarea>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('modal-note')">Cancel</button>
                 <button class="btn btn-primary" id="submit-note-btn">Commit Note</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal-backdrop" id="modal-incident" style="display: none;">
-        <div class="modal-card">
-            <h3>Log Incident Record</h3>
-            <div class="form-group">
-                <label for="incident-title">Incident Title</label>
-                <input type="text" id="incident-title" class="form-input" placeholder="e.g. Memory leak in pipeline thread workers">
-            </div>
-            <div class="form-group">
-                <label for="incident-summary">Incident Description</label>
-                <textarea id="incident-summary" class="form-input" rows="4" placeholder="Detail the root cause, symptoms, and impact on system entities..."></textarea>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('modal-incident')">Cancel</button>
-                <button class="btn btn-primary" id="submit-incident-btn">Record Incident</button>
             </div>
         </div>
     </div>

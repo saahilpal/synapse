@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from synapse.cognition.objects import (
+from synapse.context.objects import (
     Confidence,
     ContextObject,
     EventRecord,
@@ -24,7 +24,7 @@ class TransactionStatus(StrEnum):
 
 
 @dataclass(frozen=True)
-class CognitionCommitRequest:
+class ContextCommitRequest:
     operation: str
     event_type: EventType
     source: str
@@ -43,7 +43,7 @@ class CognitionCommitRequest:
 
 
 @dataclass(frozen=True)
-class CognitionCommitResult:
+class ContextCommitResult:
     transaction_id: str
     idempotency_key: str
     event: EventRecord

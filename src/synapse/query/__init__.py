@@ -1,6 +1,5 @@
-"""Temporal query engine for cognition through time."""
+"""Context query and retrieval engine."""
 
-from synapse.query.engine import TemporalQueryEngine
-from synapse.query.models import TemporalQueryKind, TemporalQueryResult
+from synapse.query.retrieval import HybridRetrievalEngine
 
-__all__ = ["TemporalQueryEngine", "TemporalQueryKind", "TemporalQueryResult"]
+__all__ = ["HybridRetrievalEngine"]

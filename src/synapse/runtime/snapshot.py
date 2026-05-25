@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from synapse.cognition.objects import Snapshot
-from synapse.runtime.replay import ReplayEngine
+from synapse.context.objects import Snapshot
+from synapse.replay import ReplayEngine
 from synapse.storage.object_store import ObjectStore
 from synapse.storage.sqlite import SQLiteEventStore
 

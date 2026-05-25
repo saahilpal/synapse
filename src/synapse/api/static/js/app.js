@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const projectionSelector = document.getElementById("projection-selector");
     const filterPanel = document.getElementById("filter-panel");
     const subsystemFilterGroup = document.getElementById("subsystem-filter-group");
-    const branchFilterGroup = document.getElementById("branch-filter-group");
+    const compareFilterGroup = document.getElementById("compare-filter-group");
     const compareHashSelect = document.getElementById("compare-hash");
     
     const detailEmpty = document.getElementById("detail-empty");
@@ -37,17 +37,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const detailTitle = document.getElementById("detail-title");
     const detailId = document.getElementById("detail-id");
     const detailSourceUri = document.getElementById("detail-source-uri");
-    const detailConfidencePct = document.getElementById("detail-confidence-pct");
-    const detailConfidenceFill = document.getElementById("detail-confidence-fill");
-    const detailConfidenceRationale = document.getElementById("detail-confidence-rationale");
     const detailValidationState = document.getElementById("detail-validation-state");
     const detailMetadata = document.getElementById("detail-metadata");
 
     // Action buttons
     const btnAddNote = document.getElementById("btn-add-note");
-    const btnAddIncident = document.getElementById("btn-add-incident");
     const submitNoteBtn = document.getElementById("submit-note-btn");
-    const submitIncidentBtn = document.getElementById("submit-incident-btn");
     const applyFiltersBtn = document.getElementById("apply-filters-btn");
 
     // Zoom Buttons
@@ -57,7 +52,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Connect Modals
     btnAddNote.addEventListener("click", () => showModal("modal-note"));
-    btnAddIncident.addEventListener("click", () => showModal("modal-incident"));
 
     // Close modals on clicking background
     document.querySelectorAll(".modal-backdrop").forEach(el => {
@@ -108,7 +102,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!res.ok) throw new Error("timeline fetch failed");
         const data = await res.json();
         
-        // Timeline events are received chronologically, let's reverse them if they are sorted DESC
         timelineEvents = data.events || [];
         timelineEvents.reverse(); // Ensure chronological order from oldest to newest
 
@@ -124,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 timelineTicks.appendChild(tick);
             });
 
-            // Populate branch compare hashes dropdown
+            // Populate context compare hashes dropdown
             compareHashSelect.innerHTML = "";
             timelineEvents.forEach(evt => {
                 if (evt.payload && evt.payload.context_hash) {
@@ -224,15 +217,15 @@ document.addEventListener("DOMContentLoaded", () => {
         if (selectedProjectionKind === "subsystem") {
             filterPanel.style.display = "block";
             subsystemFilterGroup.style.display = "block";
-            branchFilterGroup.style.display = "none";
-        } else if (selectedProjectionKind === "branch") {
+            compareFilterGroup.style.display = "none";
+        } else if (selectedProjectionKind === "compare") {
             filterPanel.style.display = "block";
             subsystemFilterGroup.style.display = "none";
-            branchFilterGroup.style.display = "block";
+            compareFilterGroup.style.display = "block";
         } else {
             filterPanel.style.display = "none";
             subsystemFilterGroup.style.display = "none";
-            branchFilterGroup.style.display = "none";
+            compareFilterGroup.style.display = "none";
         }
 
         await fetchAndRenderProjection();
@@ -246,18 +239,14 @@ document.addEventListener("DOMContentLoaded", () => {
     async function fetchAndRenderProjection() {
         if (timelineEvents.length === 0) return;
         
-        // Find current context hash
-        // The event timeline contains a context_hash in the payload of contexts created
         const currentEvent = timelineEvents[currentEventIndex];
         
-        // Fallback trace logic to find context hash
         let contextHash = null;
         if (currentEvent.payload && currentEvent.payload.context_hash) {
             contextHash = currentEvent.payload.context_hash;
         } else if (currentEvent.payload && currentEvent.payload.payload_hash) {
             contextHash = currentEvent.payload.payload_hash;
         } else {
-            // Find most recent context commit in events up to index
             for (let i = currentEventIndex; i >= 0; i--) {
                 if (timelineEvents[i].event_type === "context.object_created" && timelineEvents[i].payload && timelineEvents[i].payload.context_hash) {
                     contextHash = timelineEvents[i].payload.context_hash;
@@ -267,7 +256,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (!contextHash) {
-            // If still no hash, scan back for any active head or event sequence
             console.warn("Could not identify context hash for projection.");
             return;
         }
@@ -278,7 +266,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (selectedProjectionKind === "subsystem") {
             const prefix = document.getElementById("subsystem-prefix").value;
             if (prefix) params.push(`prefix=${encodeURIComponent(prefix)}`);
-        } else if (selectedProjectionKind === "branch") {
+        } else if (selectedProjectionKind === "compare") {
             const compareWith = compareHashSelect.value;
             if (compareWith) params.push(`compare_with=${encodeURIComponent(compareWith)}`);
         }
@@ -310,23 +298,10 @@ document.addEventListener("DOMContentLoaded", () => {
         detailId.textContent = node.id;
         detailSourceUri.textContent = node.metadata.source_uri || "no source";
         
-        const confPct = Math.round(node.confidence * 100);
-        detailConfidencePct.textContent = `${confPct}%`;
-        detailConfidenceFill.style.width = `${confPct}%`;
-
-        // Render validation state
-        const valState = node.validation_state || (node.confidence >= 0.85 ? "validated" : "assumed");
+        const valState = node.validation_state || "validated";
         detailValidationState.textContent = valState;
         detailValidationState.className = `validation-badge ${valState.toLowerCase()}`;
-        
-        // Build detail rationale if available
-        let rationale = "Derived from content analysis.";
-        if (node.metadata.metadata && node.metadata.metadata.rationale) {
-            rationale = node.metadata.metadata.rationale;
-        }
-        detailConfidenceRationale.textContent = rationale;
 
-        // Render metadata json
         detailMetadata.textContent = JSON.stringify(node.metadata.metadata || {}, null, 2);
     }
 
@@ -350,43 +325,12 @@ document.addEventListener("DOMContentLoaded", () => {
             closeModal("modal-note");
             document.getElementById("note-message").value = "";
             
-            // Reload status & timeline
             await bootstrap();
         } catch (err) {
             alert("Error committing note: " + err.message);
         } finally {
             submitNoteBtn.disabled = false;
             submitNoteBtn.textContent = "Commit Note";
-        }
-    });
-
-    submitIncidentBtn.addEventListener("click", async () => {
-        const title = document.getElementById("incident-title").value.trim();
-        const summary = document.getElementById("incident-summary").value.trim();
-        if (!title || !summary) return;
-
-        try {
-            submitIncidentBtn.disabled = true;
-            submitIncidentBtn.textContent = "Recording...";
-
-            const res = await fetch("/api/v1/incident", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, summary })
-            });
-
-            if (!res.ok) throw new Error("Failed to record incident");
-
-            closeModal("modal-incident");
-            document.getElementById("incident-title").value = "";
-            document.getElementById("incident-summary").value = "";
-
-            await bootstrap();
-        } catch (err) {
-            alert("Error recording incident: " + err.message);
-        } finally {
-            submitIncidentBtn.disabled = false;
-            submitIncidentBtn.textContent = "Record Incident";
         }
     });
 });

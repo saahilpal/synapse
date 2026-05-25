@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
-from synapse.cognition.objects import (
+from synapse.context.objects import (
     ContextObject,
     EventRecord,
     EventType,
@@ -205,7 +205,7 @@ class SQLiteEventStore:
                 updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS cognition_transactions (
+            CREATE TABLE IF NOT EXISTS context_transactions (
                 transaction_id TEXT PRIMARY KEY,
                 idempotency_key TEXT NOT NULL UNIQUE,
                 operation TEXT NOT NULL,
@@ -223,7 +223,7 @@ class SQLiteEventStore:
                 kind TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (transaction_id, object_hash),
-                FOREIGN KEY(transaction_id) REFERENCES cognition_transactions(transaction_id)
+                FOREIGN KEY(transaction_id) REFERENCES context_transactions(transaction_id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
@@ -237,11 +237,32 @@ class SQLiteEventStore:
             CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
             CREATE INDEX IF NOT EXISTS idx_graph_edges_relation ON graph_edges(relation);
             CREATE INDEX IF NOT EXISTS idx_transactions_status
-                ON cognition_transactions(status);
+                ON context_transactions(status);
             CREATE INDEX IF NOT EXISTS idx_transaction_objects_hash
                 ON transaction_objects(object_hash);
             """
         )
+        transaction_object_fks = conn.execute(
+            "PRAGMA foreign_key_list(transaction_objects)"
+        ).fetchall()
+        if any(str(row["table"]) != "context_transactions" for row in transaction_object_fks):
+            conn.executescript(
+                """
+                DROP TABLE IF EXISTS transaction_objects;
+
+                CREATE TABLE transaction_objects (
+                    transaction_id TEXT NOT NULL,
+                    object_hash TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (transaction_id, object_hash),
+                    FOREIGN KEY(transaction_id) REFERENCES context_transactions(transaction_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_transaction_objects_hash
+                    ON transaction_objects(object_hash);
+                """
+            )
 
         if current_version < 4:
             conn.executescript(
@@ -274,36 +295,6 @@ class SQLiteEventStore:
         if current_version < 5:
             conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS cold_context_objects (
-                    context_hash TEXT PRIMARY KEY,
-                    schema_version INTEGER NOT NULL,
-                    git_commit_hash TEXT,
-                    branch TEXT,
-                    event_sequence INTEGER,
-                    object_hash TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS cold_semantic_objects (
-                    stable_id TEXT NOT NULL,
-                    context_hash TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    tags_json TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL,
-                    source_uri TEXT NOT NULL,
-                    source_hash TEXT,
-                    git_commit_hash TEXT,
-                    branch TEXT,
-                    confidence REAL NOT NULL,
-                    valid_from_context TEXT,
-                    valid_to_context TEXT,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (stable_id, context_hash)
-                );
-
                 CREATE INDEX IF NOT EXISTS idx_projection_cache_lookup 
                     ON projection_cache(context_hash, projection_kind, filters_hash);
                 """
@@ -396,14 +387,14 @@ class SQLiteEventStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO cognition_transactions(
+                INSERT OR IGNORE INTO context_transactions(
                     transaction_id, idempotency_key, operation, status, started_at, updated_at
                 ) VALUES (?, ?, ?, 'in_progress', ?, ?)
                 """,
                 (transaction_id, idempotency_key, operation, now, now),
             )
             row = conn.execute(
-                "SELECT * FROM cognition_transactions WHERE idempotency_key = ?",
+                "SELECT * FROM context_transactions WHERE idempotency_key = ?",
                 (idempotency_key,),
             ).fetchone()
         if row is None:
@@ -439,7 +430,7 @@ class SQLiteEventStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                UPDATE cognition_transactions
+                UPDATE context_transactions
                 SET status = ?, event_sequence = ?, context_hash = ?, error_message = ?,
                     updated_at = ?
                 WHERE transaction_id = ?
@@ -457,7 +448,7 @@ class SQLiteEventStore:
     def transaction_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM cognition_transactions WHERE idempotency_key = ?",
+                "SELECT * FROM context_transactions WHERE idempotency_key = ?",
                 (idempotency_key,),
             ).fetchone()
         return None if row is None else dict(row)
@@ -466,12 +457,12 @@ class SQLiteEventStore:
         with self.connect() as conn:
             if status is None:
                 rows = conn.execute(
-                    "SELECT * FROM cognition_transactions ORDER BY started_at ASC"
+                    "SELECT * FROM context_transactions ORDER BY started_at ASC"
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
-                    SELECT * FROM cognition_transactions
+                    SELECT * FROM context_transactions
                     WHERE status = ?
                     ORDER BY started_at ASC
                     """,
@@ -519,6 +510,13 @@ class SQLiteEventStore:
         objects: Iterable[SemanticObject],
     ) -> None:
         for semantic in objects:
+            v_from = semantic.validity.valid_from_context
+            v_to = semantic.validity.valid_to_context
+            if v_from == "__CURRENT_CONTEXT__":
+                v_from = context_hash
+            if v_to == "__CURRENT_CONTEXT__":
+                v_to = context_hash
+
             conn.execute(
                 """
                 INSERT OR IGNORE INTO semantic_objects(
@@ -539,8 +537,8 @@ class SQLiteEventStore:
                     semantic.provenance.git_commit,
                     semantic.provenance.branch,
                     semantic.confidence.score,
-                    semantic.validity.valid_from_context,
-                    semantic.validity.valid_to_context,
+                    v_from,
+                    v_to,
                     semantic.created_at.isoformat(),
                 ),
             )
@@ -552,6 +550,13 @@ class SQLiteEventStore:
         nodes: Iterable[GraphNode],
     ) -> None:
         for node in nodes:
+            v_from = node.validity.valid_from_context
+            v_to = node.validity.valid_to_context
+            if v_from == "__CURRENT_CONTEXT__":
+                v_from = context_hash
+            if v_to == "__CURRENT_CONTEXT__":
+                v_to = context_hash
+
             conn.execute(
                 """
                 INSERT OR IGNORE INTO graph_nodes(
@@ -567,8 +572,8 @@ class SQLiteEventStore:
                     json.dumps(to_primitive(node.metadata), sort_keys=True),
                     node.provenance.source_uri,
                     node.confidence.score,
-                    node.validity.valid_from_context,
-                    node.validity.valid_to_context,
+                    v_from,
+                    v_to,
                 ),
             )
 
@@ -579,6 +584,13 @@ class SQLiteEventStore:
         edges: Iterable[GraphEdge],
     ) -> None:
         for edge in edges:
+            v_from = edge.validity.valid_from_context
+            v_to = edge.validity.valid_to_context
+            if v_from == "__CURRENT_CONTEXT__":
+                v_from = context_hash
+            if v_to == "__CURRENT_CONTEXT__":
+                v_to = context_hash
+
             conn.execute(
                 """
                 INSERT OR IGNORE INTO graph_edges(
@@ -595,8 +607,8 @@ class SQLiteEventStore:
                     json.dumps(to_primitive(edge.metadata), sort_keys=True),
                     edge.provenance.source_uri,
                     edge.confidence.score,
-                    edge.validity.valid_from_context,
-                    edge.validity.valid_to_context,
+                    v_from,
+                    v_to,
                 ),
             )
 
@@ -624,12 +636,8 @@ class SQLiteEventStore:
     def context_exists(self, context_hash: str) -> bool:
         with self.connect() as conn:
             row = conn.execute(
-                """
-                SELECT 1 FROM context_objects WHERE context_hash = ?
-                UNION ALL
-                SELECT 1 FROM cold_context_objects WHERE context_hash = ?
-                """,
-                (context_hash, context_hash),
+                "SELECT 1 FROM context_objects WHERE context_hash = ?",
+                (context_hash,),
             ).fetchone()
         return row is not None
 
@@ -639,11 +647,6 @@ class SQLiteEventStore:
                 "SELECT * FROM context_objects WHERE context_hash = ?",
                 (context_hash,),
             ).fetchone()
-            if row is None:
-                row = conn.execute(
-                    "SELECT * FROM cold_context_objects WHERE context_hash = ?",
-                    (context_hash,),
-                ).fetchone()
         return cast(sqlite3.Row | None, row)
 
     def iter_events(self, *, after_sequence: int = 0) -> list[EventRecord]:
@@ -747,12 +750,11 @@ class SQLiteEventStore:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM semantic_objects WHERE context_hash = ?
-                UNION ALL
-                SELECT * FROM cold_semantic_objects WHERE context_hash = ?
+                SELECT * FROM semantic_objects
+                WHERE context_hash = ?
                 ORDER BY stable_id ASC
                 """,
-                (context_hash, context_hash),
+                (context_hash,),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -764,12 +766,11 @@ class SQLiteEventStore:
         with self.connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT * FROM semantic_objects WHERE context_hash IN ({placeholders})
-                UNION ALL
-                SELECT * FROM cold_semantic_objects WHERE context_hash IN ({placeholders})
+                SELECT * FROM semantic_objects
+                WHERE context_hash IN ({placeholders})
                 ORDER BY stable_id ASC
                 """,
-                hashes + hashes,
+                hashes,
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -1026,7 +1027,7 @@ class SQLiteEventStore:
                 graph_edges=count("graph_edges"),
                 snapshots=count("snapshots"),
                 active_heads=count("active_heads"),
-                transactions=count("cognition_transactions"),
+                transactions=count("context_transactions"),
             )
 
     def health(self) -> dict[str, Any]:

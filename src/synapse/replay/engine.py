@@ -16,7 +16,7 @@ from synapse.storage.sqlite import SQLiteEventStore
 
 
 class ReplayEngine:
-    """Deterministically reconstructs and verifies source-of-truth cognition state."""
+    """Deterministically reconstructs and verifies source-of-truth context state."""
 
     def __init__(self, *, event_store: SQLiteEventStore, object_store: ObjectStore) -> None:
         self.event_store = event_store

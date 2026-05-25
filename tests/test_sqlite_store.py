@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from synapse.cognition.objects import EventRecord, EventType
+from synapse.context.objects import EventRecord, EventType
 from synapse.storage.object_store import ObjectStore
 from synapse.storage.sqlite import SQLiteEventStore
 

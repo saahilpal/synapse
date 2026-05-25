@@ -1,33 +1,27 @@
 [project]
 name = "synapse-runtime"
 version = "0.1.0"
-description = "Temporal cognition runtime for software systems."
+description = "Persistent structural context infrastructure for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Synapse contributors" }]
-keywords = ["ai", "mcp", "git", "cognition", "developer-tools", "temporal-systems"]
+keywords = ["ai", "mcp", "git", "context", "developer-tools", "repository-indexing"]
 dependencies = [
-  "apscheduler>=3.10",
   "fastapi>=0.115",
   "gitpython>=3.1",
   "markdown-it-py>=3.0",
   "msgpack>=1.0",
-  "networkx>=3.3",
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
-  "qdrant-client>=1.10",
   "structlog>=24.1",
-  "textual>=0.79",
-  "tree-sitter>=0.21",
   "typer>=0.12",
   "uvicorn>=0.30",
-  "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0"]
 dev = [
+  "httpx>=0.28",
   "mypy>=1.11",
   "pre-commit>=3.8",
   "pytest>=8.3",
@@ -69,7 +63,7 @@ disallow_subclassing_any = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["msgpack", "networkx"]
+module = ["msgpack"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

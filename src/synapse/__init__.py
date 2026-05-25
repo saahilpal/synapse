@@ -1,4 +1,4 @@
-"""Synapse: temporal cognition runtime for software systems."""
+"""Synapse: persistent structural context infrastructure for AI coding agents."""
 
 __all__ = ["__version__"]
 

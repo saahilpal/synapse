@@ -13,7 +13,6 @@ from synapse.observability import get_logger
 class WorkKind(StrEnum):
     INDEX_REPOSITORY = "index_repository"
     CREATE_SNAPSHOT = "create_snapshot"
-    DETECT_DRIFT = "detect_drift"
     NOOP = "noop"
 
 

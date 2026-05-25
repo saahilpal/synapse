@@ -77,12 +77,10 @@ class SynapseGraphRenderer {
         const colors = {
             "package": "var(--accent-package)",
             "module": "var(--accent-module)",
-            "decision": "var(--accent-decision)",
-            "assumption": "var(--accent-assumption)",
-            "incident": "var(--accent-incident)",
+            "class": "var(--accent-class)",
+            "function": "var(--accent-function)",
             "document": "var(--accent-document)",
-            "dependency": "var(--accent-assumption)",
-            "context_commit": "var(--accent-assumption)"
+            "context": "var(--accent-historical)"
         };
 
         const defaultColor = "var(--text-secondary)";
@@ -104,27 +102,6 @@ class SynapseGraphRenderer {
             .attr("class", d => `node status-${d.status || 'active'}`)
             .call(this._drag(this.simulation));
 
-        // Append ruby halo for incident-impacted nodes
-        node.filter(d => d.status === "incident" || d.kind === "incident")
-            .append("circle")
-            .attr("r", d => (d.kind === "package" ? 14 : 10) + 6)
-            .attr("fill", "none")
-            .attr("stroke", "#ff3b30")
-            .attr("stroke-width", 2)
-            .attr("stroke-opacity", 0.6)
-            .attr("class", "ruby-halo");
-
-        // Append warning ring for drifted nodes
-        node.filter(d => d.status === "drifted")
-            .append("circle")
-            .attr("r", d => (d.kind === "package" ? 14 : 10) + 4)
-            .attr("fill", "none")
-            .attr("stroke", "#ffcc00")
-            .attr("stroke-width", 1.5)
-            .attr("stroke-dasharray", "3,3")
-            .attr("class", "drift-ring");
-
-        // Add circle representing the node with confidence color-scaling
         node.append("circle")
             .attr("r", d => d.kind === "package" ? 14 : 10)
             .attr("class", d => `node-circle ${d.kind} status-${d.status || 'active'}`)
@@ -132,9 +109,7 @@ class SynapseGraphRenderer {
                 if (d.status === "invalidated") {
                     return "var(--bg-surface)";
                 }
-                const confidence = typeof d.confidence === 'number' ? d.confidence : 1.0;
-                const percent = Math.round(25 + confidence * 55); // 25% to 80% brightness
-                return `hsl(0, 0%, ${percent}%)`;
+                return "var(--bg-surface)";
             })
             .style("stroke", d => {
                 if (d.status === "invalidated") {
@@ -144,7 +119,6 @@ class SynapseGraphRenderer {
             })
             .style("stroke-width", d => d.kind === "package" ? "3px" : "2px");
 
-        // Add label text with strike-through for invalidated assumptions
         node.append("text")
             .attr("dx", 18)
             .attr("dy", 4)
@@ -163,22 +137,15 @@ class SynapseGraphRenderer {
 
         node.on("mouseover", (event, d) => {
             const tooltip = d3.select("#graph-tooltip");
-            const confidenceVal = Math.round((typeof d.confidence === 'number' ? d.confidence : 1.0) * 100);
             tooltip.style("display", "block")
                 .html(`
                     <div style="font-weight: 600; font-family: var(--font-heading); color: var(--text-primary); margin-bottom: 4px;">${d.label}</div>
                     <div style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 8px; font-weight: 700;">${d.kind}</div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px;">
-                        <span>Confidence:</span>
-                        <strong style="color: var(--text-primary);">${confidenceVal}%</strong>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px;">
                         <span>Status:</span>
                         <span style="text-transform: capitalize; font-weight: 500; color: var(--text-secondary);">${d.status || 'active'}</span>
                     </div>
-                    ${d.status === 'drifted' ? '<div style="border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: var(--text-primary); font-size: 10px; padding: 4px 6px; border-radius: 4px; margin-top: 8px; font-weight: 500; display: flex; align-items: center; gap: 4px;">⚠️ Drift detected in source</div>' : ''}
-                    ${d.status === 'incident' ? '<div style="border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); color: var(--text-primary); font-size: 10px; padding: 4px 6px; border-radius: 4px; margin-top: 8px; font-weight: 600; display: flex; align-items: center; gap: 4px; box-shadow: 0 0 10px rgba(255,255,255,0.1);">🚨 Active incident impact</div>' : ''}
-                    ${d.status === 'invalidated' ? '<div style="border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); color: var(--text-muted); font-size: 10px; padding: 4px 6px; border-radius: 4px; margin-top: 8px; font-weight: 500; display: flex; align-items: center; gap: 4px;">🚫 Invalidated assumption</div>' : ''}
+                    ${d.status === 'invalidated' ? '<div style="border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); color: var(--text-muted); font-size: 10px; padding: 4px 6px; border-radius: 4px; margin-top: 8px; font-weight: 500;">Invalidated</div>' : ''}
                 `)
                 .style("left", (event.pageX + 15) + "px")
                 .style("top", (event.pageY - 15) + "px");
@@ -255,7 +222,6 @@ class SynapseGraphRenderer {
     }
 
     _semanticZoom(scale) {
-        // Toggle text label visibility depending on zoom scale depth
         const labels = this.g.selectAll("text");
         if (scale < 0.6) {
             labels.attr("display", "none");

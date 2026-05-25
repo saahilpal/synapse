@@ -39,7 +39,6 @@ class RuntimeDaemon:
         self._running = False
         self.pipeline.register(WorkKind.INDEX_REPOSITORY, self._handle_index_repository)
         self.pipeline.register(WorkKind.CREATE_SNAPSHOT, self._handle_create_snapshot)
-        self.pipeline.register(WorkKind.DETECT_DRIFT, self._handle_detect_drift)
         self.pipeline.register(WorkKind.NOOP, self._handle_noop)
 
     async def start(self) -> None:
@@ -101,10 +100,6 @@ class RuntimeDaemon:
     async def _handle_create_snapshot(self, item: WorkItem) -> None:
         _ = item
         await asyncio.to_thread(self.runtime.create_snapshot)
-
-    async def _handle_detect_drift(self, item: WorkItem) -> None:
-        _ = item
-        await asyncio.to_thread(self.runtime.drift)
 
     async def _handle_noop(self, item: WorkItem) -> None:
         _ = item

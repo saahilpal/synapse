@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from synapse.cognition.objects import TrustLevel
+from synapse.context.objects import TrustLevel
 from synapse.storage.sqlite import SQLiteEventStore
 
 

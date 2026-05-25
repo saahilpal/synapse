@@ -1,18 +1,18 @@
-"""Journaled cognitive transaction engine."""
+"""Journaled context transaction engine."""
 
-from synapse.transactions.engine import CognitiveTransactionEngine, CognitiveTransactionError
+from synapse.transactions.engine import ContextTransactionEngine, ContextTransactionError
 from synapse.transactions.models import (
-    CognitionCommitRequest,
-    CognitionCommitResult,
+    ContextCommitRequest,
+    ContextCommitResult,
     TransactionRecoveryFinding,
     TransactionStatus,
 )
 
 __all__ = [
-    "CognitionCommitRequest",
-    "CognitionCommitResult",
-    "CognitiveTransactionEngine",
-    "CognitiveTransactionError",
+    "ContextCommitRequest",
+    "ContextCommitResult",
+    "ContextTransactionEngine",
+    "ContextTransactionError",
     "TransactionRecoveryFinding",
     "TransactionStatus",
 ]

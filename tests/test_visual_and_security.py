@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from synapse.cognition.objects import EventType
 from synapse.config import RuntimeProfile, SynapseSettings
+from synapse.context.objects import EventType
 from synapse.projections.models import ProjectionKind
 from synapse.runtime.service import SynapseRuntime
 from synapse.security.redaction import SecretRedactor
@@ -90,14 +90,13 @@ def test_api_endpoints(mock_runtime: SynapseRuntime) -> None:
     assert "repository_path" in data
     assert "events" in data
 
-    # Test assumptions endpoint
-    res = client.get("/api/v1/assumptions")
+    # Test timeline endpoint
+    res = client.get("/api/v1/timeline")
     assert res.status_code == 200
-    assert "assumptions" in res.json()
+    assert "events" in res.json()
 
 
 def test_projection_engine(mock_runtime: SynapseRuntime) -> None:
-    # Commit a dummy context so we have ancestry
     git_state = mock_runtime.git.state()
     semantic = mock_runtime.builder.manual_note(
         message="ADR decision: Use SQLite",
@@ -105,10 +104,10 @@ def test_projection_engine(mock_runtime: SynapseRuntime) -> None:
         git_commit_hash=None,
     )
 
-    from synapse.transactions.models import CognitionCommitRequest
+    from synapse.transactions.models import ContextCommitRequest
 
     commit_res = mock_runtime.transaction_engine.commit_context_update(
-        CognitionCommitRequest(
+        ContextCommitRequest(
             operation="test_projection",
             event_type=EventType.MANUAL_NOTE_ADDED,
             source="manual://note",
@@ -132,15 +131,14 @@ def test_projection_engine(mock_runtime: SynapseRuntime) -> None:
     assert overview.context_hash == context_hash
     assert overview.kind == ProjectionKind.OVERVIEW
 
-    # Test Replay projection
-    replay = engine.get_projection(context_hash, ProjectionKind.REPLAY)
-    assert replay.kind == ProjectionKind.REPLAY
-    assert len(replay.nodes) == 1
-    assert replay.nodes[0].id == context_hash
+    history = engine.get_projection(context_hash, ProjectionKind.HISTORY)
+    assert history.kind == ProjectionKind.HISTORY
+    assert len(history.nodes) == 1
+    assert history.nodes[0].id == context_hash
 
 
 def test_validation_state_properties() -> None:
-    from synapse.cognition.objects import (
+    from synapse.context.objects import (
         Confidence,
         Provenance,
         SemanticKind,
