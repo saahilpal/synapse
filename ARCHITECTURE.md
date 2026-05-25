@@ -1,85 +1,178 @@
 # Synapse Architecture
 
-Synapse is persistent structural context infrastructure for AI coding agents. It indexes a local repository, stores versioned structural context, and returns grounded context windows through CLI, API, UI, and MCP-facing helpers.
+Synapse is a **persistent structural context infrastructure** designed specifically for AI coding agents.
 
-Synapse does not use AI to define structural truth. Parsers, Git state, content hashes, SQLite transactions, and object-store integrity checks own the durable state. AI providers may summarize, annotate, and explain already extracted context through semantic overlays.
+Unlike traditional RAG (Retrieval-Augmented Generation) systems that rely on naive text chunking and vector similarity, Synapse treats the codebase as a deterministically bounded structural graph. It maps packages, modules, classes, and functions, and records their evolution over time using an event-sourced architecture.
 
-## System Shape
+## System Overview
+
+Synapse does **not** use AI to define structural truth. Parsers, Git state, content hashes, SQLite transactions, and object-store integrity checks own the durable state. AI providers may optionally summarize, annotate, and explain already extracted context through **semantic overlays**.
+
+```mermaid
+architecture-beta
+    group source(Source)
+    service repo(Local Repository) in source
+    
+    group synapse(Synapse Core Engine)
+    service scanner(Incremental Scanner) in synapse
+    service parser(AST & Markdown Parser) in synapse
+    service engine(Transaction Engine) in synapse
+    service retrieve(Hybrid Retrieval) in synapse
+    
+    group storage(Durable State)
+    service sqlite(SQLite WAL Event Store) in storage
+    service objstore(Zlib Object Store) in storage
+
+    group interface(Interfaces)
+    service mcp(MCP Server) in interface
+    service api(FastAPI) in interface
+    service cli(Typer CLI) in interface
+    
+    repo:R --> L:scanner
+    scanner:R --> L:parser
+    parser:B --> T:engine
+    
+    engine:R --> L:sqlite
+    engine:R --> L:objstore
+    
+    retrieve:L --> R:sqlite
+    retrieve:L --> R:objstore
+    
+    retrieve:B --> T:mcp
+    retrieve:B --> T:api
+    retrieve:B --> T:cli
+```
+
+*(Note: The diagram above illustrates logical data flow. The actual implementation runs within a unified Python runtime.)*
+
+---
+
+## 1. Incremental Ingestion Pipeline
+
+The ingestion pipeline transforms raw repository files into versioned structural context. It is designed to be incremental, bounded, and fast.
+
+```mermaid
+sequenceDiagram
+    participant Repo as Local Repository
+    participant Scan as RepositoryScanner
+    participant Parse as ContextBuilder
+    participant Store as EventStore & ObjectStore
+    
+    Repo->>Scan: File System Events / Poll
+    Scan->>Scan: Deterministic exclusions & bounds check
+    Scan->>Scan: Compute SHA-256 content hash
+    Scan->>Parse: Yield changed/added files
+    
+    Parse->>Parse: Parse AST (Classes, Functions, Imports)
+    Parse->>Parse: Identify file renames via hash matching
+    
+    alt If structural node modified
+        Parse->>Parse: Invalidate stale node
+        Parse->>Parse: Invalidate attached semantic overlays
+    end
+    
+    Parse->>Store: Write Event Journal
+    Parse->>Store: Write msgpack Objects
+    Store-->>Parse: Commit success
+```
+
+### Core Responsibilities
+- **`RepositoryScanner`**: Walks the repository applying deterministic exclusions (e.g., ignoring binaries, overly large files, hidden directories) and computes SHA-256 hashes.
+- **Renames & Moves**: Handled by matching deleted and added files with identical content hashes.
+- **Invalidation**: Modified files immediately invalidate their structural nodes, parsed symbols, and attached semantic overlays.
+
+---
+
+## 2. Structural Extraction & The Context Graph
+
+Synapse maintains a purposely constrained structural graph. It does not track variables, per-line AST nodes, or speculative reasoning.
+
+**Nodes Tracked:**
+- Packages and module boundaries
+- Files and Documents (Markdown)
+- Classes and Functions
+- Import Dependencies
+
+By bounding the graph, Synapse avoids graph explosion and ensures retrieval queries return high-signal context.
+
+---
+
+## 3. Durable Storage Layer
+
+The storage layer guarantees local-first reliability using a two-part system:
+
+1. **`ObjectStore`**: Immutable `msgpack` objects compressed with `zlib` and addressed by their SHA-256 hash.
+2. **`SQLiteEventStore`**: WAL-enabled SQLite tables tracking events, context commits, active heads, structural nodes/edges, and semantic projections.
+
+```mermaid
+erDiagram
+    COMMIT ||--o{ EVENT : "contains"
+    EVENT ||--|| NODE : "mutates"
+    NODE ||--o{ EDGE : "connects to"
+    NODE ||--o{ OVERLAY : "annotated by"
+    
+    COMMIT {
+        string id PK
+        string parent_id FK
+        datetime timestamp
+    }
+    NODE {
+        string id PK
+        string kind
+        string file_path
+        string hash
+    }
+    OVERLAY {
+        string id PK
+        string node_id FK
+        string summary
+        boolean valid
+    }
+```
+
+Context writes are orchestrated by the `ContextTransactionEngine`, which journals event payloads. If an ingestion cycle is interrupted, the transaction fails atomically, and replay diagnostics (`synapse doctor`) maintain integrity.
+
+---
+
+## 4. Hybrid Retrieval Flow
+
+When an agent or developer requests context, Synapse executes a bounded, four-stage hybrid retrieval pipeline.
 
 ```mermaid
 flowchart TD
-    Repo["Repository"] --> Scanner["Incremental ingestion"]
-    Scanner --> Parser["AST and Markdown extraction"]
-    Parser --> Store["Context store"]
-    Store --> Index["Bounded structural index"]
-    Store --> Overlay["Semantic overlays"]
-    Index --> Retrieval["Hybrid retrieval"]
-    Overlay --> Retrieval
-    Retrieval --> Agent["Agent Context API / MCP"]
-    Store --> UI["Context UI"]
+    Req[Context Request] --> TFilter[1. Temporal Filtering]
+    
+    subgraph Pipeline
+    TFilter -->|Active Head| STraverse[2. Structural Traversal]
+    STraverse -->|Bounded Nodes| SRecall[3. Semantic Recall]
+    SRecall -->|Ranked Nodes| LLMSynth[4. LLM Synthesis]
+    end
+    
+    LLMSynth --> Resp[Agent Context Window]
+    
+    classDef step fill:#1e293b,stroke:#8b5cf6,stroke-width:2px;
+    class TFilter,STraverse,SRecall,LLMSynth step;
 ```
 
-## Core Components
+1. **Temporal Filtering**: Reconstructs the active context at a chosen context head (ignoring stale or deleted nodes).
+2. **Structural Traversal**: Finds matching nodes based on query parameters and expands through nearby dependency edges (up to a hard node limit).
+3. **Semantic Recall**: Uses keyword and local embedding similarity to rank active semantic objects.
+4. **LLM Synthesis** *(Optional)*: Synthesizes a natural language answer from the packed, cited context only, avoiding hallucination.
 
-### Incremental Ingestion
+---
 
-`RepositoryScanner` walks the repository with deterministic exclusions, file-size bounds, manifest discovery, language detection, and SHA-256 content hashes. `RepositoryContextBuilder` converts scans into context deltas.
+## 5. Semantic Overlays
 
-Ingestion handles renames by matching deleted and added files with identical content hashes. Modified and deleted files invalidate their structural nodes, parsed symbols, semantic summaries, and attached overlays in the next context commit.
+Semantic overlays are non-destructive AI annotations attached to structural nodes. They provide human-readable summaries or developer notes. 
 
-### Structural Extraction
+**Crucial Invariant**: Overlays cannot mutate structural nodes or create dependencies. If the underlying code is modified, the overlay is automatically invalidated by the ingestion pipeline until it is re-generated.
 
-The structural index is intentionally small. It tracks:
+---
 
-- packages and folder boundaries
-- files and modules
-- Markdown documents
-- classes and functions
-- import dependencies
+## 6. Runtime & Agent Interfaces
 
-It does not track variables, expressions, tokens, per-line AST nodes, incidents, assumption graphs, or speculative reasoning objects.
-
-### Context Store
-
-The storage layer uses two local stores:
-
-- `ObjectStore`: immutable msgpack objects compressed with zlib and addressed by SHA-256.
-- `SQLiteEventStore`: WAL-enabled SQLite tables for events, context commits, active heads, structural nodes, structural edges, semantic objects, snapshots, projections, and transaction journals.
-
-Context writes go through `ContextTransactionEngine`, which journals event payloads and context objects so interrupted writes can be marked failed and replay diagnostics remain meaningful.
-
-### Bounded Replay
-
-Replay is diagnostic and snapshot-assisted. It verifies object hashes, event payloads, context lineage, and active heads. It is not an always-on reasoning layer and does not reconstruct speculative historical universes.
-
-### Hybrid Retrieval
-
-Retrieval follows a bounded four-stage flow:
-
-1. Temporal filtering reconstructs active context at a chosen context head.
-2. Structural traversal finds matching nodes and expands through nearby edges with hard node limits.
-3. Semantic recall ranks active semantic objects with keyword and embedding similarity.
-4. LLM synthesis answers from packed, cited context only.
-
-### Semantic Overlays
-
-Semantic overlays are annotations attached to structural nodes. They can summarize, explain, or add developer-provided notes. They cannot mutate structural nodes or create dependencies. If the target node is modified or removed, the overlay is invalidated by ingestion.
-
-### Agent/API/UI Layer
-
-The runtime exposes:
-
-- Typer CLI commands for init, status, search, rollback, doctor, and UI startup.
-- FastAPI endpoints for status, timeline, projection, and notes.
-- `SynapseMCPFacade` tools for current context, context diffs, search, task context, structure explanation, and related structural context.
-- A lightweight D3 UI for overview, subsystem, history, and context comparison views.
-
-## Invariants
-
-- Same repository content produces the same structural hashes.
-- AI output is never structural truth.
-- Context commits are append-only.
-- Structural nodes and overlays are invalidated, not patched in place.
-- Retrieval output is bounded by traversal limits and token budgets.
-- SQLite is local-first and runs in WAL mode.
-- Object-store corruption is surfaced by `synapse doctor`.
+Synapse exposes its engine through several interfaces:
+- **Typer CLI**: `init`, `status`, `search`, `rollback`, `doctor`.
+- **FastAPI**: REST endpoints for context status, timelines, and raw projections.
+- **Context UI**: A lightweight D3-based visualizer for the context graph and historical timeline.
+- **SynapseMCPFacade**: Implementation of the Model Context Protocol (MCP). Exposes tools to agents (e.g., `get_current_context`, `search_context`, `explain_structure`).

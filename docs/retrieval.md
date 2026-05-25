@@ -1,29 +1,32 @@
-# Retrieval
+# Hybrid Retrieval
 
-Hybrid retrieval builds a bounded context window for an agent task.
+Retrieval in Synapse is not standard RAG. Instead of relying solely on text chunks and vector embeddings, Synapse builds a **bounded context window** by traversing a deterministic structural graph.
 
-## Flow
+## The Retrieval Flow
 
 ```mermaid
 flowchart TD
-    Query["Agent query"] --> Temporal["Temporal filter"]
-    Temporal --> Traversal["Structural traversal"]
-    Traversal --> Recall["Semantic recall"]
-    Recall --> Pack["Token-bounded packing"]
-    Pack --> LLM["Optional LLM synthesis"]
+    Req[Agent Query] --> TFilter[1. Temporal Filter]
+    TFilter --> STraverse[2. Structural Traversal]
+    STraverse --> SRecall[3. Semantic Recall]
+    SRecall --> Pack[4. Token-Bounded Packing]
+    Pack --> LLM[Optional LLM Synthesis]
+    
+    classDef step fill:#1e293b,stroke:#3b82f6,stroke-width:2px;
+    class TFilter,STraverse,SRecall,Pack step;
 ```
 
-## Stages
+### Stage 1: Temporal Filtering
+Before any search occurs, Synapse reconstructs the repository state at a specific point in time (the "Context Head"). This automatically filters out nodes, edges, and summaries that were invalidated by recent commits, ensuring agents never reason over deleted code.
 
-1. Temporal filtering reconstructs active nodes, edges, and semantic objects at a context head.
-2. Structural traversal finds query-relevant nodes and expands through nearby ownership/import edges.
-3. Semantic recall ranks summaries and overlays using keyword and embedding similarity.
-4. Context packing enforces token budgets before provider synthesis.
+### Stage 2: Structural Traversal
+Synapse matches the query against structural nodes (module names, class names, function signatures). Once an entry point is found, the engine executes a bounded traversal, walking ownership edges (e.g., "What methods are in this class?") and import edges (e.g., "What does this file depend on?").
 
-## Bounds
+### Stage 3: Semantic Recall
+While structural traversal handles deterministic dependencies, **Semantic Recall** evaluates AI-generated summaries and overlays attached to the graph. It uses keyword matching and local embedding similarity to pull in context that answers the *intent* of the query, even if the exact symbol name wasn't mentioned.
 
-Retrieval caps traversal nodes, semantic candidates, embedding cache size, and output tokens. If no structural match is found, it falls back to a deterministic bounded slice of active context rather than dumping the repository.
+### Stage 4: Token-Bounded Packing
+Synapse protects the LLM’s context window. Retrieval enforces strict limits on traversal depth, candidate count, and final output tokens. Context is packed efficiently, providing the highest-signal subgraphs first.
 
-## AI Boundary
-
-The LLM receives grounded context and can explain it. It cannot modify structural nodes, create dependencies, or override parser output.
+## The AI Boundary
+When optional LLM Synthesis is enabled, the provider (e.g., Claude, OpenAI) is given the packed, grounded context and asked to explain it. **The LLM cannot modify structural nodes, invent dependencies, or override parser output.**
