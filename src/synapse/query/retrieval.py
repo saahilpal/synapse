@@ -155,8 +155,10 @@ class HybridRetrievalEngine:
                 {
                     "stable_id": sem.get("stable_id"),
                     "source_uri": uri,
-                    "score": score,
+                    "score": float(score),
                     "structural_distance": sem.get("_structural_distance"),
+                    "confidence": sem.get("confidence", 0.5),
+                    "reason": self._explain_score(sem, score, query),
                 }
             )
 
@@ -349,6 +351,39 @@ class HybridRetrievalEngine:
         emb = self.llm_provider.embed(text)
         self.event_store.put_embedding(text_hash, provider_name, emb)
         return emb
+
+    def _explain_score(self, sem: dict[str, Any], score: float, query: str) -> str:
+        """Explain why a semantic object was ranked at this score."""
+        reasons = []
+
+        # Check keyword match
+        query_words = {w.lower().strip() for w in query.split() if len(w) > 2}
+        summary = sem.get("summary", "").lower()
+        matches = [w for w in query_words if w in summary]
+        if matches:
+            reasons.append(f"keyword match: {', '.join(matches)}")
+
+        # Check structural proximity
+        dist = sem.get("_structural_distance", 2)
+        if dist == 0:
+            reasons.append("directly matched")
+        elif dist == 1:
+            reasons.append("direct neighbor")
+
+        # Check confidence
+        confidence = sem.get("confidence", 0.5)
+        if confidence > 0.7:
+            reasons.append("high confidence")
+
+        # Check overlay
+        tags = sem.get("tags", [])
+        if "overlay" in tags:
+            reasons.append("semantic annotation available")
+
+        if not reasons:
+            reasons.append("structural relevance")
+
+        return "; ".join(reasons)
 
     def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         dot_product = sum(x * y for x, y in zip(a, b, strict=False))
