@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const detailConfidencePct = document.getElementById("detail-confidence-pct");
     const detailConfidenceFill = document.getElementById("detail-confidence-fill");
     const detailConfidenceRationale = document.getElementById("detail-confidence-rationale");
+    const detailValidationState = document.getElementById("detail-validation-state");
     const detailMetadata = document.getElementById("detail-metadata");
 
     // Action buttons
@@ -312,6 +313,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const confPct = Math.round(node.confidence * 100);
         detailConfidencePct.textContent = `${confPct}%`;
         detailConfidenceFill.style.width = `${confPct}%`;
+
+        // Render validation state
+        const valState = node.validation_state || (node.confidence >= 0.85 ? "validated" : "assumed");
+        detailValidationState.textContent = valState;
+        detailValidationState.className = `validation-badge ${valState.toLowerCase()}`;
         
         // Build detail rationale if available
         let rationale = "Derived from content analysis.";

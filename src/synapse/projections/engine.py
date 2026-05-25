@@ -111,12 +111,15 @@ class ProjectionEngine:
             for c_hash in ordered_ancestry:
                 row = self.event_store.get_context_row(c_hash)
                 summary = str(row["summary"]) if row else f"Context {c_hash[:8]}"
+                conf_val = float(row["confidence"]) if row else 1.0
+                val_state = "validated" if conf_val >= 0.85 else "assumed"
                 proj_nodes[c_hash] = ProjectionNode(
                     id=c_hash,
                     label=summary,
                     kind="context_commit",
-                    confidence=float(row["confidence"]) if row else 1.0,
+                    confidence=conf_val,
                     status="active" if c_hash == context_hash else "historical",
+                    validation_state=val_state,
                     metadata={
                         "git_commit": row["git_commit_hash"] if row else None,
                         "branch": row["branch"] if row else None,
@@ -378,11 +381,22 @@ class ProjectionEngine:
             else row["metadata_json"]
         )
         label = labels[0] if labels else row["stable_id"]
+
+        valid_to = row.get("valid_to_context")
+        conf_val = float(row["confidence"])
+        if valid_to is not None:
+            val_state = "invalidated"
+        elif conf_val >= 0.85:
+            val_state = "validated"
+        else:
+            val_state = "assumed"
+
         return ProjectionNode(
             id=str(row["stable_id"]),
             label=str(label),
             kind=str(row["node_type"]),
-            confidence=float(row["confidence"]),
+            confidence=conf_val,
+            validation_state=val_state,
             metadata={
                 "source_uri": row["source_uri"],
                 "labels": labels,
@@ -396,11 +410,21 @@ class ProjectionEngine:
             if isinstance(row["metadata_json"], str)
             else row["metadata_json"]
         )
+        valid_to = row.get("valid_to_context")
+        conf_val = float(row["confidence"])
+        if valid_to is not None:
+            val_state = "invalidated"
+        elif conf_val >= 0.85:
+            val_state = "validated"
+        else:
+            val_state = "assumed"
+
         return ProjectionEdge(
             id=str(row["stable_id"]),
             from_id=str(row["from_id"]),
             to_id=str(row["to_id"]),
             relation=str(row["relation"]),
-            confidence=float(row["confidence"]),
+            confidence=conf_val,
+            validation_state=val_state,
             metadata=metadata or {},
         )

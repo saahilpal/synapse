@@ -48,6 +48,12 @@ class VerificationStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class ValidationState(StrEnum):
+    VALIDATED = "validated"
+    ASSUMED = "assumed"
+    INVALIDATED = "invalidated"
+
+
 class SemanticKind(StrEnum):
     ARCHITECTURE = "architecture"
     DECISION = "decision"
@@ -169,6 +175,14 @@ class SemanticObject(FrozenModel):
     created_at: datetime = Field(default_factory=utc_now)
     schema_version: int = SCHEMA_VERSION
 
+    @property
+    def validation_state(self) -> ValidationState:
+        if self.validity.valid_to_context is not None or self.validity.valid_to_git is not None:
+            return ValidationState.INVALIDATED
+        if self.confidence.score >= 0.85:
+            return ValidationState.VALIDATED
+        return ValidationState.ASSUMED
+
     @field_validator("stable_id")
     @classmethod
     def _stable_id_is_not_empty(cls, value: str) -> str:
@@ -208,6 +222,14 @@ class GraphNode(FrozenModel):
     validity: Validity = Field(default_factory=Validity)
     schema_version: int = SCHEMA_VERSION
 
+    @property
+    def validation_state(self) -> ValidationState:
+        if self.validity.valid_to_context is not None or self.validity.valid_to_git is not None:
+            return ValidationState.INVALIDATED
+        if self.confidence.score >= 0.85:
+            return ValidationState.VALIDATED
+        return ValidationState.ASSUMED
+
 
 class GraphEdge(FrozenModel):
     stable_id: str
@@ -220,6 +242,14 @@ class GraphEdge(FrozenModel):
     validity: Validity = Field(default_factory=Validity)
     metadata: dict[str, Any] = Field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
+
+    @property
+    def validation_state(self) -> ValidationState:
+        if self.validity.valid_to_context is not None or self.validity.valid_to_git is not None:
+            return ValidationState.INVALIDATED
+        if self.confidence.score >= 0.85:
+            return ValidationState.VALIDATED
+        return ValidationState.ASSUMED
 
     @classmethod
     def derive_id(

@@ -137,3 +137,50 @@ def test_projection_engine(mock_runtime: SynapseRuntime) -> None:
     assert replay.kind == ProjectionKind.REPLAY
     assert len(replay.nodes) == 1
     assert replay.nodes[0].id == context_hash
+
+
+def test_validation_state_properties() -> None:
+    from synapse.cognition.objects import (
+        Confidence,
+        Provenance,
+        SemanticKind,
+        SemanticObject,
+        SourceType,
+        ValidationState,
+        Validity,
+    )
+
+    provenance = Provenance(source_uri="test://uri", source_type=SourceType.CODE)
+
+    # 1. Validated (confidence >= 0.85, active)
+    obj1 = SemanticObject(
+        stable_id="test1",
+        kind=SemanticKind.ASSUMPTION,
+        summary="Test assumption 1",
+        provenance=provenance,
+        confidence=Confidence(score=0.9, rationale="High evidence", evidence_count=5),
+        validity=Validity(),
+    )
+    assert obj1.validation_state == ValidationState.VALIDATED
+
+    # 2. Assumed (confidence < 0.85, active)
+    obj2 = SemanticObject(
+        stable_id="test2",
+        kind=SemanticKind.ASSUMPTION,
+        summary="Test assumption 2",
+        provenance=provenance,
+        confidence=Confidence(score=0.7, rationale="Medium evidence", evidence_count=1),
+        validity=Validity(),
+    )
+    assert obj2.validation_state == ValidationState.ASSUMED
+
+    # 3. Invalidated (validity valid_to_context set)
+    obj3 = SemanticObject(
+        stable_id="test3",
+        kind=SemanticKind.ASSUMPTION,
+        summary="Test assumption 3",
+        provenance=provenance,
+        confidence=Confidence(score=0.9, rationale="High evidence", evidence_count=5),
+        validity=Validity(valid_to_context="some_context_hash"),
+    )
+    assert obj3.validation_state == ValidationState.INVALIDATED

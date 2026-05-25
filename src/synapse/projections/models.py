@@ -22,6 +22,7 @@ class ProjectionNode(BaseModel):
     kind: str  # e.g. "module", "decision", "assumption", "incident"
     confidence: float = Field(ge=0.0, le=1.0)
     status: str = "active"  # "active", "drifted", "invalidated", "incident"
+    validation_state: str = "assumed"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -31,6 +32,7 @@ class ProjectionEdge(BaseModel):
     to_id: str
     relation: str
     confidence: float = Field(ge=0.0, le=1.0)
+    validation_state: str = "assumed"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
