@@ -8,6 +8,16 @@ The format follows Keep a Changelog conventions, and the project intends to use 
 
 ### Added
 
+- **Validation State Tristate**: Introduced validation state (`Validated`, `Assumed`, `Invalidated`) on semantic annotations, graph nodes, and edges, with full serialization and frontend UI badge rendering.
+- **Architectural Migration Audit**: Created `docs/architecture_migration_audit.md` to map repository-wide terminology.
+
+### Changed
+
+- **Substrate Repositioning**: Repositioned project from "Temporal Cognitive OS / AI OS" to **Temporal Source Context Management Substrate** and **Causal Software Evolution Graph**.
+- **Terminology Convergence**: Aligned positioning, documentation, and user-facing CLI / API strings with the new substrate and causal graph model.
+- **Deterministic vs AI Boundary Hardening**: Formalized the Semantic Overlay Contract, establishing that AI annotations can never modify structural AST or Git lineage truth.
+- **Bounded Replay Model**: Explicitly defined replay as bounded temporal reconstruction using checkpoint snapshots and WAL logging.
+
 - Interactive Visual Cognition UI (FastAPI and D3.js force-directed graph with timeline scrubber, progressive disclosure side panel, dynamic legend, note/incident logs).
 - Projection Engine for slicing temporal cognition facts into bounded graphs (`overview`, `subsystem`, `replay`, `drift`, `assumption`, `incident`, and `branch`).
 - Projection caching in SQLite database under `projection_cache` table.
