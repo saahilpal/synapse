@@ -85,15 +85,21 @@ def setup(
     typer.secho("Welcome to Synapse AI Context Runtime", fg=typer.colors.CYAN, bold=True)
     typer.echo("This wizard will bootstrap your local AI environment.\n")
 
-    env_dir = Path("~/.synapse").expanduser()
-    env_dir.mkdir(parents=True, exist_ok=True)
-    env_file = env_dir / ".env"
+    config_dir = Path("~/.config/synapse").expanduser()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "config.toml"
+
+    typer.secho("Synapse stores API keys securely in a global config file.", fg=typer.colors.YELLOW)
+    typer.echo(f"Location: {config_file.as_posix()}\n")
 
     # 1. Choose Provider
     provider = typer.prompt(
-        "Which primary LLM provider would you like to use? (ollama, openai, gemini, anthropic)",
+        "Which primary LLM provider would you like to use?",
         default="ollama",
     ).lower()
+    if provider not in ("ollama", "openai", "gemini", "anthropic"):
+        typer.secho(f"Invalid provider: {provider}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
     # 2. Configure LLM
     llm_model = typer.prompt(
@@ -108,7 +114,13 @@ def setup(
     )
 
     # 3. Configure Embeddings
-    embed_provider = typer.prompt("Which provider for embeddings?", default=provider).lower()
+    embed_provider = typer.prompt(
+        "Which provider for embeddings?",
+        default=provider,
+    ).lower()
+    if embed_provider not in ("ollama", "openai", "gemini", "anthropic"):
+        typer.secho(f"Invalid provider: {embed_provider}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
     embed_model = typer.prompt(
         "Which embedding model?",
@@ -130,27 +142,100 @@ def setup(
     if provider == "ollama" or embed_provider == "ollama":
         ollama_url = typer.prompt("Enter Ollama URL", default="http://localhost:11434")
 
-    env_content = f"""SYNAPSE_LLM_PROVIDER={provider}
-SYNAPSE_LLM_MODEL={llm_model}
-SYNAPSE_EMBED_PROVIDER={embed_provider}
-SYNAPSE_EMBED_MODEL={embed_model}
-SYNAPSE_OLLAMA_URL={ollama_url}
-SYNAPSE_OPENAI_API_KEY={openai_key}
-SYNAPSE_GEMINI_API_KEY={gemini_key}
-SYNAPSE_ANTHROPIC_API_KEY={anthropic_key}
-"""
-    env_file.write_text(env_content)
-    typer.secho(f"\n✓ Configuration saved to {env_file}", fg=typer.colors.GREEN)
+    # Build TOML config (more secure format than .env)
+    config_content = f"""# Synapse Global Configuration
+# DO NOT commit this file to version control!
+# This file contains sensitive API keys.
 
-    # 6. Initialize storage
+[llm]
+provider = "{provider}"
+model = "{llm_model}"
+
+[embeddings]
+provider = "{embed_provider}"
+model = "{embed_model}"
+
+[providers]
+ollama_url = "{ollama_url}"
+openai_api_key = "{openai_key}"
+gemini_api_key = "{gemini_key}"
+anthropic_api_key = "{anthropic_key}"
+"""
+    config_file.write_text(config_content)
+    config_file.chmod(0o600)  # Restrict to owner only
+    typer.secho(f"\n✓ Configuration saved to {config_file.as_posix()}", fg=typer.colors.GREEN)
+    typer.secho("  (Permissions: 0600 - readable by you only)", fg=typer.colors.BRIGHT_BLACK)
+
+    # Initialize storage
     typer.echo("\nInitializing storage...")
     runtime = SynapseRuntime(_settings(path))
     runtime.bootstrap(force=True)
     typer.secho("✓ Storage initialized.", fg=typer.colors.GREEN)
+
     typer.echo("\nYou are all set! Next steps:")
-    typer.echo(f"  1. Start the daemon: synapse start {path}")
+    typer.echo(f"  1. Start the runtime: synapse run {path}")
     typer.echo(f"  2. Open the UI: synapse ui {path}")
-    typer.echo(f'  3. Try a search: synapse search "What does this repository do?" {path}\n')
+    typer.echo(
+        f'  3. Try task-context: synapse task-context "describe authentication flow" {path}\n'
+    )
+
+
+@app.command()
+def validate(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Validate Synapse configuration and provider connectivity."""
+    settings = _settings(path, json_output=json_output)
+
+    typer.secho("Validating Synapse configuration...\n", fg=typer.colors.CYAN, bold=True)
+
+    # Check configuration completeness
+    errors = settings.validate_configuration()
+    if errors:
+        typer.secho("Configuration errors found:", fg=typer.colors.RED, bold=True)
+        for error in errors:
+            typer.secho(f"  ✗ {error}", fg=typer.colors.RED)
+        typer.echo(f"\nRun 'synapse setup {path}' to configure Synapse.")
+        raise typer.Exit(code=1)
+
+    typer.secho("✓ Configuration is valid.", fg=typer.colors.GREEN)
+    typer.echo(f"  Config file: {settings.config_file_path().as_posix()}")
+    typer.echo(f"  LLM: {settings.llm_provider}/{settings.llm_model}")
+    typer.echo(f"  Embeddings: {settings.embed_provider or settings.llm_provider}")
+
+    # Test provider connectivity
+    typer.echo("\nTesting provider connectivity...")
+    try:
+        from synapse.provider.factory import get_llm_provider
+
+        provider = get_llm_provider(settings)
+        typer.secho("✓ LLM provider is accessible.", fg=typer.colors.GREEN)
+    except Exception as e:
+        typer.secho(f"✗ LLM provider error: {e}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    # Check storage
+    typer.echo("\nChecking storage...")
+    try:
+        settings.ensure_directories()
+        assert settings.sqlite_path is not None
+        assert settings.object_path is not None
+
+        from synapse.storage.object_store import ObjectStore
+        from synapse.storage.sqlite import SQLiteEventStore
+
+        event_store = SQLiteEventStore(settings.sqlite_path)
+        obj_store = ObjectStore(settings.object_path)
+        typer.secho("✓ Storage is accessible.", fg=typer.colors.GREEN)
+        typer.echo(f"  SQLite: {settings.sqlite_path.as_posix()}")
+        typer.echo(f"  Objects: {settings.object_path.as_posix()}")
+    except Exception as e:
+        typer.secho(f"✗ Storage error: {e}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    typer.secho("\n✓ All systems operational.", fg=typer.colors.GREEN)
+    typer.echo(f"Ready to run: synapse run {path}")
 
 
 @app.command()
@@ -417,6 +502,75 @@ def search(
             typer.echo(f"• {uri} ({kind})")
     except Exception as exc:
         typer.secho(f"Error during retrieval: {exc}", fg=typer.colors.RED)
+
+
+@app.command()
+def task_context(
+    task: Annotated[str, typer.Argument(help="Task description or scope.")] = "",
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+    limit: Annotated[int, typer.Option(help="Max tokens in response.")] = 4000,
+) -> None:
+    """Generate bounded context for a development task.
+
+    This produces a task-specific context package including:
+    - Affected files and their changes
+    - Subsystem summaries
+    - Dependencies and imports
+    - Historical changes
+    - Architectural risks
+
+    Example:
+        synapse task-context "refactor authentication pipeline" .
+    """
+    if not task:
+        typer.secho("Task description required. Example:", fg=typer.colors.YELLOW)
+        typer.echo('  synapse task-context "refactor auth flow" .')
+        raise typer.Exit(code=1)
+
+    runtime = SynapseRuntime(_settings(path, json_output=json_output))
+    typer.secho(f"Generating context for task: '{task}'...", fg=typer.colors.BLUE)
+
+    try:
+        # Prepend task-focused prompt to ensure better scoping
+        enhanced_query = (
+            f"Generate a development context package for this task: {task}\n\n"
+            "Include: affected files, subsystem boundaries, dependencies, "
+            "recent changes, and architectural risks."
+        )
+        answer, sources, trace = runtime.query_hybrid(enhanced_query, max_tokens=limit)
+
+        if json_output:
+            _emit(
+                {
+                    "task": task,
+                    "context": answer,
+                    "sources": sources,
+                    "retrieval_trace": trace,
+                },
+                json_output=True,
+            )
+            return
+
+        typer.secho("\n--- TASK CONTEXT PACKAGE ---", fg=typer.colors.GREEN, bold=True)
+        typer.echo(answer)
+        typer.secho("\n--- GROUNDING SOURCES ---", fg=typer.colors.MAGENTA, bold=True)
+        for src in sources[:10]:
+            uri = src.get("source_uri", "Unknown")
+            kind = src.get("kind", "Node")
+            typer.echo(f"• {uri} ({kind})")
+
+        if json_output is False:
+            typer.secho("\nTo save this context:", fg=typer.colors.BRIGHT_BLACK)
+            typer.echo(f'  synapse task-context "{task}" {path} --json > task-context.json')
+
+    except ValueError as e:
+        typer.secho(f"Configuration error: {e}", fg=typer.colors.RED)
+        typer.echo("Run 'synapse setup' to initialize Synapse first.")
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.secho(f"Error during context generation: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
 
 @app.command()

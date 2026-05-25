@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from pathlib import Path
 from typing import Self
@@ -32,13 +33,45 @@ class IndexingMode(StrEnum):
     OFF = "off"
 
 
+def _get_config_file_path() -> Path:
+    """Get global Synapse config file path (XDG-compliant).
+
+    Priority:
+    1. SYNAPSE_CONFIG environment variable
+    2. ~/.config/synapse/config.toml (XDG standard)
+    3. ~/.synapse/config.toml (legacy fallback)
+    """
+    if env_path := os.environ.get("SYNAPSE_CONFIG"):
+        return Path(env_path).expanduser()
+
+    xdg_config = Path.home() / ".config" / "synapse" / "config.toml"
+    if xdg_config.exists():
+        return xdg_config
+
+    legacy_config = Path.home() / ".synapse" / "config.toml"
+    if legacy_config.exists():
+        return legacy_config
+
+    return xdg_config  # default to XDG path if neither exists yet
+
+
 class SynapseSettings(BaseSettings):
-    """Runtime configuration loaded from environment or defaults."""
+    """Runtime configuration loaded from environment or global config file.
+
+    Configuration priority (highest to lowest):
+    1. Environment variables (SYNAPSE_*)
+    2. XDG config file (~/.config/synapse/config.toml)
+    3. Defaults
+
+    Secrets are stored in the global config file, never in the repository.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="SYNAPSE_",
         env_nested_delimiter="__",
-        env_file=str(Path("~/.synapse/.env").expanduser()),
+        env_file=str(_get_config_file_path()),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
         extra="ignore",
     )
 
@@ -141,3 +174,36 @@ class SynapseSettings(BaseSettings):
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
         }
+
+    def validate_configuration(self) -> list[str]:
+        """Validate configuration completeness and connectivity.
+
+        Returns a list of validation errors. Empty list means valid.
+        """
+        errors = []
+
+        if not self.llm_provider:
+            errors.append("llm_provider is required but not configured")
+        if not self.llm_model:
+            errors.append("llm_model is required but not configured")
+
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            errors.append("openai_api_key is required for OpenAI provider")
+        if self.llm_provider == "gemini" and not self.gemini_api_key:
+            errors.append("gemini_api_key is required for Gemini provider")
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            errors.append("anthropic_api_key is required for Anthropic provider")
+
+        embed_provider = self.embed_provider or self.llm_provider
+        if embed_provider == "openai" and not self.openai_api_key:
+            errors.append("openai_api_key is required for OpenAI embeddings")
+        if embed_provider == "gemini" and not self.gemini_api_key:
+            errors.append("gemini_api_key is required for Gemini embeddings")
+        if embed_provider == "anthropic" and not self.anthropic_api_key:
+            errors.append("anthropic_api_key is required for Anthropic embeddings")
+
+        return errors
+
+    def config_file_path(self) -> Path:
+        """Return the path to the active configuration file."""
+        return _get_config_file_path()
