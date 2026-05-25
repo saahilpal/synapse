@@ -10,6 +10,8 @@ The format follows Keep a Changelog conventions, and the project intends to use 
 
 - **Validation State Tristate**: Introduced validation state (`Validated`, `Assumed`, `Invalidated`) on semantic annotations, graph nodes, and edges, with full serialization and frontend UI badge rendering.
 - **Architectural Migration Audit**: Created `docs/architecture_migration_audit.md` to map repository-wide terminology.
+- **Git Subsystem Custom Aliases**: Added repository-local Git aliases (`git synapse-status`, `git synapse-timeline`, `git synapse-doctor`, `git synapse-lineage`, `git synapse-diff`, `git synapse-compact`) to natively integrate the CLI with standard Git.
+- **Developer Git Workflow Documentation**: Added `docs/git/DX_GIT_WORKFLOW.md` outlining pre-commit, aliases, and commit standards.
 
 ### Changed
 
@@ -17,6 +19,7 @@ The format follows Keep a Changelog conventions, and the project intends to use 
 - **Terminology Convergence**: Aligned positioning, documentation, and user-facing CLI / API strings with the new substrate and causal graph model.
 - **Deterministic vs AI Boundary Hardening**: Formalized the Semantic Overlay Contract, establishing that AI annotations can never modify structural AST or Git lineage truth.
 - **Bounded Replay Model**: Explicitly defined replay as bounded temporal reconstruction using checkpoint snapshots and WAL logging.
+- **Git Settings Alignment**: Enabled standard performance and linear history controls locally (`pull.rebase`, `fetch.prune`, custom whitespace warnings).
 
 - Interactive Visual Cognition UI (FastAPI and D3.js force-directed graph with timeline scrubber, progressive disclosure side panel, dynamic legend, note/incident logs).
 - Projection Engine for slicing temporal cognition facts into bounded graphs (`overview`, `subsystem`, `replay`, `drift`, `assumption`, `incident`, and `branch`).
