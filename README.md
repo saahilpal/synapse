@@ -31,9 +31,10 @@ Synapse requires Python 3.10+ and uses `uv` for lightning-fast installation. Her
 uv tool install synapse-core
 ```
 
-### 2. Initialize
+### 2. Guided Setup
+Launch the interactive first-run wizard to configure your preferred AI provider (Ollama, OpenAI, Gemini, or Anthropic):
 ```bash
-synapse init .
+synapse setup .
 ```
 
 ### 3. Start Background Runtime
@@ -46,9 +47,9 @@ synapse start .
 synapse ui .
 ```
 
-### 5. Ask Structural Questions
+### 5. Ask Grounded AI Questions
 ```bash
-synapse search "How does context replay work?"
+synapse search "How does context replay work?" .
 ```
 
 ---
@@ -118,11 +119,16 @@ Visualize your codebase's structure, track historical commits, and inspect seman
 
 Synapse implements the **Model Context Protocol**, allowing seamless integration with tools like Claude Desktop, Cursor, or your own custom agents.
 
+To start the MCP Server over standard I/O (required for Claude Desktop/Cursor configs):
+```bash
+synapse mcp start .
+```
+
 The Synapse MCP server exposes powerful tools:
 - `get_current_context`: Retrieve the full structural boundaries of a target file.
-- `get_context_diffs`: View the structural differences across temporal commits.
+- `get_context_for_task`: Provide an AI agent with grounded, synthesized context necessary to complete a task.
 - `search_context`: Hybrid query across structural nodes and semantic overlays.
-- `explain_structure`: Ask an LLM to synthesize a targeted answer using only grounded structural subgraphs.
+- `explain_structure`: Ask Synapse to explain the structural boundaries and dependencies of a specific file/module.
 
 ---
 

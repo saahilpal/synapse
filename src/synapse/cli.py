@@ -73,6 +73,103 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+mcp_app = typer.Typer(help="Model Context Protocol (MCP) server commands.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@app.command()
+def setup(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Interactive first-run setup and onboarding."""
+    typer.secho("Welcome to Synapse AI Context Runtime", fg=typer.colors.CYAN, bold=True)
+    typer.echo("This wizard will bootstrap your local AI environment.\n")
+
+    env_file = Path(path) / ".env"
+
+    # 1. Choose Provider
+    provider = typer.prompt(
+        "Which primary LLM provider would you like to use? (ollama, openai, gemini, anthropic)",
+        default="ollama",
+    ).lower()
+
+    # 2. Configure LLM
+    llm_model = typer.prompt(
+        f"Which model would you like to use for {provider}?",
+        default="qwen2.5-coder:14b"
+        if provider == "ollama"
+        else "gpt-4o"
+        if provider == "openai"
+        else "claude-3-5-sonnet-latest"
+        if provider == "anthropic"
+        else "gemini-1.5-pro",
+    )
+
+    # 3. Configure Embeddings
+    embed_provider = typer.prompt("Which provider for embeddings?", default=provider).lower()
+
+    embed_model = typer.prompt(
+        "Which embedding model?",
+        default="nomic-embed-text" if embed_provider == "ollama" else "text-embedding-3-small",
+    )
+
+    # Gather Keys if needed
+    openai_key = ""
+    gemini_key = ""
+    anthropic_key = ""
+    ollama_url = "http://localhost:11434"
+
+    if provider == "openai" or embed_provider == "openai":
+        openai_key = typer.prompt("Enter OpenAI API Key", hide_input=True, default="")
+    if provider == "gemini" or embed_provider == "gemini":
+        gemini_key = typer.prompt("Enter Gemini API Key", hide_input=True, default="")
+    if provider == "anthropic" or embed_provider == "anthropic":
+        anthropic_key = typer.prompt("Enter Anthropic API Key", hide_input=True, default="")
+    if provider == "ollama" or embed_provider == "ollama":
+        ollama_url = typer.prompt("Enter Ollama URL", default="http://localhost:11434")
+
+    env_content = f"""SYNAPSE_LLM_PROVIDER={provider}
+SYNAPSE_LLM_MODEL={llm_model}
+SYNAPSE_EMBED_PROVIDER={embed_provider}
+SYNAPSE_EMBED_MODEL={embed_model}
+SYNAPSE_OLLAMA_URL={ollama_url}
+SYNAPSE_OPENAI_API_KEY={openai_key}
+SYNAPSE_GEMINI_API_KEY={gemini_key}
+SYNAPSE_ANTHROPIC_API_KEY={anthropic_key}
+"""
+    env_file.write_text(env_content)
+    typer.secho(f"\n✓ Configuration saved to {env_file}", fg=typer.colors.GREEN)
+
+    # 6. Initialize storage
+    typer.echo("\nInitializing storage...")
+    runtime = SynapseRuntime(_settings(path))
+    runtime.bootstrap(force=True)
+    typer.secho("✓ Storage initialized.", fg=typer.colors.GREEN)
+    typer.echo("\nYou are all set! Next steps:")
+    typer.echo(f"  1. Start the daemon: synapse start {path}")
+    typer.echo(f"  2. Open the UI: synapse ui {path}")
+    typer.echo(f'  3. Try a search: synapse search "What does this repository do?" {path}\n')
+
+
+@mcp_app.command("start")
+def mcp_start(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Start the Model Context Protocol (MCP) server for agent integration."""
+    typer.secho(f"Starting Synapse MCP Server for {path}...", fg=typer.colors.BLUE)
+
+    # Force active mode and initialize runtime
+    settings = _settings(path, json_output=json_output)
+    runtime = SynapseRuntime(settings)
+    runtime.bootstrap()
+
+    from synapse.mcp.server import SynapseMCPServer
+
+    server = SynapseMCPServer(runtime)
+    asyncio.run(server.run())
+
+
 @app.command()
 def init(
     path: Annotated[str, typer.Argument(help="Repository path to initialize.")] = ".",
@@ -117,7 +214,7 @@ def status(
 @app.command()
 def note(
     message: Annotated[str, typer.Argument(help="Manual context note.")],
-    path: Annotated[str, typer.Option(help="Repository path.")] = ".",
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Add a trusted manual context note."""
@@ -131,7 +228,7 @@ def note(
 def diff(
     left_hash: Annotated[str, typer.Argument(help="Left context hash.")],
     right_hash: Annotated[str, typer.Argument(help="Right context hash.")],
-    path: Annotated[str, typer.Option(help="Repository path.")] = ".",
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Compare two context commits."""
@@ -143,7 +240,7 @@ def diff(
 @app.command()
 def rollback(
     target_hash: Annotated[str, typer.Argument(help="Context hash to activate.")],
-    path: Annotated[str, typer.Option(help="Repository path.")] = ".",
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Activate a previous context state without deleting history."""
@@ -178,20 +275,41 @@ def commits(
 
 @app.command()
 def search(
-    query: Annotated[str, typer.Argument(help="Semantic context query.")],
-    path: Annotated[str, typer.Option(help="Repository path.")] = ".",
-    limit: Annotated[int, typer.Option(help="Maximum results.")] = 20,
+    arg1: Annotated[str, typer.Argument(help="Query or repository path.")],
+    arg2: Annotated[str, typer.Argument(help="Query (if arg1 is path).")] = "",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Search semantic annotations."""
+    """Search context using hybrid retrieval and grounded AI synthesis."""
+    if arg2:
+        path = arg1
+        query = arg2
+    else:
+        path = "."
+        query = arg1
 
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
-    _emit({"results": runtime.search_context(query, limit=limit)}, json_output=json_output)
+    typer.secho(f"Retrieving context for: '{query}'...", fg=typer.colors.BLUE)
+
+    try:
+        answer, sources = runtime.query_hybrid(query)
+        if json_output:
+            _emit({"answer": answer, "sources": sources}, json_output=True)
+            return
+
+        typer.secho("\n--- SYNTHESIZED ANSWER ---", fg=typer.colors.GREEN, bold=True)
+        typer.echo(answer)
+        typer.secho("\n--- GROUNDING SOURCES ---", fg=typer.colors.MAGENTA, bold=True)
+        for src in sources[:5]:
+            uri = src.get("source_uri", "Unknown")
+            kind = src.get("kind", "Node")
+            typer.echo(f"• {uri} ({kind})")
+    except Exception as exc:
+        typer.secho(f"Error during retrieval: {exc}", fg=typer.colors.RED)
 
 
 @app.command()
 def ui(
-    path: Annotated[str, typer.Option(help="Repository path.")] = ".",
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     host: Annotated[str, typer.Option(help="Host to run the UI server on.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to run the UI server on.")] = 9876,
 ) -> None:

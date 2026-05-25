@@ -64,11 +64,16 @@ class SynapseSettings(BaseSettings):
 
     openai_api_key: str | None = Field(default=None, description="OpenAI API key.")
     gemini_api_key: str | None = Field(default=None, description="Gemini API key.")
+    anthropic_api_key: str | None = Field(default=None, description="Anthropic API key.")
     ollama_url: str = Field(default="http://127.0.0.1:11434", description="Ollama API base URL.")
     llm_provider: str = Field(
         default="mock", description="Default LLM provider (openai, gemini, ollama, mock)."
     )
     llm_model: str = Field(default="mock-model", description="Default LLM model.")
+    embed_provider: str | None = Field(
+        default=None, description="Default embedding provider. Falls back to llm_provider."
+    )
+    embed_model: str | None = Field(default=None, description="Default embedding model.")
 
     mcp_enabled: bool = False
     mcp_host: str = "127.0.0.1"

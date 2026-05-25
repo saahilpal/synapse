@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from mcp.server.fastmcp import FastMCP
+
 from synapse.runtime.service import SynapseRuntime
 
 
@@ -149,3 +151,46 @@ class SynapseMCPFacade:
                 "active_semantics": list(active_semantics.values()),
             }
         )
+
+
+class SynapseMCPServer:
+    """The actual MCP Server using FastMCP to expose tools over Stdio."""
+
+    def __init__(self, runtime: SynapseRuntime) -> None:
+        self.mcp = FastMCP("Synapse Context Runtime")
+        self.facade = SynapseMCPFacade(runtime)
+        self._register_tools()
+
+    def _register_tools(self) -> None:
+        @self.mcp.tool()
+        def get_current_context() -> str:
+            """Get the current repository context summary and active commit heads."""
+            import json
+
+            return json.dumps(self.facade.get_context().content)
+
+        @self.mcp.tool()
+        def search_context(query: str) -> str:
+            """Search the repository context using hybrid semantic + structural search."""
+            import json
+
+            return json.dumps(self.facade.search_context(query=query).content)
+
+        @self.mcp.tool()
+        def get_context_for_task(task_description: str) -> str:
+            """Provide an AI agent with grounded, synthesized context necessary to complete a task."""
+            import json
+
+            return json.dumps(
+                self.facade.get_context_for_task(task_description=task_description).content
+            )
+
+        @self.mcp.tool()
+        def explain_structure(module_path: str) -> str:
+            """Ask Synapse to explain the structural boundaries and dependencies of a specific file/module."""
+            import json
+
+            return json.dumps(self.facade.explain_structure(module_path=module_path).content)
+
+    async def run(self) -> None:
+        await self.mcp.run_stdio_async()
