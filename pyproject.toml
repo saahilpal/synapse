@@ -1,6 +1,6 @@
 [project]
 name = "synapse-runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "Persistent structural context infrastructure for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -79,6 +79,8 @@ ignore_missing_imports = true
 addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
   "integration: tests that touch filesystem or external services",
+  "benchmark: performance/stress tests that take longer to run",
 ]

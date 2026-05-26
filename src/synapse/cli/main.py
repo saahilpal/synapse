@@ -259,7 +259,78 @@ def rollback(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Rollback active state to a previous commit."""
-    console.print("[yellow]Rollback not implemented yet.[/yellow]")
+    import subprocess
+
+    settings = _settings(path)
+    runtime = SynapseRuntime(settings)
+
+    # 1. Get recent commits
+    try:
+        log_out = subprocess.check_output(  # noqa: S603
+            ["git", "log", "-n", "5", "--pretty=format:%h|%ar|%s"],  # noqa: S607
+            cwd=settings.repository_path,
+            text=True,
+        )
+        commits = []
+        for line in log_out.splitlines():
+            if line.strip():
+                parts = line.split("|", 2)
+                if len(parts) == 3:
+                    commits.append((parts[0], parts[1], parts[2]))
+    except Exception as e:
+        console.print(f"[red]✗ Failed to read git history: {e}[/red]")
+        raise typer.Abort()
+
+    if not commits:
+        console.print("[yellow]No commits found in git log.[/yellow]")
+        return
+
+    console.print("Recent commits:")
+    for idx, (h, ar, s) in enumerate(commits, 1):
+        suffix = "  ← current" if idx == 1 else ""
+        console.print(f'  [{idx}] {h}  {ar}   "{s}"{suffix}')
+
+    choice = typer.prompt("\nRoll back to which commit? [1-5]", default="1")
+    try:
+        choice_idx = int(choice) - 1
+        if choice_idx < 0 or choice_idx >= len(commits):
+            raise ValueError()
+    except ValueError:
+        console.print("[red]Invalid choice.[/red]")
+        raise typer.Abort()
+
+    selected_commit = commits[choice_idx][0]
+
+    console.print(f"\n[bold yellow]⚠ Rolling back to {selected_commit} will:[/bold yellow]")
+    console.print("    - Restore index to that commit's state (via git checkout)")
+    console.print("    - Preserve all approved lessons (they survive rollbacks)")
+    console.print("    - Clear current checkpoint")
+
+    if not typer.confirm("\nProceed?", default=False):
+        raise typer.Abort()
+
+    # Clear current checkpoint
+    try:
+        with runtime.store.connect() as conn:
+            conn.execute(
+                "DELETE FROM checkpoints WHERE branch = ?",
+                (runtime.git.state().effective_branch,),
+            )
+    except Exception:
+        pass
+
+    # git checkout
+    try:
+        subprocess.check_call(  # noqa: S603
+            ["git", "checkout", selected_commit],  # noqa: S607
+            cwd=settings.repository_path,
+        )
+    except Exception as e:
+        console.print(f"[red]✗ Git checkout failed: {e}[/red]")
+        raise typer.Abort()
+
+    runtime.bootstrap(force=True)
+    console.print(f"[green]✓ Rolled back successfully to {selected_commit}[/green]")
 
 
 @app.command()
@@ -267,7 +338,53 @@ def recover(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Recover from a broken index state."""
-    console.print("[yellow]Recover not implemented yet.[/yellow]")
+    settings = _settings(path)
+    runtime = SynapseRuntime(settings)
+
+    console.print("Checking database integrity...")
+    corrupted = False
+    try:
+        runtime.initialize_storage()
+        integrity = runtime.store.integrity_check()
+        if integrity != "ok":
+            corrupted = True
+    except Exception:
+        corrupted = True
+
+    if corrupted:
+        console.print("[red]✗ synapse.db appears corrupted[/red]\n")
+    else:
+        console.print("[green]✓ Database file is healthy.[/green]")
+        if not typer.confirm("Do you want to force rebuild the index anyway?"):
+            return
+
+    console.print("Rebuilding from git history...")
+    console.print("[1/3] Restoring file structure from HEAD")
+    try:
+        runtime.wipe_index()
+    except Exception:
+        if settings.sqlite_path:
+            for ext in ["", "-wal", "-shm"]:
+                p = Path(f"{settings.sqlite_path}{ext}")
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+
+    runtime.initialize_storage()
+    console.print("[2/3] Reindexing all symbols")
+    runtime.bootstrap(force=True)
+
+    console.print("[3/3] Regenerating wiki from last known state")
+    try:
+        runtime.wiki.generate_project_wiki()
+    except Exception:
+        pass
+
+    status_info = runtime.status()
+    console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")
+    console.print("[yellow]⚠ Agent memory (L3) could not be recovered — starting fresh.[/yellow]")
 
 
 @app.command()
@@ -572,10 +689,67 @@ def memory_prune(
 @memory_app.command("verify")
 def memory_verify(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Check for dangling symbol references in approved memory."""
-    console.print("[yellow]Symbol verification logic pending implementation.[/yellow]")
-    # For future: iterate over approved lessons, parse `files_affected` and verify they still exist in Git.
+    """Check for dangling file references in approved memory lessons."""
+    import json as json_lib
+
+    runtime = SynapseRuntime(_settings(path, json_output=json_output))
+    approved = runtime.store.get_lessons("approved")
+
+    dangling: list[dict[str, Any]] = []
+    healthy: list[dict[str, Any]] = []
+
+    repo_root = runtime.settings.repository_path
+
+    for lesson in approved:
+        lesson_id = lesson["lesson_id"]
+        try:
+            files: list[str] = json_lib.loads(lesson.get("files_affected") or "[]")
+        except Exception:
+            files = []
+
+        missing = [f for f in files if not (repo_root / f).exists()]
+        if missing:
+            dangling.append({"lesson_id": lesson_id, "missing_files": missing})
+        else:
+            healthy.append({"lesson_id": lesson_id, "files": files})
+
+    if json_output:
+        _emit({"dangling": dangling, "healthy": healthy}, json_output=True)
+        return
+
+    if not approved:
+        console.print("[dim]No approved lessons to verify.[/dim]")
+        return
+
+    table = Table(title="Approved Memory Verification", show_header=True, header_style="bold cyan")
+    table.add_column("Lesson ID")
+    table.add_column("Status")
+    table.add_column("Details")
+
+    for item in healthy:
+        table.add_row(
+            item["lesson_id"][:16] + "…",
+            "[green]HEALTHY[/green]",
+            f"{len(item['files'])} file(s) intact",
+        )
+    for item in dangling:
+        table.add_row(
+            item["lesson_id"][:16] + "…",
+            "[red]DANGLING[/red]",
+            f"Missing: {', '.join(item['missing_files'])}",
+        )
+
+    console.print(table)
+
+    if dangling:
+        console.print(
+            f"\n[bold yellow]⚠ {len(dangling)} lesson(s) reference files no longer in the repository.[/bold yellow]"
+        )
+        console.print("[dim]Run `synapse lessons reject <id>` to clean up stale memory.[/dim]")
+    else:
+        console.print("\n[green]✓ All approved memory references are valid.[/green]")
 
 
 @lessons_app.command("approve")

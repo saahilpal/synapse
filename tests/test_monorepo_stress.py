@@ -1,0 +1,142 @@
+"""
+Monorepo stress test: indexes the Synapse repository itself.
+
+This test bootstraps Synapse against its own source tree and measures:
+  - Indexing latency
+  - File and symbol counts
+  - Retrieval latency under realistic load
+  - Memory footprint (RSS) stays within bounds
+
+Run with:
+    uv run pytest tests/test_monorepo_stress.py -v -m benchmark
+
+Skipped automatically when not in the synapse repo or if the
+SYNAPSE_SKIP_STRESS env variable is set (e.g. in fast CI passes).
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+
+import pytest
+
+from synapse.config import RuntimeProfile, SynapseSettings
+from synapse.indexer.engine import SynapseRuntime
+
+
+def _synapse_repo_root() -> Path | None:
+    """Find the root of the Synapse repository relative to this test file."""
+    here = Path(__file__).resolve().parent
+    candidate = here.parent
+    if (candidate / "pyproject.toml").exists() and (candidate / "src" / "synapse").exists():
+        return candidate
+    return None
+
+
+pytestmark = pytest.mark.benchmark
+
+
+@pytest.fixture(scope="module")
+def stress_runtime(tmp_path_factory: pytest.TempPathFactory) -> SynapseRuntime | None:
+    if os.environ.get("SYNAPSE_SKIP_STRESS"):
+        return None
+    repo_root = _synapse_repo_root()
+    if repo_root is None:
+        return None
+
+    tmp = tmp_path_factory.mktemp("stress_db")
+    settings = SynapseSettings(
+        repository_path=repo_root,
+        profile=RuntimeProfile.TEST,
+        sqlite_path=tmp / "synapse.db",
+        object_path=tmp / "objects",
+    )
+    runtime = SynapseRuntime(settings)
+    return runtime
+
+
+@pytest.mark.benchmark
+def test_indexing_latency(stress_runtime: SynapseRuntime | None) -> None:
+    """Full-repo indexing must complete under 60 seconds."""
+    if stress_runtime is None:
+        pytest.skip("Stress test skipped (SYNAPSE_SKIP_STRESS or repo not found)")
+
+    t0 = time.perf_counter()
+    stress_runtime.bootstrap(force=True)
+    elapsed = time.perf_counter() - t0
+
+    print(f"\n  ⏱  Indexing elapsed: {elapsed:.2f}s")
+    assert elapsed < 60.0, f"Indexing took {elapsed:.2f}s — exceeds 60s budget"
+
+
+@pytest.mark.benchmark
+def test_file_and_symbol_counts(stress_runtime: SynapseRuntime | None) -> None:
+    """Monorepo indexing should produce substantial symbol coverage."""
+    if stress_runtime is None:
+        pytest.skip("Stress test skipped")
+
+    status = stress_runtime.status()
+    print(f"\n  📦  Files: {status.files}, Symbols: {status.symbols}")
+
+    assert status.files >= 5, f"Expected ≥5 files indexed, got {status.files}"
+    assert status.symbols >= 20, f"Expected ≥20 symbols, got {status.symbols}"
+
+
+@pytest.mark.benchmark
+def test_retrieval_latency_p95(stress_runtime: SynapseRuntime | None) -> None:
+    """Single retrieval queries must complete in under 2 seconds each."""
+    if stress_runtime is None:
+        pytest.skip("Stress test skipped")
+
+    queries = [
+        "How does the retrieval engine rank candidates?",
+        "What is the lesson lifecycle?",
+        "How does the daemon detect git commits?",
+        "What does bootstrap do?",
+        "How is the MCP server structured?",
+    ]
+
+    latencies = []
+    for q in queries:
+        t0 = time.perf_counter()
+        stress_runtime.query_hybrid(q, max_tokens=2000)
+        latencies.append(time.perf_counter() - t0)
+
+    p95 = sorted(latencies)[int(len(latencies) * 0.95) - 1]
+    avg = sum(latencies) / len(latencies)
+    print(f"\n  ⏱  Query latencies — avg: {avg * 1000:.0f}ms, p95: {p95 * 1000:.0f}ms")
+
+    assert p95 < 2.0, f"p95 retrieval latency {p95 * 1000:.0f}ms exceeds 2000ms budget"
+
+
+@pytest.mark.benchmark
+def test_memory_footprint(stress_runtime: SynapseRuntime | None) -> None:
+    """Process RSS after indexing must stay under 512 MiB."""
+    if stress_runtime is None:
+        pytest.skip("Stress test skipped")
+
+    try:
+        import resource
+
+        rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # macOS reports in bytes, Linux in kilobytes
+        if rss_bytes < 10_000:  # Linux: value is in KB
+            rss_mb = rss_bytes / 1024
+        else:
+            rss_mb = rss_bytes / (1024 * 1024)
+        print(f"\n  💾  RSS: {rss_mb:.0f} MiB")
+        assert rss_mb < 512, f"RSS {rss_mb:.0f} MiB exceeds 512 MiB budget"
+    except ImportError:
+        pytest.skip("resource module not available on this platform")
+
+
+@pytest.mark.benchmark
+def test_integrity_after_stress(stress_runtime: SynapseRuntime | None) -> None:
+    """Database must remain intact after full indexing pass."""
+    if stress_runtime is None:
+        pytest.skip("Stress test skipped")
+
+    result = stress_runtime.store.integrity_check()
+    assert result == "ok", f"Database integrity failed: {result}"

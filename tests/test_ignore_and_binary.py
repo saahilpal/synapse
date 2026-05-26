@@ -54,3 +54,34 @@ def test_binary_file_skipping(tmp_path: Path) -> None:
     assert "valid.txt" in relative_paths
     assert "image.png" not in relative_paths
     assert "raw.dat" not in relative_paths
+
+
+def test_symlink_traversal_prevention(tmp_path: Path) -> None:
+    import pytest
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    # Create inside file
+    (repo / "source.py").write_text("print('hello')", encoding="utf-8")
+
+    # Create outside file
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "secret_ssh"
+    outside_file.write_text("ssh-private-key", encoding="utf-8")
+
+    # Create symlink pointing outside
+    symlink_file = repo / "linked_secret"
+    try:
+        symlink_file.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("Symlinks not supported on this platform")
+
+    scanner = RepositoryScanner(repository_path=repo)
+    scan = scanner.scan()
+
+    relative_paths = {f.relative_path for f in scan.files}
+
+    assert "source.py" in relative_paths
+    assert "linked_secret" not in relative_paths

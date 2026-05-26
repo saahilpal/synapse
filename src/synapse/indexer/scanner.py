@@ -244,7 +244,11 @@ class RepositoryScanner:
                 logger.debug("Skipped binary file", path=path.name)
                 continue
 
-            relative_path = path.relative_to(self.repository_path).as_posix()
+            try:
+                relative_path = path.relative_to(self.repository_path).as_posix()
+                path.resolve().relative_to(self.repository_path)
+            except (ValueError, OSError):
+                continue
             content_hash = _hash_file(path)
             language = LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
             folder_role = self._classify_folder(relative_path)
