@@ -79,10 +79,16 @@ class CodeParserRegistry:
 
     def _parse_tree_sitter(self, text: str, lang_name: str, relative_path: str) -> CodeParseResult:
         parser = self._get_parser(lang_name)
-        tree = parser.parse(bytes(text, "utf8"))
+        text_bytes = bytes(text, "utf8")
+        tree = parser.parse(text_bytes)
 
         symbols: list[CodeSymbol] = []
         imports: list[str] = []
+
+        def extract_text(node: Node | None) -> str | None:
+            if not node:
+                return None
+            return text_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
         # Simple recursive traversal to extract symbols
         def traverse(node: Node) -> None:
@@ -92,17 +98,17 @@ class CodeParserRegistry:
             # Basic symbol extraction logic per language
             if lang_name == "python":
                 if kind in ("class_definition", "function_definition"):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
                 elif kind == "import_from_statement":
-                    module_node = node.child_by_field_name("module_name")
-                    if module_node:
-                        imports.append(text[module_node.start_byte : module_node.end_byte])
+                    mod_name = extract_text(node.child_by_field_name("module_name"))
+                    if mod_name:
+                        imports.append(mod_name)
                 elif kind == "import_statement":
                     for child in node.children:
                         if child.type == "dotted_name":
-                            imports.append(text[child.start_byte : child.end_byte])
+                            imp_name = extract_text(child)
+                            if imp_name:
+                                imports.append(imp_name)
 
             elif lang_name in ("javascript", "tsx"):
                 # Capturing classes, functions, methods, interfaces, and types
@@ -114,47 +120,35 @@ class CodeParserRegistry:
                     "type_alias_declaration",
                     "class",
                 ):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
                 elif kind == "variable_declarator":
                     # Catch const foo = () => ...
-                    name_node = node.child_by_field_name("name")
                     value_node = node.child_by_field_name("value")
-                    if (
-                        name_node
-                        and value_node
-                        and value_node.type in ("arrow_function", "function_expression")
-                    ):
-                        name = text[name_node.start_byte : name_node.end_byte]
-                        kind = "function_definition"
+                    if value_node and value_node.type in ("arrow_function", "function_expression"):
+                        name = extract_text(node.child_by_field_name("name"))
+                        if name:
+                            kind = "function_definition"
 
                 elif kind == "import_statement":
-                    source_node = node.child_by_field_name("source")
-                    if source_node:
-                        imports.append(
-                            text[source_node.start_byte : source_node.end_byte].strip("'\"")
-                        )
+                    src = extract_text(node.child_by_field_name("source"))
+                    if src:
+                        imports.append(src.strip("'\""))
 
             elif lang_name == "go":
                 if kind in ("function_declaration", "method_declaration", "type_spec"):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
                 elif kind == "import_spec":
-                    path_node = node.child_by_field_name("path")
-                    if path_node:
-                        imports.append(text[path_node.start_byte : path_node.end_byte].strip('"'))
+                    path_val = extract_text(node.child_by_field_name("path"))
+                    if path_val:
+                        imports.append(path_val.strip('"'))
 
             elif lang_name == "rust":
                 if kind in ("function_item", "struct_item", "enum_item", "trait_item", "impl_item"):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
-                    elif kind == "impl_item":
-                        type_node = node.child_by_field_name("type")
-                        if type_node:
-                            name = "impl " + text[type_node.start_byte : type_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
+                    if not name and kind == "impl_item":
+                        t_name = extract_text(node.child_by_field_name("type"))
+                        if t_name:
+                            name = "impl " + t_name
 
             elif lang_name == "java":
                 if kind in (
@@ -163,37 +157,36 @@ class CodeParserRegistry:
                     "interface_declaration",
                     "enum_declaration",
                 ):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
 
             elif lang_name == "cpp":
                 if kind in ("function_definition", "class_specifier", "struct_specifier"):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
-                    else:
+                    name = extract_text(node.child_by_field_name("name"))
+                    if not name:
                         # Fallback to declarator
                         declarator = node.child_by_field_name("declarator")
                         if declarator:
-                            name_node = declarator.child_by_field_name("declarator")
-                            if name_node:
-                                name = text[name_node.start_byte : name_node.end_byte]
+                            name = extract_text(declarator.child_by_field_name("declarator"))
 
             elif lang_name == "ruby":
                 if kind in ("class", "module", "method"):
-                    name_node = node.child_by_field_name("name")
-                    if name_node:
-                        name = text[name_node.start_byte : name_node.end_byte]
+                    name = extract_text(node.child_by_field_name("name"))
 
             if name:
                 # Compute hash of the node's subtree for change detection
-                ast_content = text[node.start_byte : node.end_byte]
+                ast_content = extract_text(node) or ""
                 ast_hash = stable_hash(ast_content)
+
+                # Ensure uniqueness by appending start/end lines if needed, but for now we rely on name/kind
+                # since stable_id uses path, name, kind. Wait, if multiple methods have same name (e.g. overloads)
+                # it will duplicate. Let's include start_line in stable_id to prevent IntegrityError!
+                sym_id = stable_hash(
+                    {"path": relative_path, "name": name, "kind": kind, "line": node.start_point[0]}
+                )
 
                 symbols.append(
                     CodeSymbol(
-                        stable_id=stable_hash({"path": relative_path, "name": name, "kind": kind}),
+                        stable_id=sym_id,
                         kind=kind,
                         name=name,
                         source_path=relative_path,

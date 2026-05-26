@@ -535,3 +535,81 @@ def ui(
 
     api_app = create_app(runtime)
     uvicorn.run(api_app, host=host, port=port)
+
+
+@memory_app.command("status")
+def memory_status(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Show current memory trust status."""
+    runtime = SynapseRuntime(_settings(path))
+
+    approved = runtime.store.get_lessons("approved")
+    pending = runtime.store.get_lessons("pending")
+    expired = runtime.store.get_lessons("expired")
+
+    table = Table(title="Synapse Memory Status", show_header=True, header_style="bold cyan")
+    table.add_column("State")
+    table.add_column("Count")
+
+    table.add_row("[green]Approved[/green]", str(len(approved)))
+    table.add_row("[yellow]Pending[/yellow]", str(len(pending)))
+    table.add_row("[dim]Expired[/dim]", str(len(expired)))
+
+    console.print(table)
+
+
+@memory_app.command("prune")
+def memory_prune(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Evaluate expiry rules and prune dead memory."""
+    runtime = SynapseRuntime(_settings(path))
+    pruned_count = runtime.store.prune_expired_lessons()
+    console.print(f"[green]✓ Evaluated memory expiry. Pruned {pruned_count} lessons.[/green]")
+
+
+@memory_app.command("verify")
+def memory_verify(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Check for dangling symbol references in approved memory."""
+    console.print("[yellow]Symbol verification logic pending implementation.[/yellow]")
+    # For future: iterate over approved lessons, parse `files_affected` and verify they still exist in Git.
+
+
+@lessons_app.command("approve")
+def lessons_approve(
+    lesson_id: Annotated[str, typer.Argument(help="The ID of the lesson to approve.")],
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Approve a pending lesson."""
+    runtime = SynapseRuntime(_settings(path))
+    # Fetch to ensure it exists and is pending
+    pending = runtime.store.get_lessons("pending")
+    target = next((lesson for lesson in pending if lesson["lesson_id"] == lesson_id), None)
+
+    if not target:
+        console.print(f"[red]✗ Pending lesson {lesson_id} not found.[/red]")
+        raise typer.Exit(1)
+
+    runtime.store.update_lesson(lesson_id, target["why_failed"], "approved", actor="cli_user")
+    console.print(f"[green]✓ Lesson {lesson_id} approved. Memory updated.[/green]")
+
+
+@lessons_app.command("reject")
+def lessons_reject(
+    lesson_id: Annotated[str, typer.Argument(help="The ID of the lesson to reject.")],
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Reject a pending lesson."""
+    runtime = SynapseRuntime(_settings(path))
+    pending = runtime.store.get_lessons("pending")
+    target = next((lesson for lesson in pending if lesson["lesson_id"] == lesson_id), None)
+
+    if not target:
+        console.print(f"[red]✗ Pending lesson {lesson_id} not found.[/red]")
+        raise typer.Exit(1)
+
+    runtime.store.update_lesson(lesson_id, target["why_failed"], "rejected", actor="cli_user")
+    console.print(f"[yellow]✓ Lesson {lesson_id} rejected. Memory updated.[/yellow]")

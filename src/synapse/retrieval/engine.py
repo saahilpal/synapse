@@ -126,6 +126,16 @@ class HybridRetrievalEngine:
 
         context_str = "\n".join(packed_blocks)
 
+        # Gating: Only approved lessons affect retrieval
+        approved_lessons = self.store.get_lessons("approved")
+        if approved_lessons:
+            lesson_blocks = ["# APPROVED SYSTEM MEMORY (CRITICAL: MUST ADHERE)"]
+            for i, lesson in enumerate(approved_lessons, 1):
+                lesson_blocks.append(
+                    f"[{i}] DO NOT DO THIS: {lesson['what_failed']} - BECAUSE: {lesson['why_failed']}"
+                )
+            context_str = "\n".join(lesson_blocks) + "\n\n" + context_str
+
         system_prompt = (
             "You are an AI coding assistant with deep structural repository understanding.\n"
             "Answer the user query based ONLY on the provided grounded structural context.\n"

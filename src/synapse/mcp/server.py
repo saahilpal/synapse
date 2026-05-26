@@ -58,8 +58,16 @@ class SynapseMCPFacade:
         return res
 
     def submit_lesson_analysis(self, lesson_id: str, why_failed: str) -> dict[str, Any]:
-        self.runtime.store.update_lesson(lesson_id, why_failed, "awaiting_approval")
-        return {"status": "success", "message": "Lesson awaiting approval"}
+        self.runtime.store.update_lesson(lesson_id, why_failed, "pending", actor="mcp_agent")
+        return {"status": "success", "message": "Lesson awaiting human approval"}
+
+    def get_approved_memory(self) -> dict[str, Any]:
+        lessons = self.runtime.store.get_lessons("approved")
+        return {"status": "success", "lessons": lessons}
+
+    def get_pending_memory(self) -> dict[str, Any]:
+        lessons = self.runtime.store.get_lessons("pending")
+        return {"status": "success", "lessons": lessons}
 
 
 class SynapseMCPServer:
@@ -172,8 +180,20 @@ class SynapseMCPServer:
         @self.mcp.tool()
         @_wrap
         def submit_lesson_analysis(lesson_id: str, why_failed: str) -> dict[str, Any]:
-            """Submit an analysis for a pending lesson (e.g., after a revert)."""
+            """Submit an analysis for a pending lesson (e.g., after a revert). Lesson remains pending until human approval."""
             return self.facade.submit_lesson_analysis(lesson_id, why_failed)
+
+        @self.mcp.tool()
+        @_wrap
+        def get_approved_memory() -> dict[str, Any]:
+            """Retrieve APPROVED memory lessons that MUST be strictly adhered to."""
+            return self.facade.get_approved_memory()
+
+        @self.mcp.tool()
+        @_wrap
+        def get_pending_memory() -> dict[str, Any]:
+            """Retrieve PENDING memory lessons currently awaiting human review."""
+            return self.facade.get_pending_memory()
 
     async def run(self) -> None:
         await self.mcp.run_stdio_async()

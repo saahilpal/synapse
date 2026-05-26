@@ -5,10 +5,20 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from synapse.utils.serialization import stable_hash
+
+
+class LessonStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    SUPERSEDED = "superseded"
+    FAILED = "failed"
 
 
 class SynapseStore:
@@ -106,7 +116,8 @@ class SynapseStore:
                     status TEXT NOT NULL DEFAULT 'pending',
                     created_at INTEGER NOT NULL,
                     approved_at INTEGER,
-                    expires_at INTEGER NOT NULL
+                    expires_at INTEGER NOT NULL,
+                    approval_actor TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS activity (
@@ -366,16 +377,41 @@ class SynapseStore:
                 ),
             )
 
-    def update_lesson(self, lesson_id: str, why_failed: str, status: str) -> None:
+    def update_lesson(
+        self, lesson_id: str, why_failed: str, status: str, actor: str = "system"
+    ) -> None:
+        try:
+            LessonStatus(status)
+        except ValueError:
+            raise ValueError(f"Invalid lesson status: {status}")
+
         now = int(datetime.now(UTC).timestamp())
         with self.connect() as conn:
             conn.execute(
                 """
-                UPDATE lessons SET why_failed = ?, status = ?, approved_at = ?
+                UPDATE lessons SET why_failed = ?, status = ?, approved_at = ?, approval_actor = ?
                 WHERE lesson_id = ?
                 """,
-                (why_failed, status, now, lesson_id),
+                (why_failed, status, now, actor, lesson_id),
             )
+
+    def prune_expired_lessons(self) -> int:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE lessons
+                SET status = ?
+                WHERE status IN (?, ?) AND expires_at < ?
+                """,
+                (
+                    LessonStatus.EXPIRED.value,
+                    LessonStatus.PENDING.value,
+                    LessonStatus.APPROVED.value,
+                    now,
+                ),
+            )
+            return cursor.rowcount
 
     def get_decisions(self, branch: str, limit: int = 10) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -394,9 +430,11 @@ class SynapseStore:
         return dict(row) if row else None
 
     def get_lessons(self, status: str) -> list[dict[str, Any]]:
+        now = int(datetime.now(UTC).timestamp())
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM lessons WHERE status = ? ORDER BY created_at DESC", (status,)
+                "SELECT * FROM lessons WHERE status = ? AND expires_at >= ? ORDER BY created_at DESC",
+                (status, now),
             ).fetchall()
         return [dict(row) for row in rows]
 
