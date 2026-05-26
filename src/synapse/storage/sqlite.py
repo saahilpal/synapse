@@ -495,6 +495,70 @@ class SynapseStore:
                     pass
         return True
 
+    def put_llm_call(
+        self,
+        provider: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        purpose: str,
+        file_path: str | None = None,
+    ) -> None:
+        import uuid
+        from datetime import UTC
+
+        cost = 0.0
+        p_lower = provider.lower() if provider else ""
+        m_lower = model.lower() if model else ""
+
+        if "openai" in p_lower:
+            if "mini" in m_lower:
+                cost = (input_tokens * 0.150 + output_tokens * 0.600) / 1_000_000
+            else:
+                cost = (input_tokens * 5.00 + output_tokens * 15.00) / 1_000_000
+        elif "gemini" in p_lower:
+            if "pro" in m_lower:
+                cost = (input_tokens * 3.50 + output_tokens * 10.50) / 1_000_000
+            else:
+                cost = (input_tokens * 0.075 + output_tokens * 0.300) / 1_000_000
+        elif "anthropic" in p_lower:
+            if "sonnet" in m_lower:
+                cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
+            elif "haiku" in m_lower:
+                cost = (input_tokens * 0.25 + output_tokens * 1.25) / 1_000_000
+            else:
+                cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
+
+        call_id = str(uuid.uuid4())
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, cost_usd, purpose, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    call_id,
+                    provider or "unknown",
+                    model or "unknown",
+                    input_tokens,
+                    output_tokens,
+                    cost,
+                    purpose,
+                    file_path,
+                    now,
+                ),
+            )
+
+    def get_llm_calls(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def clear_llm_calls(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM llm_calls")
+
     def clear_all(self) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM edges")

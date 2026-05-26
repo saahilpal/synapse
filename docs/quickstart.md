@@ -33,16 +33,17 @@ This creates a `.synapse/` folder (add this to your `.gitignore`!) and performs 
 
 ## 4. Connect to your Agent
 
-Synapse supports the **Model Context Protocol (MCP)**. Use the built-in installer to automatically configure your IDE's AI agent:
+Synapse supports the **Model Context Protocol (MCP)**. Generate the MCP configuration snippet for your IDE:
 
 ```bash
-synapse mcp install cursor
-# Also supports: claude, roo, cline
+synapse mcp config .
 ```
+
+Copy the generated JSON structure into your Cursor, Windsurf, or Claude Desktop MCP configuration.
 
 ## 5. Launch the Platform
 
-Start the full Synapse runtime. This command starts the file watcher, the MCP server, and the diagnostic UI.
+Start the full Synapse runtime. This command starts the background watcher daemon, the MCP server, and the diagnostic UI.
 
 ```bash
 synapse run .
@@ -52,13 +53,12 @@ synapse run .
 
 Once the runtime is active, you can:
 
-1.  **Open the UI:** Visit `http://127.0.0.1:9876` to inspect your repository's structural graph and grounding trace.
-2.  **Generate Task Context:** In your terminal, try:
+1.  **Open the UI:** Visit `http://127.0.0.1:9876` to inspect your repository's structural graph, checkpoints, L3 agent memory, and live traces.
+2.  **Verify System Health:** Check the status of database integrity, parsers, and daemon connectivity:
     ```bash
-    synapse task-context "implement a new API endpoint" .
+    synapse doctor .
     ```
-3.  **Chat with Grounded Memory:** Open your IDE (e.g., Cursor) and ask:
-    > "Using Synapse context, explain the dependency graph of the storage module."
+3.  **Interact via MCP:** In your IDE chat (e.g. Cursor), ask questions grounded by Synapse context.
 
 ---
 

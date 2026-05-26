@@ -174,6 +174,18 @@ class HybridRetrievalEngine:
                 temperature=0.1,
             )
             answer_content = response.content
+            try:
+                provider_name = self.llm_provider.__class__.__name__.replace("Provider", "").lower()
+                model_name = getattr(self.llm_provider, "default_model", "unknown")
+                self.store.put_llm_call(
+                    provider=provider_name,
+                    model=model_name,
+                    input_tokens=response.prompt_tokens,
+                    output_tokens=response.completion_tokens,
+                    purpose="retrieval",
+                )
+            except Exception:
+                pass
         else:
             answer_content = (
                 "Mode A (Structural Only): Context retrieved, but LLM generation is disabled."

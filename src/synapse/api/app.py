@@ -44,6 +44,9 @@ def create_app(runtime: SynapseRuntime) -> FastAPI:
     async def get_status() -> dict[str, Any]:
         try:
             status = runtime.status()
+            from synapse.cli.main import _read_daemon_heartbeat
+
+            daemon_info = _read_daemon_heartbeat(Path(status.repository_path))
             return {
                 "repository_path": status.repository_path,
                 "branch": status.branch,
@@ -52,6 +55,7 @@ def create_app(runtime: SynapseRuntime) -> FastAPI:
                 "symbols": status.symbols,
                 "files": status.files,
                 "mode": status.mode,
+                "daemon": daemon_info,
             }
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))

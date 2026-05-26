@@ -65,6 +65,9 @@ synapse mcp verify .
 synapse checkpoint create . --doing "Verifying release wheel" --files "test.py" --next-step "done" --blockers "None"
 synapse checkpoint list .
 synapse checkpoint restore latest .
+synapse cost show .
+synapse cost clear .
+synapse wiki list .
 
 # Cleanup
 cd ..

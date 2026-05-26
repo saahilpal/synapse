@@ -44,6 +44,19 @@ class WikiEngine:
             )
             wiki_path.write_text(doc_response.content, encoding="utf-8")
             logger.info("wiki_generated_file", path=file_path)
+            try:
+                provider_name = self.provider.__class__.__name__.replace("Provider", "").lower()
+                model_name = getattr(self.provider, "default_model", "unknown")
+                self.store.put_llm_call(
+                    provider=provider_name,
+                    model=model_name,
+                    input_tokens=doc_response.prompt_tokens,
+                    output_tokens=doc_response.completion_tokens,
+                    purpose="wiki",
+                    file_path=file_path,
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.error("wiki_generation_failed", path=file_path, error=str(e))
 

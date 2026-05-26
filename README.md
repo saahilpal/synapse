@@ -167,18 +167,28 @@ Synapse uses a powerful, strict CLI interface. Every destructive action prompts 
 ### Core Lifecycle
 - `synapse init .` : Perform Pass 1 and Pass 2 indexing.
 - `synapse start .` : Launch the background polling daemon.
-- `synapse stop .` : Gracefully halt the daemon.
-- `synapse status .` : View active branch, indexed symbols, and agent mode.
+- `synapse status .` : View active branch, indexed symbols, daemon state, and memory metrics.
+- `synapse rollback .` : Rollback active state to a previous commit.
+- `synapse recover .` : Recover from a corrupted database state.
+- `synapse run .` : Run all Synapse services (Daemon, MCP, UI) concurrently.
 
 ### L3 Memory Management
-- `synapse memory list` : View recent agent architectural decisions.
-- `synapse checkpoint list` : View active and historical agent tasks.
-- `synapse lessons review` : Interactively review and approve pending lessons generated from git reverts.
+- `synapse memory status .` : View counts of approved, pending, and expired lessons.
+- `synapse memory prune .` : Prune expired rules and cleanup memory.
+- `synapse memory verify .` : Detect dangling file references in active memory.
+- `synapse lessons approve <id> .` : Approve a pending revert lesson to activate it.
+- `synapse lessons reject <id> .` : Reject and discard a pending lesson.
+- `synapse checkpoint create . --doing "..."` : Save the current context state.
+- `synapse checkpoint list .` : List all checkpoints for the active branch in a table.
+- `synapse checkpoint restore <id> .` : Show details of a checkpoint (or "latest").
 
 ### Developer Tools
-- `synapse wiki show <file>` : View the generated L2 markdown wiki for a component.
-- `synapse cost --today` : View exact LLM token usage and pricing.
-- `synapse doctor --fix --context` : Validate system health, DB integrity, and preview the exact context header injected into agents.
+- `synapse wiki list .` : List all generated wiki documentation files.
+- `synapse wiki show <filepath> .` : Render a specific wiki markdown page to the console.
+- `synapse cost show .` : Display detailed aggregated LLM token usage and estimated costs.
+- `synapse cost clear .` : Purge all LLM call cost history.
+- `synapse doctor .` : Validate SQLite integrity, Tree-sitter, tokenizers, LLM providers, and daemon heartbeat.
+- `synapse mcp verify .` : Verify MCP protocol, tool schemas, and contract stability.
 
 ---
 

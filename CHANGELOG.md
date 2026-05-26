@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-05-26
 
+### Added — Final Polish & Release Readiness
+- CLI cost management: `synapse cost show` (displays Rich aggregated pricing table and summary panel) and `synapse cost clear`.
+- CLI wiki management: `synapse wiki list` and `synapse wiki show <filepath>` (renders page in terminal via Rich Markdown).
+- LLM call database logging: records `prompt_tokens`, `completion_tokens`, and calculates `cost_usd` dynamically for retrieval and wiki generation passes.
+- Real-time daemon state: heartbeats integrated into `synapse status`, `synapse doctor`, and the Web UI status endpoints.
+- Premium Web UI dashboard polish: dual L3 memory (Approved vs Pending) view, real-time LLM cost analytics, and active daemon PID badge.
+- Defensive GHA release pipeline: `.github/workflows/release.yml` automates TestPyPI and PyPI publishing, tag alignment checking, and draft release generation.
+- Clean Typer execution wrapper: intercepts configuration and credential exceptions to output actionable suggestions (e.g. `synapse setup`) instead of tracebacks.
+
 ### Added — Hardening Loop 2: MCP Stability & Protocol Polish
 - Deterministic MCP JSON envelope: every tool response carries `ok`, `data`, `warnings`, `trace_id`, `dirty_tree`.
 - Structured error objects with `code`, `message`, and `suggestion` fields for all failure paths.

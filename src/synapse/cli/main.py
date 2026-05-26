@@ -24,6 +24,38 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Exception handling wrapper for clean CLI diagnostics
+_original_call = app.__call__
+
+
+def _custom_call(*args: Any, **kwargs: Any) -> Any:
+    try:
+        return _original_call(*args, **kwargs)
+    except ValueError as e:
+        err_msg = str(e)
+        if (
+            "missing" in err_msg.lower()
+            or "api key" in err_msg.lower()
+            or "provider" in err_msg.lower()
+        ):
+            console.print(f"[bold red]Configuration Error:[/bold red] {e}")
+            console.print(
+                "\n[yellow]Suggestion:[/yellow] Run [bold]synapse setup[/bold] to configure your LLM provider and credentials."
+            )
+        else:
+            console.print(f"[bold red]Error:[/bold red] {e}")
+        import sys
+
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Unexpected Error:[/bold red] {e}")
+        import sys
+
+        sys.exit(1)
+
+
+app.__call__ = _custom_call  # type: ignore[method-assign]
+
 JSON_OPTION = typer.Option("--json", help="Emit machine-readable JSON.")
 console = Console()
 
@@ -223,16 +255,45 @@ def start(
     asyncio.run(daemon.start())
 
 
+def _read_daemon_heartbeat(repository_path: Path) -> dict[str, Any] | None:
+    heartbeat_path = repository_path / ".synapse" / "daemon_heartbeat.json"
+    if not heartbeat_path.exists():
+        return None
+    try:
+        import time
+
+        data = cast(
+            dict[str, Any],
+            json.loads(heartbeat_path.read_text(encoding="utf-8")),
+        )
+        mtime = heartbeat_path.stat().st_mtime
+        if time.time() - mtime > 10.0:
+            data["status"] = "stale"
+        return data
+    except Exception:
+        return None
+
+
 @app.command()
 def status(
     path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Show current repository context status."""
-    runtime = SynapseRuntime(_settings(path, json_output=json_output))
+    settings = _settings(path, json_output=json_output)
+    runtime = SynapseRuntime(settings)
     status_info = runtime.status()
+
+    daemon_info = _read_daemon_heartbeat(settings.repository_path)
+    approved_cnt = len(runtime.store.get_lessons("approved"))
+    pending_cnt = len(runtime.store.get_lessons("pending"))
+
     if json_output:
-        _emit(status_info, json_output=True)
+        out = _jsonable(status_info)
+        out["daemon"] = daemon_info
+        out["l3_approved_memory"] = approved_cnt
+        out["l3_pending_memory"] = pending_cnt
+        _emit(out, json_output=True)
     else:
         table = Table(title="Synapse Repository Status", show_header=True, header_style="bold cyan")
         table.add_column("Property", style="dim")
@@ -245,6 +306,21 @@ def status(
         table.add_row("Files Indexed", str(status_info.files))
         table.add_row("Symbols Indexed", str(status_info.symbols))
         table.add_row("Mode", status_info.mode)
+
+        if daemon_info:
+            status_str = daemon_info["status"].upper()
+            if status_str == "HEALTHY":
+                daemon_status = f"[green]ACTIVE (PID {daemon_info['pid']}, uptime {daemon_info['uptime_seconds']}s)[/green]"
+            elif status_str == "STALE":
+                daemon_status = f"[yellow]STALE (PID {daemon_info['pid']} inactive)[/yellow]"
+            else:
+                daemon_status = f"[red]{status_str} (PID {daemon_info['pid']})[/red]"
+        else:
+            daemon_status = "[dim]INACTIVE[/dim]"
+        table.add_row("Daemon State", daemon_status)
+
+        table.add_row("L3 Approved Memory", str(approved_cnt))
+        table.add_row("L3 Pending Memory", str(pending_cnt))
 
         console.print(table)
 
@@ -426,7 +502,7 @@ def doctor(
 
             registry = CodeParserRegistry()
             test_file = Path(path) / ".synapse_test.py"
-            test_file.write_text("def test(): pass")
+            test_file.write_text("def test(): pass", encoding="utf-8")
             registry.parse(test_file, relative_path=".synapse_test.py")
             test_file.unlink()
             progress.update(
@@ -452,28 +528,71 @@ def doctor(
 
         task_prov = progress.add_task("Checking LLM Provider...", total=1)
         try:
-            errors = settings.validate_configuration()
-            if errors:
+            if settings.llm_provider is None:
                 progress.update(
-                    task_prov, completed=1, description=f"[red]✗ Config error: {errors[0]}[/red]"
+                    task_prov,
+                    completed=1,
+                    description="[yellow]⚠ No LLM Provider configured (running in structural Mode A)[/yellow]",
                 )
             else:
-                conn_errors = settings.test_connectivity()
-                if conn_errors:
+                errors = settings.validate_configuration()
+                if errors:
                     progress.update(
                         task_prov,
                         completed=1,
-                        description=f"[red]✗ Connectivity error: {conn_errors[0]}[/red]",
+                        description=f"[red]✗ Config error: {errors[0]}[/red]",
                     )
                 else:
-                    progress.update(
-                        task_prov,
-                        completed=1,
-                        description=f"[green]✓ Provider ({settings.llm_provider}) connectivity verified[/green]",
-                    )
+                    conn_errors = settings.test_connectivity()
+                    if conn_errors:
+                        progress.update(
+                            task_prov,
+                            completed=1,
+                            description=f"[red]✗ Connectivity error: {conn_errors[0]}[/red]",
+                        )
+                    else:
+                        progress.update(
+                            task_prov,
+                            completed=1,
+                            description=f"[green]✓ Provider ({settings.llm_provider}) connectivity verified[/green]",
+                        )
         except Exception as e:
             progress.update(
                 task_prov, completed=1, description=f"[red]✗ Unexpected error: {e}[/red]"
+            )
+
+        task_daemon = progress.add_task("Checking Daemon Status...", total=1)
+        try:
+            daemon_info = _read_daemon_heartbeat(settings.repository_path)
+            if daemon_info:
+                status_str = daemon_info["status"].upper()
+                if status_str == "HEALTHY":
+                    progress.update(
+                        task_daemon,
+                        completed=1,
+                        description=f"[green]✓ Daemon active and healthy (PID {daemon_info['pid']}, uptime {daemon_info['uptime_seconds']}s)[/green]",
+                    )
+                elif status_str == "STALE":
+                    progress.update(
+                        task_daemon,
+                        completed=1,
+                        description="[yellow]⚠ Daemon heartbeat file exists but is stale (not running?)[/yellow]",
+                    )
+                else:
+                    progress.update(
+                        task_daemon,
+                        completed=1,
+                        description=f"[red]✗ Daemon degraded: {daemon_info.get('last_error')}[/red]",
+                    )
+            else:
+                progress.update(
+                    task_daemon,
+                    completed=1,
+                    description="[yellow]⚠ Daemon inactive (not running). Start it using `synapse start`[/yellow]",
+                )
+        except Exception as e:
+            progress.update(
+                task_daemon, completed=1, description=f"[red]✗ Daemon status error: {e}[/red]"
             )
 
     console.print("\n[bold]All checks complete.[/bold]")
@@ -898,3 +1017,148 @@ def checkpoint_restore(
     console.print(
         f"  [bold]Created At:[/bold] {datetime.fromtimestamp(cp['created_at']).isoformat()}"
     )
+
+
+@cost_app.command("show")
+def cost_show(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Show detailed LLM call and cost tracking metrics."""
+    runtime = SynapseRuntime(_settings(path))
+    calls = runtime.store.get_llm_calls()
+
+    if not calls:
+        console.print("[yellow]No LLM calls recorded yet.[/yellow]")
+        return
+
+    # Aggregate by provider/model/purpose
+    agg: dict[tuple[str, str, str], dict[str, Any]] = {}
+    total_input = 0
+    total_output = 0
+    total_cost = 0.0
+
+    for c in calls:
+        key = (c["provider"], c["model"], c["purpose"])
+        if key not in agg:
+            agg[key] = {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost": 0.0,
+            }
+        agg[key]["calls"] += 1
+        agg[key]["input_tokens"] += c["input_tokens"]
+        agg[key]["output_tokens"] += c["output_tokens"]
+        agg[key]["cost"] += c["cost_usd"]
+
+        total_input += c["input_tokens"]
+        total_output += c["output_tokens"]
+        total_cost += c["cost_usd"]
+
+    # Render summary table
+    table = Table(title="LLM Call Aggregated Costs", show_header=True, header_style="bold cyan")
+    table.add_column("Provider")
+    table.add_column("Model")
+    table.add_column("Purpose")
+    table.add_column("Calls", justify="right")
+    table.add_column("Input Tokens", justify="right")
+    table.add_column("Output Tokens", justify="right")
+    table.add_column("Cost (USD)", justify="right")
+
+    for (prov, model, purpose), data in sorted(agg.items()):
+        table.add_row(
+            prov,
+            model,
+            purpose,
+            str(data["calls"]),
+            f"{data['input_tokens']:,}",
+            f"{data['output_tokens']:,}",
+            f"${data['cost']:.6f}",
+        )
+
+    console.print(table)
+
+    # Grand total box
+    from rich.panel import Panel
+
+    grand_total_text = (
+        f"[bold]Total Calls:[/bold] {len(calls)}\n"
+        f"[bold]Total Input Tokens:[/bold] {total_input:,}\n"
+        f"[bold]Total Output Tokens:[/bold] {total_output:,}\n"
+        f"[bold]Total Cost (USD):[/bold] [green]${total_cost:.6f}[/green]"
+    )
+    console.print(Panel(grand_total_text, title="Operational Cost Summary", expand=False))
+
+
+@cost_app.command("clear")
+def cost_clear(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Clear all LLM call cost history."""
+    runtime = SynapseRuntime(_settings(path))
+    runtime.store.clear_llm_calls()
+    console.print("[green]✓ LLM cost history cleared successfully.[/green]")
+
+
+@wiki_app.command("list")
+def wiki_list(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """List all generated wiki documentation pages."""
+    runtime = SynapseRuntime(_settings(path))
+    wiki_dir = runtime.settings.state_path / "wiki"
+
+    if not wiki_dir.exists():
+        console.print("[yellow]No wiki documentation directory found.[/yellow]")
+        return
+
+    files = sorted(wiki_dir.glob("**/*.md"))
+    if not files:
+        console.print("[yellow]No wiki documentation pages found.[/yellow]")
+        return
+
+    table = Table(title="Generated Wiki Documentation", show_header=True, header_style="bold cyan")
+    table.add_column("Wiki Page (Relative Path)")
+    table.add_column("Size (Bytes)", justify="right")
+    table.add_column("Last Modified")
+
+    for f in files:
+        rel_path = f.relative_to(wiki_dir).as_posix()
+        stats = f.stat()
+        mtime = datetime.fromtimestamp(stats.st_mtime).isoformat()
+        table.add_row(
+            rel_path,
+            f"{stats.st_size:,}",
+            mtime,
+        )
+
+    console.print(table)
+
+
+@wiki_app.command("show")
+def wiki_show(
+    filepath: Annotated[
+        str,
+        typer.Argument(help="The relative path of the wiki page (e.g. src/utils.py.md)."),
+    ],
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Show a specific wiki documentation page rendered in Markdown."""
+    from rich.markdown import Markdown
+
+    runtime = SynapseRuntime(_settings(path))
+    wiki_dir = runtime.settings.state_path / "wiki"
+
+    target = filepath
+    if not target.endswith(".md"):
+        target += ".md"
+
+    wiki_path = wiki_dir / target
+    if not wiki_path.exists():
+        wiki_path = wiki_dir / filepath
+        if not wiki_path.exists():
+            console.print(f"[red]✗ Wiki page '{filepath}' not found.[/red]")
+            raise typer.Exit(1)
+
+    content = wiki_path.read_text(encoding="utf-8")
+    console.print(Markdown(content))
