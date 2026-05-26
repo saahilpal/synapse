@@ -429,6 +429,29 @@ class SynapseStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_checkpoints(self, branch: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM checkpoints WHERE branch = ? ORDER BY created_at DESC",
+                (branch,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_checkpoint(self, checkpoint_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM checkpoints WHERE checkpoint_id = ?",
+                (checkpoint_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_checkpoint(self, checkpoint_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM checkpoints WHERE checkpoint_id = ?",
+                (checkpoint_id,),
+            )
+
     def get_lessons(self, status: str) -> list[dict[str, Any]]:
         now = int(datetime.now(UTC).timestamp())
         with self.connect() as conn:
