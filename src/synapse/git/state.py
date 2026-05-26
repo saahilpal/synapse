@@ -111,6 +111,26 @@ class GitRepository:
             message = current.commit_message or ""
             if message.startswith("Revert "):
                 return GitChange(kind=GitChangeKind.REVERT, previous=previous, current=current)
+
+            try:
+                from git import Repo
+
+                repo = Repo(current.repository_path)
+                curr_commit = repo.head.commit
+                curr_tree = curr_commit.tree.hexsha
+                is_revert = False
+                for parent in curr_commit.parents:
+                    for ancestor in repo.iter_commits(parent, max_count=20):
+                        if ancestor.tree.hexsha == curr_tree:
+                            is_revert = True
+                            break
+                    if is_revert:
+                        break
+                if is_revert:
+                    return GitChange(kind=GitChangeKind.REVERT, previous=previous, current=current)
+            except Exception:
+                pass
+
             if len(current.commit_parent_hashes) > 1:
                 return GitChange(kind=GitChangeKind.MERGE, previous=previous, current=current)
             return GitChange(kind=GitChangeKind.COMMIT, previous=previous, current=current)

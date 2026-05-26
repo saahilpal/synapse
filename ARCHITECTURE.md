@@ -1,187 +1,71 @@
 # Synapse Architecture
 
-Synapse is a **persistent structural context infrastructure** designed specifically for AI coding agents.
-
-Unlike traditional RAG (Retrieval-Augmented Generation) systems that rely on naive text chunking and vector similarity, Synapse treats the codebase as a deterministically bounded structural graph. It maps packages, modules, classes, and functions, and records their evolution over time using an event-sourced architecture.
+Synapse is a **deterministic structural context substrate** designed for AI coding agents. It provides a stable, verifiable memory layer by projecting Git repository states into a searchable structural graph.
 
 ## System Overview
 
-Synapse does **not** use AI to define structural truth. Parsers, Git state, content hashes, SQLite transactions, and object-store integrity checks own the durable state. AI providers may optionally summarize, annotate, and explain already extracted context through **semantic overlays**.
+Synapse operates as a pure projection engine. It does not "guess" code structure using AI; it extracts it deterministically using **Tree-sitter** parsers and **Recursive SQL** traversals.
 
 ```mermaid
-flowchart TD
-    subgraph Source["Source"]
-        Repo[Local Repository]
-    end
-    
-    subgraph Synapse["Synapse Core Engine"]
-        Scanner[Incremental Scanner]
-        Parser[AST & Markdown Parser]
-        Engine[Transaction Engine]
-        Retrieve[Hybrid Retrieval]
-    end
-    
-    subgraph Storage["Durable State"]
-        SQLite[(SQLite WAL Event Store)]
-        ObjStore[(Zlib Object Store)]
+graph TD
+    subgraph Ingestion
+        Git[Git Repo HEAD] --> Scanner[File Scanner]
+        Scanner -->|Content Hash| Parser[Tree-sitter Registry]
+        Parser -->|AST Symbols| SQLite[(SQLite WAL)]
     end
 
-    subgraph Interfaces["Interfaces"]
-        MCP[MCP Server]
-        API[FastAPI]
-        CLI[Typer CLI]
+    subgraph Retrieval
+        Query[Task Query] --> Engine[Hybrid Engine]
+        SQLite -->|Recursive CTE| Engine
+        Engine -->|tiktoken| Packer[Token Packer]
     end
-    
-    Repo --> Scanner
-    Scanner --> Parser
-    Parser --> Engine
-    
-    Engine --> SQLite
-    Engine --> ObjStore
-    
-    Retrieve --> SQLite
-    Retrieve --> ObjStore
-    
-    Retrieve --> MCP
-    Retrieve --> API
-    Retrieve --> CLI
-    
-    style Source fill:#0f172a,stroke:#3b82f6
-    style Synapse fill:#0f172a,stroke:#8b5cf6
-    style Storage fill:#0f172a,stroke:#10b981
-    style Interfaces fill:#0f172a,stroke:#e2e8f0
+
+    subgraph Interfaces
+        Packer --> MCP[MCP Server]
+        SQLite --> API[Diagnostic API]
+        SQLite --> CLI[Typer CLI]
+    end
 ```
 
-*(Note: The diagram above illustrates logical data flow. The actual implementation runs within a unified Python runtime.)*
+---
+
+## 1. Deterministic Grounding
+
+The fundamental invariant of Synapse is **Git Grounding**.
+- Every indexed symbol is tied to a specific Git commit OID and file content hash.
+- The system state is a pure function of the Git working tree.
+- Wiping the local index and rebuilding it always produces identical results.
+
+## 2. Ingestion Pipeline
+
+Synapse implements a highly optimized incremental indexing pipeline:
+1.  **Fast Scan**: Identifies changed files using SHA-256 content hashes.
+2.  **Tree-sitter Parsing**: Extracts high-fidelity symbols (Classes, Functions, Interfaces) and structural relationships (Imports, Call Edges).
+3.  **Atomic Persistence**: Updates the SQLite index within a single WAL-mode transaction.
+
+## 3. Storage Layer
+
+Synapse uses a simple, infrastructure-grade storage model:
+- **SQLite (Primary Index)**: Stores files, symbols, edges, and retrieval traces.
+- **Zlib Object Store**: Git-like content-addressed storage for immutable file snapshots.
+
+## 4. Hybrid Retrieval Engine
+
+Retrieval is executed in a strict 4-stage priority order:
+1.  **Temporal**: Filter by active branch and recent commits.
+2.  **Structural**: Expand search from keywords to neighbors using SQL Recursive CTEs.
+3.  **Lexical**: Sub-millisecond keyword matching via SQLite FTS5.
+4.  **Semantic**: concepts-based reranking using vector similarity (Optional).
+
+## 5. Model Context Protocol (MCP)
+
+Synapse is an **MCP-first** platform. It exposes its core capabilities through standard Model Context Protocol tools, allowing any AI agent (Cursor, Claude, Roo) to perform grounded repository analysis.
 
 ---
 
-## 1. Incremental Ingestion Pipeline
+## 6. Diagnostic Observability
 
-The ingestion pipeline transforms raw repository files into versioned structural context. It is designed to be incremental, bounded, and fast.
-
-```mermaid
-sequenceDiagram
-    participant Repo as Local Repository
-    participant Scan as RepositoryScanner
-    participant Parse as ContextBuilder
-    participant Store as EventStore & ObjectStore
-    
-    Repo->>Scan: File System Events / Poll
-    Scan->>Scan: Deterministic exclusions & bounds check
-    Scan->>Scan: Compute SHA-256 content hash
-    Scan->>Parse: Yield changed/added files
-    
-    Parse->>Parse: Parse AST (Classes, Functions, Imports)
-    Parse->>Parse: Identify file renames via hash matching
-    
-    alt If structural node modified
-        Parse->>Parse: Invalidate stale node
-        Parse->>Parse: Invalidate attached semantic overlays
-    end
-    
-    Parse->>Store: Write Event Journal
-    Parse->>Store: Write msgpack Objects
-    Store-->>Parse: Commit success
-```
-
-### Core Responsibilities
-- **`RepositoryScanner`**: Walks the repository applying deterministic exclusions (e.g., ignoring binaries, overly large files, hidden directories) and computes SHA-256 hashes.
-- **Renames & Moves**: Handled by matching deleted and added files with identical content hashes.
-- **Invalidation**: Modified files immediately invalidate their structural nodes, parsed symbols, and attached semantic overlays.
-
----
-
-## 2. Structural Extraction & The Context Graph
-
-Synapse maintains a purposely constrained structural graph. It does not track variables, per-line AST nodes, or speculative reasoning.
-
-**Nodes Tracked:**
-- Packages and module boundaries
-- Files and Documents (Markdown)
-- Classes and Functions
-- Import Dependencies
-
-By bounding the graph, Synapse avoids graph explosion and ensures retrieval queries return high-signal context.
-
----
-
-## 3. Durable Storage Layer
-
-The storage layer guarantees local-first reliability using a two-part system:
-
-1. **`ObjectStore`**: Immutable `msgpack` objects compressed with `zlib` and addressed by their SHA-256 hash.
-2. **`SQLiteEventStore`**: WAL-enabled SQLite tables tracking events, context commits, active heads, structural nodes/edges, and semantic projections.
-
-```mermaid
-erDiagram
-    COMMIT ||--o{ EVENT : "contains"
-    EVENT ||--|| NODE : "mutates"
-    NODE ||--o{ EDGE : "connects to"
-    NODE ||--o{ OVERLAY : "annotated by"
-    
-    COMMIT {
-        string id PK
-        string parent_id FK
-        datetime timestamp
-    }
-    NODE {
-        string id PK
-        string kind
-        string file_path
-        string hash
-    }
-    OVERLAY {
-        string id PK
-        string node_id FK
-        string summary
-        boolean valid
-    }
-```
-
-Context writes are orchestrated by the `ContextTransactionEngine`, which journals event payloads. If an ingestion cycle is interrupted, the transaction fails atomically, and replay diagnostics (`synapse doctor`) maintain integrity.
-
----
-
-## 4. Hybrid Retrieval Flow
-
-When an agent or developer requests context, Synapse executes a bounded, four-stage hybrid retrieval pipeline.
-
-```mermaid
-flowchart TD
-    Req[Context Request] --> TFilter[1. Temporal Filtering]
-    
-    subgraph Pipeline
-    TFilter -->|Active Head| STraverse[2. Structural Traversal]
-    STraverse -->|Bounded Nodes| SRecall[3. Semantic Recall]
-    SRecall -->|Ranked Nodes| LLMSynth[4. LLM Synthesis]
-    end
-    
-    LLMSynth --> Resp[Agent Context Window]
-    
-    classDef step fill:#1e293b,stroke:#8b5cf6,stroke-width:2px;
-    class TFilter,STraverse,SRecall,LLMSynth step;
-```
-
-1. **Temporal Filtering**: Reconstructs the active context at a chosen context head (ignoring stale or deleted nodes).
-2. **Structural Traversal**: Finds matching nodes based on query parameters and expands through nearby dependency edges (up to a hard node limit).
-3. **Semantic Recall**: Uses keyword and local embedding similarity to rank active semantic objects.
-4. **LLM Synthesis** *(Optional)*: Synthesizes a natural language answer from the packed, cited context only, avoiding hallucination.
-
----
-
-## 5. Semantic Overlays
-
-Semantic overlays are non-destructive AI annotations attached to structural nodes. They provide human-readable summaries or developer notes. 
-
-**Crucial Invariant**: Overlays cannot mutate structural nodes or create dependencies. If the underlying code is modified, the overlay is automatically invalidated by the ingestion pipeline until it is re-generated.
-
----
-
-## 6. Runtime & Agent Interfaces
-
-Synapse exposes its engine through several interfaces:
-- **Typer CLI**: `init`, `status`, `search`, `rollback`, `doctor`.
-- **FastAPI**: REST endpoints for context status, timelines, and raw projections.
-- **Context UI**: A lightweight D3-based visualizer for the context graph and historical timeline.
-- **SynapseMCPFacade**: Implementation of the Model Context Protocol (MCP). Exposes tools to agents (e.g., `get_current_context`, `search_context`, `explain_structure`).
+Synapse prioritizes **Explainable AI**. Every retrieval operation generates a persistent **Diagnostic Trace**, recording:
+- Which symbols were selected and why (lexical vs structural).
+- The token weight of each context block.
+- The specific truncation decisions made to fit within the agent's window.

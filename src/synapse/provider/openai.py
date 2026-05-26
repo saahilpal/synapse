@@ -44,7 +44,7 @@ class OpenAIProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
             choice = data["choices"][0]["message"]
             usage = data.get("usage", {})
@@ -73,7 +73,7 @@ class OpenAIProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8"))
             embedding = data["data"][0]["embedding"]
             return [float(x) for x in embedding]

@@ -1,27 +1,27 @@
 # Changelog
 
-All notable changes to Synapse will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Changed
-
-- Converged the project identity on persistent structural context infrastructure for AI coding agents.
-- Replaced speculative documentation with one canonical architecture document and focused operational docs.
-- Renamed the internal context package and public search terminology around structural context.
-- Reduced structural extraction to packages, modules/documents, classes, functions, and imports.
-- Reduced UI projections to overview, subsystem, history, and context comparison.
-- Bounded retrieval traversal, semantic candidates, token packing, and embedding cache growth.
-
-### Removed
-
-- Speculative engines for assumptions, incidents, impact, lineage, drift, health scoring, compaction tiers, and advanced confidence propagation.
-- Duplicate replay facade and standalone temporal graph package.
-- Legacy ADR/RFC/schema/product/evolution documentation trees.
-- Dead query model APIs and unused projection modes.
+## [0.1.0] - 2026-05-25
 
 ### Added
+- Core deterministic indexing engine using Tree-sitter and Git content hashes.
+- 4-stage hybrid retrieval pipeline (Temporal, Structural, Lexical, Semantic).
+- Model Context Protocol (MCP) server for IDE integration.
+- "Why-This-Context" retrieval tracing system.
+- Secure secret management via `python-keyring`.
+- `synapse doctor` for system validation.
+- Diagnostic UI dashboard.
 
-- Focused docs for ingestion, retrieval, semantic overlays, and troubleshooting.
-- Symbol-level structural nodes for classes and functions.
-- Overlay invalidation tied to target structural changes.
+### Changed
+- Refactored entire architecture from event-sourcing to deterministic Git projections.
+- Consolidated storage into unified SQLite schema with Recursive CTE support.
+- Upgraded documentation to production infrastructure standards.
+
+### Removed
+- Legacy "cognitive OS" and "graph operating system" abstractions.
+- Speculative async priority queues and replay engines.
+- Brittle regex-based parsers.

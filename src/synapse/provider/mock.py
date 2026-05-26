@@ -20,6 +20,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float = 0.2,
     ) -> LLMResponse:
+        _ = (model, max_tokens, temperature)
         # Match preset replies if any substring matches
         combined = f"{system_prompt}\n{user_prompt}".lower()
         for pattern, reply in self.preset_replies.items():
@@ -49,8 +50,9 @@ class MockLLMProvider(LLMProvider):
         *,
         model: str | None = None,
     ) -> list[float]:
+        _ = model
         # Deterministic pseudo-embedding based on string md5 hash
-        hasher = hashlib.md5(text.encode("utf-8"))
+        hasher = hashlib.md5(text.encode("utf-8"), usedforsecurity=False)  # noqa: S324
         digest = hasher.digest()
         embedding = []
         for i in range(16):

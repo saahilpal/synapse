@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from synapse.config import SynapseSettings
+from synapse.diagnostics.logging import get_logger
+from synapse.git import GitRepository, GitState
+from synapse.indexer.scanner import RepositoryScanner
+from synapse.parser.registry import CodeParserRegistry
+from synapse.provider.factory import get_llm_provider
+from synapse.retrieval.engine import HybridRetrievalEngine
+from synapse.storage.sqlite import SynapseStore
+from synapse.utils.serialization import stable_hash
+
+
+@dataclass(frozen=True)
+class RuntimeStatus:
+    repository_path: str
+    branch: str
+    git_commit: str | None
+    active_commit: str | None
+    symbols: int
+    files: int
+    mode: str
+
+
+class SynapseRuntime:
+    """Deterministic runtime service for indexing and retrieval."""
+
+    def __init__(self, settings: SynapseSettings) -> None:
+        self.settings = settings
+        if settings.sqlite_path is None:
+            raise ValueError("Storage paths must be configured.")
+
+        self.store = SynapseStore(settings.sqlite_path)
+        self.git = GitRepository(settings.repository_path)
+        self.parser_registry = CodeParserRegistry()
+        self.llm_provider = get_llm_provider(settings)
+        self.retrieval_engine = HybridRetrievalEngine(
+            store=self.store,
+            llm_provider=self.llm_provider,
+        )
+        self.logger = get_logger("runtime")
+
+        from synapse.indexer.wiki import WikiEngine
+
+        self.wiki = WikiEngine(settings, self.store)
+
+    def initialize_storage(self) -> None:
+        self.settings.ensure_directories()
+        self.store.initialize()
+
+    def bootstrap(self, *, force: bool = False) -> str | None:
+        self.initialize_storage()
+        git_state = self.git.state()
+        branch = git_state.effective_branch
+        existing_commit = self.store.get_active_commit(branch)
+
+        if existing_commit == git_state.head_commit and not force:
+            self.logger.info("bootstrap_skipped", branch=branch, commit=existing_commit)
+            return existing_commit
+
+        return self.index_repository(git_state=git_state)
+
+    def wipe_index(self) -> None:
+        """Completely purge the index to allow a fresh deterministic rebuild."""
+        self.initialize_storage()
+        self.store.clear_all()
+        self.logger.info("index_wiped")
+
+    def handle_commit(self, git_state: GitState) -> None:
+        self.index_repository(git_state=git_state)
+        # Pass 2 happens inside index_repository eventually
+
+    def handle_branch_switch(self, git_state: GitState) -> None:
+        self.initialize_storage()
+        self.bootstrap()
+
+    def handle_merge(self, git_state: GitState) -> None:
+        self.index_repository(git_state=git_state)
+
+    def handle_revert(self, previous_state: GitState | None, current_state: GitState) -> None:
+        self.initialize_storage()
+        revert_commit = current_state.head_commit or "unknown"
+        reverted_from = previous_state.head_commit if previous_state else "unknown"
+
+        import uuid
+        from datetime import UTC, datetime
+
+        now = int(datetime.now(UTC).timestamp())
+
+        with self.store.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    current_state.effective_branch,
+                    revert_commit,
+                    reverted_from,
+                    "Revert detected automatically",
+                    "Awaiting analysis from LLM or User",
+                    "[]",
+                    now,
+                    now + (86400 * 7),  # 7 days
+                ),
+            )
+
+        self.logger.info("lesson_pending", revert_commit=revert_commit, reverted_from=reverted_from)
+        self.index_repository(git_state=current_state)
+
+    def index_repository(self, *, git_state: GitState | None = None) -> str | None:
+        self.initialize_storage()
+        git_state = git_state or self.git.state()
+        scanner = RepositoryScanner(
+            repository_path=self.settings.repository_path,
+            max_file_bytes=self.settings.max_file_bytes,
+        )
+        scan = scanner.scan()
+
+        all_parse_results = []
+
+        # Pass 1: Index all symbols
+        for file_info in scan.files:
+            rel_path = file_info.relative_path
+            existing = self.store.get_file_by_path(rel_path)
+
+            if existing and existing["content_hash"] == file_info.content_hash:
+                # Still need the parse result for Pass 2 if we want to update edges
+                # For now, let's just reparse changed files
+                continue
+
+            self.logger.info("indexing_file", path=rel_path)
+
+            import hashlib
+
+            file_id_input = rel_path + file_info.content_hash
+            file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
+
+            file_id = self.store.update_file(
+                file_id=file_id_hash,
+                path=rel_path,
+                git_oid=file_info.git_oid or "",
+                content_hash=file_info.content_hash,
+                language=file_info.language or "unknown",
+            )
+
+            parse_result = self.parser_registry.parse(file_info.path, relative_path=rel_path)
+            all_parse_results.append((file_id, parse_result))
+
+            self.store.clear_file_symbols(file_id)
+            for sym in parse_result.symbols:
+                self.store.put_symbol(
+                    symbol_id=sym.stable_id,
+                    file_id=file_id,
+                    name=sym.name,
+                    kind=sym.kind,
+                    start_line=sym.start_line,
+                    end_line=sym.end_line,
+                    ast_hash=sym.ast_hash,
+                    metadata=sym.metadata,
+                )
+
+        # Pass 2: Create structural edges
+        # In a real system, we'd only do this for changed files or their dependents.
+        # For recovery, we'll re-process all parse results from this run.
+        for file_id, parse_result in all_parse_results:
+            file_symbols = self.store.get_symbols_by_file(file_id)
+            for imp in parse_result.imports:
+                target_name = imp.split(".")[-1]
+                target_symbols = self.store.get_symbols_by_name(target_name)
+                for ts in target_symbols:
+                    for fs in file_symbols:
+                        edge_id = stable_hash(
+                            {
+                                "source": fs["symbol_id"],
+                                "target": ts["symbol_id"],
+                                "type": "depends_on",
+                            }
+                        )
+                        with self.store.connect() as conn:
+                            conn.execute(
+                                """
+                                INSERT OR IGNORE INTO edges (edge_id, source_symbol, target_symbol, edge_type)
+                                VALUES (?, ?, ?, 'depends_on')
+                            """,
+                                (edge_id, fs["symbol_id"], ts["symbol_id"]),
+                            )
+
+        # Pass 3: Wiki Generation
+        for file_info in scan.files:
+            rel_path = file_info.relative_path
+            content = (self.settings.repository_path / rel_path).read_text(errors="ignore")
+
+            import hashlib
+
+            file_id_input = rel_path + file_info.content_hash
+            file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
+            self.wiki.generate_file_wiki(file_id_hash, rel_path, content)
+
+        self.wiki.generate_project_wiki()
+
+        self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
+        return git_state.head_commit
+
+    def status(self) -> RuntimeStatus:
+        self.initialize_storage()
+        git_state = self.git.state()
+        active_commit = self.store.get_active_commit(git_state.effective_branch)
+
+        with self.store.connect() as conn:
+            symbol_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+            file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+
+        return RuntimeStatus(
+            repository_path=self.settings.repository_path.as_posix(),
+            branch=git_state.effective_branch,
+            git_commit=git_state.head_commit,
+            active_commit=active_commit,
+            symbols=symbol_count,
+            files=file_count,
+            mode=self.settings.mode.value,
+        )
+
+    def query_hybrid(
+        self,
+        query: str,
+        *,
+        max_tokens: int = 4000,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        self.initialize_storage()
+        return self.retrieval_engine.retrieve(query, max_tokens=max_tokens)
+
+    def doctor(self) -> dict[str, Any]:
+        self.initialize_storage()
+        with self.store.connect() as conn:
+            integrity = conn.execute("PRAGMA quick_check").fetchone()[0]
+        return {
+            "database_integrity": integrity,
+            "status": self.status().__dict__,
+        }

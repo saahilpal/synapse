@@ -1,172 +1,192 @@
-<p align="center">
-  <img src="assets/hero.svg" alt="Synapse" width="100%">
-</p>
+# Synapse 🧠
 
 <p align="center">
-  <b>Persistent structural context infrastructure for AI coding agents.</b>
+  <b>The Deterministic Context Injector for AI Coding Agents.</b>
 </p>
 
 <p align="center">
   <a href="https://github.com/synapse/synapse/actions"><img src="https://img.shields.io/github/actions/workflow/status/synapse/synapse/ci.yml?style=flat-square&color=3b82f6" alt="CI Status"></a>
-  <a href="https://pypi.org/project/synapse-core/"><img src="https://img.shields.io/pypi/v/synapse-core?style=flat-square&color=8b5cf6" alt="PyPI Version"></a>
-  <a href="https://pypi.org/project/synapse-core/"><img src="https://img.shields.io/pypi/pyversions/synapse-core?style=flat-square&color=10b981" alt="Python Versions"></a>
-  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square" alt="Ruff"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/github/license/synapse/synapse?style=flat-square&color=cbd5e1" alt="License"></a>
+  <img src="https://img.shields.io/badge/architecture-spec_compliant-green?style=flat-square" alt="Spec Compliant">
 </p>
 
 ---
 
-**Synapse** is a local-first service that indexes your repository, extracts its bounded structure (modules, classes, functions, imports), and stores versioned context. It exposes this structurally-grounded truth to AI agents via CLI, REST APIs, and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+Synapse is **NOT a RAG system.** It is a strict, deterministic background daemon that mirrors your Git state and proactively pushes exact contextual boundaries to AI coding agents via the Model Context Protocol (MCP). Agents do not query Synapse—Synapse *injects* reality into Agents.
 
-AI agents lose repository understanding over time. Token windows fill up with stale chats, and search relies on naive text embeddings. Synapse fixes this by giving agents **persistent, structurally-aware, and temporally-accurate** context retrieval.
+## 🏛️ Philosophy & Vision
+
+1. **DETERMINISTIC FIRST:** If the agent sees it, it exists exactly as shown in the local filesystem.
+2. **PUSH, NOT PULL:** Agents are terrible at querying for what they don't know exists. Synapse bounds their context upfront.
+3. **NOTHING HAPPENS SILENTLY:** Every action, decision, and LLM call is tracked, costed, and logged.
+4. **LOCAL ONLY:** Your code never leaves your machine unless you explicitly configure a remote LLM. All state is kept in `.synapse/synapse.db`.
+5. **MIRROR GIT EXACTLY:** Synapse's state machine is perfectly synced to `HEAD`. If you switch branches, your agent's memory switches branches instantly.
 
 ---
 
-## Quick Install & First Run
+## 🏗️ High-Level Architecture (HLD)
 
-Synapse requires Python 3.10+ and uses `uv` for lightning-fast installation. Here is the absolute fastest way to get started:
+Synapse bridges the gap between your local file system, Git history, and the LLM via a 3-layer indexing strategy.
 
-### 1. Install
-```bash
-uv tool install synapse-core
+```mermaid
+graph TD
+    subgraph Local Repository
+        FS[File System]
+        Git[Git History]
+    end
+
+    subgraph Synapse Daemon
+        I[Indexer Engine]
+        DB[(SQLite synapse.db)]
+        W[Wiki Engine .synapse/wiki/]
+        M[Context Injector memory.py]
+    end
+
+    subgraph IDE / AI
+        MCP[MCP Server]
+        Agent[AI Coding Agent]
+    end
+
+    FS -->|Change Events| I
+    Git -->|Branch/Revert Events| I
+    I -->|L1 Structural| DB
+    I -->|L2 Semantic| W
+    I -->|L3 Behavioral| DB
+
+    DB --> M
+    W --> M
+    M -->|Injection Payload| MCP
+    MCP <-->|Read/Write Tools| Agent
 ```
 
-### 2. Guided Setup
-Launch the interactive first-run wizard to configure your preferred AI provider (Ollama, OpenAI, Gemini, or Anthropic):
+---
+
+## 🧩 The 3 Layers of Context
+
+Synapse provides three distinct layers of context to completely ground the agent:
+
+### 1. L1: Structural (The Truth)
+Deterministic mapping of code architecture using **Tree-sitter**.
+- Fast, 100% accurate symbol extraction.
+- Graph edges mapping `Imports`, `Inherits`, `Calls`, and `References`.
+- Primary Key: `sha256(path + content_hash)` to completely eliminate edge-case collisions.
+
+### 2. L2: Semantic (The "Why")
+Hierarchical generated documentation stored locally as Markdown files (`.synapse/wiki/`).
+- **File Level:** What does this file do?
+- **Module Level:** How do these files relate?
+- **Project Level:** `overview.md` and `architecture.md`.
+
+### 3. L3: Behavioral (Agent Memory)
+Synapse tracks the *history* of agent actions so the AI doesn't repeat past mistakes.
+- **Checkpoints:** The active task the agent is performing (`synapse checkpoint`).
+- **Decisions:** Architecture decisions logged by the agent.
+- **Lessons:** Generated automatically when a developer runs `git revert` on an agent's commit!
+
+---
+
+## 🔄 Low-Level Data Flows (LLD)
+
+### Git Mirroring Flow
+Synapse's daemon watches the Git repository. The state of the repository completely drives the context.
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Git as Git Repo
+    participant Daemon as Synapse Daemon
+    participant DB as SQLite DB
+
+    Dev->>Git: git checkout feature-branch
+    Git-->>Daemon: Branch Switch Event
+    Daemon->>DB: Swap active context immediately
+
+    Dev->>Git: git revert <agent-commit>
+    Git-->>Daemon: Revert Detected (20-ancestor check)
+    Daemon->>DB: Log Pending Lesson (What failed?)
+    Daemon->>Dev: Prompt interactive review of failure
+```
+
+### Context Injection Flow
+When an Agent starts a task, it receives a strict, pre-packaged header injection.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCP as MCP Server
+    participant Memory as Context Injector
+    participant DB as SQLite DB
+
+    Agent->>MCP: Trigger Tool / Start Task
+    MCP->>Memory: build_injection_context()
+    Memory->>DB: Fetch Active Branch & Checkpoint
+    Memory->>DB: Fetch Approved Lessons
+    Memory->>DB: Check for Dirty Git Tree (Uncommitted changes)
+    Memory-->>MCP: Formatted Context Header
+    MCP-->>Agent: Proactive Context Grounding
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Installation
+Install the Synapse CLI via `uv`:
+```bash
+uv tool install synapse-runtime
+```
+
+### 2. Setup & Initialize
+Interactive onboarding to set up your LLM providers (keys stored securely in your OS keyring).
 ```bash
 synapse setup .
 ```
+Initialize the repo (Use `--skip-llm` to run in pure structural Mode A):
+```bash
+synapse init .
+```
 
-### 3. Start Background Runtime
+### 3. Start the Daemon
+Run the background watcher to keep Synapse perfectly synced with Git:
 ```bash
 synapse start .
 ```
 
-### 4. Open UI
-```bash
-synapse ui .
-```
-
-### 5. Ask Grounded AI Questions
-```bash
-synapse search "How does context replay work?" .
-```
-
----
-
-## Example Developer Workflow
-
-Synapse provides an instant, grounded retrieval window right in your terminal.
-
-<p align="center">
-  <img src="assets/cli-screenshot.svg" alt="Synapse CLI Search" width="100%">
-</p>
-
----
-
-## Why Synapse?
-
-Text embeddings are blind to module boundaries, resulting in unstructured, disjointed snippets. Synapse replaces this with **Bounded Structure**.
-
-<p align="center">
-  <img src="assets/why-synapse.svg" alt="Naive RAG vs Synapse" width="100%">
-</p>
-
-| Naive RAG / Embedding Search | Synapse Structural Context |
-| :--- | :--- |
-| Blind to module boundaries and file history. | Knows exactly where functions, classes, and modules begin and end. |
-| Returns unstructured, disjointed text snippets. | Returns bounded structural subgraphs and deterministic lineage. |
-| Overwrites context; loses the "why" behind changes. | Uses WAL-enabled SQLite + Object Store for temporal history and snapshots. |
-| Slow, cloud-dependent. | Fast, local-first, runs entirely on your machine. |
-
----
-
-## How it Works
-
-Synapse does **not** use AI to define structural truth. Parsers, Git state, content hashes, and SQLite transactions own the durable state. AI providers optionally summarize or explain the extracted context through non-destructive **semantic overlays**.
-
-<p align="center">
-  <img src="assets/retrieval-pipeline.svg" alt="Synapse Pipeline" width="100%">
-</p>
-
-```mermaid
-flowchart LR
-    Repo[Local Repo] -->|Ingest| Scanner(Scanner & Parser)
-    Scanner -->|Delta| Store[(SQLite + Object Store)]
-    Store -->|Temporal Filter| Retrieval[Hybrid Retrieval]
-    Retrieval -->|MCP / API| Agent[AI Agent]
-    
-    style Repo fill:#1e293b,stroke:#3b82f6
-    style Scanner fill:#1e293b,stroke:#8b5cf6
-    style Store fill:#1e293b,stroke:#3b82f6
-    style Retrieval fill:#1e293b,stroke:#8b5cf6
-    style Agent fill:#1e293b,stroke:#3b82f6
-```
-
----
-
-## Context UI Explorer
-
-Visualize your codebase's structure, track historical commits, and inspect semantic overlays using the built-in local UI.
-
-<p align="center">
-  <img src="assets/ui-screenshot.svg" alt="Synapse Context UI" width="100%">
-</p>
-
----
-
-## Agent Integration (MCP)
-
-Synapse implements the **Model Context Protocol**, allowing seamless integration with tools like Claude Desktop, Cursor, or your own custom agents.
-
-To automatically install the required MCP configuration for your IDE:
-```bash
-synapse mcp install cursor
-# Supported: cursor, claude, roo, cline
-```
-
-Alternatively, you can manually start the MCP Server over standard I/O:
+### 4. Connect to IDE
+Start the MCP server to expose Synapse to your AI Agent (Cursor, Windsurf, etc.):
 ```bash
 synapse mcp start .
 ```
 
-The Synapse MCP server exposes powerful tools:
-- `get_current_context`: Retrieve the full structural boundaries of a target file.
-- `get_context_for_task`: Provide an AI agent with grounded, synthesized context necessary to complete a task.
-- `search_context`: Hybrid query across structural nodes and semantic overlays.
-- `explain_structure`: Ask Synapse to explain the structural boundaries and dependencies of a specific file/module.
+---
+
+## 💻 CLI Command Reference
+
+Synapse uses a powerful, strict CLI interface. Every destructive action prompts for approval.
+
+### Core Lifecycle
+- `synapse init .` : Perform Pass 1 and Pass 2 indexing.
+- `synapse start .` : Launch the background polling daemon.
+- `synapse stop .` : Gracefully halt the daemon.
+- `synapse status .` : View active branch, indexed symbols, and agent mode.
+
+### L3 Memory Management
+- `synapse memory list` : View recent agent architectural decisions.
+- `synapse checkpoint list` : View active and historical agent tasks.
+- `synapse lessons review` : Interactively review and approve pending lessons generated from git reverts.
+
+### Developer Tools
+- `synapse wiki show <file>` : View the generated L2 markdown wiki for a component.
+- `synapse cost --today` : View exact LLM token usage and pricing.
+- `synapse doctor --fix --context` : Validate system health, DB integrity, and preview the exact context header injected into agents.
 
 ---
 
-## Documentation
+## 🤝 Contributing
 
-Dive deeper into Synapse's architecture and advanced workflows:
+Synapse is built on the philosophy that AI tools must be transparent and controllable. If you're contributing:
+- Do not introduce implicit RAG features.
+- Adhere to the `SYNAPSE_BUILD_SPEC.md` strictly.
+- Ensure all states are stored exclusively in `synapse.db` or `.synapse/wiki/`.
 
-- 🏗️ **[Architecture](ARCHITECTURE.md)**: Store internals, bounded replay, and object modeling.
-- 🚀 **[Quickstart](docs/quickstart.md)**: Full guide to initialization and basic workflows.
-- 🔄 **[Ingestion](docs/ingestion.md)**: How incremental scanning, deterministic exclusion, and invalidation work.
-- 🧠 **[Retrieval](docs/retrieval.md)**: The four-stage hybrid retrieval pipeline.
-- 🎨 **[Semantic Overlays](docs/overlays.md)**: AI-generated summaries attached to durable structure.
-- 🚑 **[Troubleshooting](docs/troubleshooting.md)**: Diagnostics, common errors, and configuration.
-
----
-
-## Community & Contributing
-
-We welcome contributions! Synapse is designed to be an infrastructure-grade project.
-Please read our [Contributing Guide](CONTRIBUTING.md) to learn about our development workflow, testing standards, and PR process.
-
-- Report a bug or request a feature: [GitHub Issues](https://github.com/synapse/synapse/issues)
-- Read our [Code of Conduct](CODE_OF_CONDUCT.md)
-- Security reporting: [Security Policy](SECURITY.md)
-
-## License
-
-Synapse is open-source software licensed under the [MIT License](LICENSE.md).
-- Report a bug or request a feature: [GitHub Issues](https://github.com/synapse/synapse/issues)
-- Read our [Code of Conduct](CODE_OF_CONDUCT.md)
-- Security reporting: [Security Policy](SECURITY.md)
-
-## License
-
-Synapse is open-source software licensed under the [MIT License](LICENSE.md).
+License: [Apache 2.0](LICENSE.md)

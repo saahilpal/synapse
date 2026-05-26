@@ -1,38 +1,27 @@
-name: Feature Request
-description: Propose a new feature, integration, or architectural enhancement.
-title: "[FEATURE] "
-labels: ["enhancement", "triage"]
-assignees:
-  - ""
+name: Feature request
+description: Suggest an idea for Synapse.
+labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting an improvement to Synapse! 
-        Since we prioritize a bounded, deterministic architecture, please detail why this feature fits into the core engine.
+        We love hearing your ideas!
   - type: textarea
-    id: problem
+    id: feature-description
     attributes:
-      label: The Problem
-      description: Is your feature request related to a problem? Please describe.
-      placeholder: I'm always frustrated when...
+      label: Is your feature request related to a problem?
+      description: A clear and concise description of what the problem is.
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
-      label: Proposed Solution
-      description: Describe the solution you'd like to see implemented.
-      placeholder: I would like Synapse to support extracting...
+      label: Describe the solution you'd like
+      description: A clear and concise description of what you want to happen.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: Describe any alternative solutions or workarounds you've considered.
-  - type: textarea
-    id: context
-    attributes:
-      label: Additional Context
-      description: Add any other context, diagrams, or architectural reasoning about the feature request here.
+      label: Describe alternatives you've considered
+      description: A clear and concise description of any alternative solutions or features you've considered.

@@ -1,32 +1,44 @@
-# Hybrid Retrieval
+# Retrieval Pipeline
 
-Retrieval in Synapse is not standard RAG. Instead of relying solely on text chunks and vector embeddings, Synapse builds a **bounded context window** by traversing a deterministic structural graph.
+Synapse implements a 4-stage retrieval pipeline designed to provide high-signal context while strictly managing the token budget of AI agents.
 
-## The Retrieval Flow
+## Retrieval Order
+
+1.  **Temporal:** We prioritize files and symbols associated with the active branch and recent commits.
+2.  **Structural:** We expand the search from initial matches to their neighbors (dependencies, callers, superclasses) using SQL Recursive CTEs.
+3.  **Lexical:** We perform exact identifier and keyword matching using SQLite FTS5.
+4.  **Semantic:** conceptually related matches (fallback) are retrieved using vector similarity search.
+
+## Token Budgeting
+
+Character counting is imprecise and leads to unpredictable LLM failures. Synapse uses **tiktoken** to perform exact token counting.
+- **Priority Packing:** We pack context blocks in order of their combined score.
+- **Deterministic Truncation:** We stop packing as soon as the budget is reached, ensuring the agent never receives a malformed request.
+
+## Scoring Model
+
+The final context ranking is determined by:
+- **Lexical Score:** Quality of identifier match.
+- **Structural Distance:** Exponential decay based on distance in the dependency graph.
+- **Confidence:** Parser reliability and symbol completeness.
+
+---
+
+## Retrieval Trace Flow
 
 ```mermaid
-flowchart TD
-    Req[Agent Query] --> TFilter[1. Temporal Filter]
-    TFilter --> STraverse[2. Structural Traversal]
-    STraverse --> SRecall[3. Semantic Recall]
-    SRecall --> Pack[4. Token-Bounded Packing]
-    Pack --> LLM[Optional LLM Synthesis]
-    
-    classDef step fill:#1e293b,stroke:#3b82f6,stroke-width:2px;
-    class TFilter,STraverse,SRecall,Pack step;
+sequenceDiagram
+    participant U as User Query
+    participant R as Retrieval Engine
+    participant DB as SQLite Index
+    participant T as Trace Log
+
+    U->>R: "How does auth work?"
+    R->>DB: Lexical Search (FTS5)
+    DB-->>R: Symbol Hits
+    R->>DB: Structural Expansion (CTE)
+    DB-->>R: Related Symbols
+    R->>R: Token-Aware Packing
+    R->>T: Log Trace (Why context was chosen)
+    R-->>U: Final Context Package
 ```
-
-### Stage 1: Temporal Filtering
-Before any search occurs, Synapse reconstructs the repository state at a specific point in time (the "Context Head"). This automatically filters out nodes, edges, and summaries that were invalidated by recent commits, ensuring agents never reason over deleted code.
-
-### Stage 2: Structural Traversal
-Synapse matches the query against structural nodes (module names, class names, function signatures). Once an entry point is found, the engine executes a bounded traversal, walking ownership edges (e.g., "What methods are in this class?") and import edges (e.g., "What does this file depend on?").
-
-### Stage 3: Semantic Recall
-While structural traversal handles deterministic dependencies, **Semantic Recall** evaluates AI-generated summaries and overlays attached to the graph. It uses keyword matching and local embedding similarity to pull in context that answers the *intent* of the query, even if the exact symbol name wasn't mentioned.
-
-### Stage 4: Token-Bounded Packing
-Synapse protects the LLM’s context window. Retrieval enforces strict limits on traversal depth, candidate count, and final output tokens. Context is packed efficiently, providing the highest-signal subgraphs first.
-
-## The AI Boundary
-When optional LLM Synthesis is enabled, the provider (e.g., Claude, OpenAI) is given the packed, grounded context and asked to explain it. **The LLM cannot modify structural nodes, invent dependencies, or override parser output.**

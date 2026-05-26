@@ -1,57 +1,28 @@
-# Troubleshooting Synapse
+# Troubleshooting
 
-Synapse is designed to be highly resilient, local-first, and append-only. When things go wrong, you have deep diagnostics available to inspect the state of your infrastructure.
+## Installation Issues
 
-## 1. Diagnostics & Health
+### Tree-sitter build errors
+Synapse uses pre-compiled grammars via `tree-sitter-languages`. If you encounter build errors, ensure you have a modern C compiler installed (`gcc` or `clang`).
 
-If Synapse behaves unexpectedly, the first step is always to run the diagnostic tool:
+### Missing `tiktoken` cache
+On some air-gapped systems, `tiktoken` may fail to download its vocabulary. Set the `TIKTOKEN_CACHE_DIR` environment variable to a pre-populated directory.
 
-```bash
-synapse doctor .
-```
+## Configuration Issues
 
-This command:
-- Checks the integrity of the Zlib Object Store.
-- Validates the WAL-enabled SQLite Event Store.
-- Verifies that all active structural nodes point to valid content hashes.
+### Provider connection failed
+Run `synapse doctor` to verify connectivity.
+- **Ollama:** Ensure the service is running (`ollama serve`) and accessible at the configured URL.
+- **OpenAI/Anthropic:** Verify that your API keys are correctly set in the system keyring or environment variables.
 
-## 2. Common Issues
+## Retrieval Issues
 
-### The `.synapse` Folder is Missing
-Synapse requires an initialized state folder in the root of your repository.
-**Fix**: Ensure you have write permissions to the repository directory and run:
-```bash
-synapse init .
-```
+### Hallucinations
+If the agent is hallucinating code that doesn't exist:
+1. Check the **Diagnostic Trace** to see what context Synapse provided.
+2. Ensure you have run `synapse init` or that the daemon is running to capture recent changes.
 
-### SQLite Database Locks or Corruption
-Synapse uses SQLite in Write-Ahead Log (WAL) mode. In the rare event of severe system-level corruption (e.g., hard power loss during a transaction commit), the database might become locked.
-**Fix**: Because Synapse is append-only and hash-driven, you can always safely rebuild from scratch without losing repository code.
-```bash
-# Move the corrupted state
-mv .synapse .synapse.backup
-
-# Re-initialize
-synapse init .
-```
-
-### Missing Structural Nodes
-If a file exists in your repository but cannot be found in Synapse's search or MCP tools, it is likely being ignored by the scanner.
-**Fix**:
-1. Check if the file is ignored by `.gitignore` or `.synapseignore`.
-2. Check if the file size exceeds the `SYNAPSE_MAX_FILE_BYTES` threshold.
-3. Keep in mind that unsupported languages will produce a `FileNode` but will not yield detailed AST symbols (classes, functions).
-
-### Stale AI Overlays
-Because overlays are strictly bound to structural target hashes, if a file changes outside of Synapse's daemon watcher, the old overlay might linger briefly until the next scan.
-**Fix**: Force an immediate invalidation scan:
-```bash
-synapse start . --force-scan
-```
-
-## 3. Performance Tuning
-
-For exceptionally large monorepos, ingestion and memory might become bottlenecks.
-- **Tune Exclusions**: Aggressively ignore generated output folders, `node_modules`, `target`, and `dist`.
-- **Lower File Limits**: Decrease `SYNAPSE_MAX_FILE_BYTES` to skip large, low-value assets like minified bundle files.
-- **Retrieval Bounding**: Ensure your agents are providing targeted structural queries. Broad queries (e.g., "Find everything") will hit hard traversal limits, returning a deterministic but truncated subgraph to protect token windows.
+### No results found
+If `synapse search` returns no results:
+1. Verify that the file types are supported (Python, JS, TS).
+2. Check if the files are excluded by `.gitignore` or the `max_file_bytes` limit.

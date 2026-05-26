@@ -1,61 +1,29 @@
-name: Bug Report
-description: Create a report to help us improve Synapse's infrastructure.
-title: "[BUG] "
-labels: ["bug", "triage"]
-assignees:
-  - ""
+name: Bug report
+description: Create a report to help us improve Synapse.
+labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report an issue with Synapse. 
-        As an infrastructure project, reproducible contexts are critical. Please provide as much detail as possible.
+        Thanks for taking the time to fill out this bug report!
   - type: textarea
-    id: description
+    id: what-happened
     attributes:
-      label: Describe the Bug
-      description: A clear and concise description of what the bug is.
-      placeholder: When I run `synapse init .` on a repository with deeply nested symlinks, the scanner crashes with...
-    validations:
-      required: true
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Reproduction Steps
-      description: Exact steps to reproduce the behavior. 
-      placeholder: |
-        1. Initialize repo with `git init`
-        2. Create file structure...
-        3. Run `synapse start .`
-        4. See error...
-    validations:
-      required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected Behavior
-      description: A clear and concise description of what you expected to happen.
+      label: What happened?
+      description: Also tell us what you expected to happen.
+      placeholder: Tell us what you see!
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Synapse Version
-      description: What version of Synapse are you using? (e.g., Output of `synapse --version`)
-      placeholder: "0.1.4"
-    validations:
-      required: true
-  - type: input
-    id: env
-    attributes:
-      label: Environment
-      description: OS, Python version, Terminal, etc.
-      placeholder: "macOS 14.1, Python 3.11, iTerm2"
+      label: Synapse version
+      description: Run `synapse --version`
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Logs / Output
-      description: Please paste any relevant logs, traces, or terminal output. Use code blocks (` ``` `).
+      label: Relevant logs
+      description: Please paste relevant logs from `synapse run` or `synapse doctor`.
       render: shell
