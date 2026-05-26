@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from synapse.config import SynapseSettings
-from synapse.diagnostics.logging import get_logger
+from synapse.diagnostics.logger import get_logger
 from synapse.git import GitRepository, GitState
 from synapse.indexer.scanner import RepositoryScanner
 from synapse.parser.registry import CodeParserRegistry
@@ -116,8 +116,8 @@ class SynapseRuntime:
         from datetime import UTC, datetime
 
         try:
-            diff_out = subprocess.check_output(
-                ["git", "show", "--name-only", "--format=", revert_commit],
+            diff_out = subprocess.check_output(  # noqa: S603
+                ["git", "show", "--name-only", "--format=", revert_commit],  # noqa: S607
                 cwd=self.settings.repository_path,
                 text=True,
             )

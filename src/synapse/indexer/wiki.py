@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from synapse.config import SynapseSettings
-from synapse.diagnostics.logging import get_logger
+from synapse.diagnostics.logger import get_logger
 from synapse.provider.factory import get_llm_provider
 from synapse.storage.sqlite import SynapseStore
 

@@ -5,7 +5,7 @@ from synapse.config import RuntimeProfile, SynapseSettings
 from synapse.indexer.engine import SynapseRuntime
 
 
-def evaluate_structural_grounding(repo_path: str):
+def evaluate_structural_grounding(repo_path: str) -> None:
     path = Path(repo_path)
     print(f"Evaluating Grounding on {path.name}...")
 

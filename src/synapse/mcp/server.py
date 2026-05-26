@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import time
 import uuid
-import functools
-import inspect
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -71,13 +71,15 @@ class SynapseMCPServer:
         self._register_tools()
 
     def _register_tools(self) -> None:
-        from synapse.diagnostics.logging import get_logger
+        from synapse.diagnostics.logger import get_logger
 
         logger = get_logger("mcp_server")
 
-        def _wrap(f):
+        from collections.abc import Callable
+
+        def _wrap(f: Callable[..., dict[str, Any]]) -> Callable[..., str]:
             @functools.wraps(f)
-            def wrapper(*args, **kwargs) -> str:
+            def wrapper(*args: Any, **kwargs: Any) -> str:
                 trace_id = str(uuid.uuid4())
                 try:
                     status = self.facade.runtime.status()
@@ -85,44 +87,48 @@ class SynapseMCPServer:
                     warnings = []
                     if dirty:
                         warnings.append("Working tree is dirty. Index may be stale.")
-                        
+
                     start = time.monotonic()
                     data = f(*args, **kwargs)
-                    logger.info("mcp_tool_invoked", tool=f.__name__, latency_ms=(time.monotonic() - start) * 1000)
-                    
-                    return json.dumps({
-                        "ok": True,
-                        "data": data,
-                        "warnings": warnings,
-                        "trace_id": trace_id,
-                        "dirty_tree": dirty
-                    })
+                    logger.info(
+                        "mcp_tool_invoked",
+                        tool=f.__name__,
+                        latency_ms=(time.monotonic() - start) * 1000,
+                    )
+
+                    return json.dumps(
+                        {
+                            "ok": True,
+                            "data": data,
+                            "warnings": warnings,
+                            "trace_id": trace_id,
+                            "dirty_tree": dirty,
+                        }
+                    )
                 except Exception as e:
                     msg = str(e)
                     code = "INTERNAL_ERROR"
                     suggestion = "Check daemon logs."
-                    
+
                     if "stale" in msg.lower():
                         code = "INDEX_STALE"
                         suggestion = "Run `synapse reindex` or wait for daemon."
                     elif "no checkpoint" in msg.lower():
                         code = "NOT_FOUND"
                         suggestion = "Ensure checkpoints exist for this branch."
-                    
+
                     logger.error("mcp_tool_error", tool=f.__name__, error=msg)
-                    return json.dumps({
-                        "ok": False,
-                        "error": {
-                            "code": code,
-                            "message": msg,
-                            "suggestion": suggestion
-                        },
-                        "warnings": [],
-                        "trace_id": trace_id,
-                        "dirty_tree": False
-                    })
-                    
-            wrapper.__signature__ = inspect.signature(f)
+                    return json.dumps(
+                        {
+                            "ok": False,
+                            "error": {"code": code, "message": msg, "suggestion": suggestion},
+                            "warnings": [],
+                            "trace_id": trace_id,
+                            "dirty_tree": False,
+                        }
+                    )
+
+            wrapper.__signature__ = inspect.signature(f)  # type: ignore
             return wrapper
 
         @self.mcp.tool()

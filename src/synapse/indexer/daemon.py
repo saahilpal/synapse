@@ -5,7 +5,7 @@ import signal
 from dataclasses import dataclass
 
 from synapse.config import SynapseSettings
-from synapse.diagnostics.logging import get_logger
+from synapse.diagnostics.logger import get_logger
 from synapse.git import GitRepository, GitState
 from synapse.indexer.engine import SynapseRuntime
 

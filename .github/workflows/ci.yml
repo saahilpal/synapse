@@ -26,4 +26,15 @@ jobs:
         run: uv run pytest --cov=synapse --cov-report=term-missing
       - name: Verify package build
         run: uv build
-
+      - name: Release install validation
+        run: |
+          uv venv test_env
+          source test_env/bin/activate
+          uv pip install dist/*.whl
+          synapse doctor
+          synapse mcp verify
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
