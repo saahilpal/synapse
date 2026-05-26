@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -94,6 +95,92 @@ class RepositoryScan:
         return tuple(file for file in self.files if file.language == "markdown")
 
 
+class GitIgnoreSpec:
+    """Simple and robust parser for .gitignore compliance."""
+
+    def __init__(self, base_dir: Path, lines: list[str]) -> None:
+        self.base_dir = base_dir.resolve()
+        self.rules: list[tuple[bool, re.Pattern[str], bool]] = []
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            is_negation = False
+            if line.startswith("!"):
+                is_negation = True
+                line = line[1:]
+
+            directory_only = False
+            if line.endswith("/"):
+                directory_only = True
+                line = line[:-1]
+
+            regex = self._glob_to_regex(line)
+            try:
+                pattern = re.compile(regex)
+                self.rules.append((is_negation, pattern, directory_only))
+            except re.error:
+                continue
+
+    def _glob_to_regex(self, glob: str) -> str:
+        leading_slash = glob.startswith("/")
+        if leading_slash:
+            glob = glob[1:]
+
+        parts = []
+        i = 0
+        n = len(glob)
+        while i < n:
+            c = glob[i]
+            if c == "*":
+                if i + 1 < n and glob[i + 1] == "*":
+                    parts.append(".*")
+                    i += 2
+                    if i < n and glob[i] == "/":
+                        i += 1
+                else:
+                    parts.append("[^/]*")
+                    i += 1
+            elif c == "?":
+                parts.append("[^/]")
+                i += 1
+            elif c == "/":
+                parts.append("/")
+                i += 1
+            elif c in "\\^$.|?*+()[]{}":
+                parts.append("\\" + c)
+                i += 1
+            else:
+                parts.append(c)
+                i += 1
+
+        regex = "".join(parts)
+        if leading_slash:
+            return f"^{regex}(/|$)"
+        else:
+            return f"(^|/){regex}(/|$)"
+
+    def matches(self, path: Path, is_dir: bool = False) -> bool:
+        try:
+            rel_path = path.resolve().relative_to(self.base_dir)
+        except ValueError:
+            return False
+
+        parts = rel_path.parts
+        ignored = False
+        for i in range(1, len(parts) + 1):
+            sub_path = Path(*parts[:i])
+            sub_is_dir = (i < len(parts)) or is_dir
+            sub_rel_path = sub_path.as_posix()
+
+            for is_negation, pattern, dir_only in self.rules:
+                if dir_only and not sub_is_dir:
+                    continue
+                if pattern.search(sub_rel_path):
+                    ignored = not is_negation
+        return ignored
+
+
 class RepositoryScanner:
     """Fast structural scanner with deterministic exclusion and manifest discovery."""
 
@@ -107,6 +194,15 @@ class RepositoryScanner:
         self.repository_path = repository_path.resolve()
         self.excludes = excludes or DEFAULT_EXCLUDES
         self.max_file_bytes = max_file_bytes
+        self.gitignore = None
+
+        gitignore_path = self.repository_path / ".gitignore"
+        if gitignore_path.exists():
+            try:
+                lines = gitignore_path.read_text(encoding="utf-8").splitlines()
+                self.gitignore = GitIgnoreSpec(self.repository_path, lines)
+            except Exception as e:
+                logger.warning("failed_to_load_gitignore", error=str(e))
 
     async def scan_async(self) -> RepositoryScan:
         return await asyncio.to_thread(self.scan)
@@ -185,7 +281,11 @@ class RepositoryScanner:
             parts = path.relative_to(self.repository_path).parts
         except ValueError:
             return True
-        return any(part in self.excludes for part in parts)
+        if any(part in self.excludes for part in parts):
+            return True
+        if self.gitignore and self.gitignore.matches(path, is_dir=path.is_dir()):
+            return True
+        return False
 
     def _classify_folder(self, relative_path: str) -> FolderRole:
         parts = set(Path(relative_path).parts)
@@ -229,9 +329,66 @@ class RepositoryScanner:
 
 def _is_binary_file(path: Path) -> bool:
     try:
+        # Check extensions first
+        binary_extensions = {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".pdf",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".tgz",
+            ".rar",
+            ".7z",
+            ".exe",
+            ".dll",
+            ".so",
+            ".dylib",
+            ".bin",
+            ".dat",
+            ".db",
+            ".sqlite",
+            ".sqlite3",
+            ".woff",
+            ".woff2",
+            ".eot",
+            ".ttf",
+            ".mp4",
+            ".mp3",
+            ".wav",
+            ".avi",
+            ".mov",
+            ".flac",
+            ".ogg",
+            ".webm",
+            ".mkv",
+            ".class",
+            ".o",
+            ".a",
+            ".out",
+            ".pyc",
+            ".pyd",
+            ".pyo",
+        }
+        if path.suffix.lower() in binary_extensions:
+            return True
+
         with path.open("rb") as f:
             chunk = f.read(1024)
+            if not chunk:
+                return False
             if b"\x00" in chunk:
+                return True
+
+            control_count = 0
+            for byte in chunk:
+                if byte < 32 and byte not in (9, 10, 13):
+                    control_count += 1
+            if len(chunk) > 0 and (control_count / len(chunk)) > 0.1:
                 return True
     except Exception:
         return True

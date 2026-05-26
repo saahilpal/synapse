@@ -58,8 +58,10 @@ def create_app(runtime: SynapseRuntime) -> FastAPI:
 
     @app.get("/api/v1/trace/latest")
     async def get_latest_trace() -> dict[str, Any]:
-        # Placeholder for real trace logging
-        return {"status": "ready", "message": "Tracing system initializing."}
+        try:
+            return runtime.trace_store.get_latest()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
 
     @app.get("/api/v1/events")
     async def get_events() -> StreamingResponse:

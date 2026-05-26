@@ -29,20 +29,26 @@ class HybridRetrievalEngine:
         *,
         store: SynapseStore,
         llm_provider: LLMProvider | None,
+        trace_store: Any | None = None,
     ) -> None:
         self.store = store
         self.llm_provider = llm_provider
         # Use tiktoken for exact budgeting
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         self.max_expansion_depth = 2
+        self.trace_store = trace_store
 
     def retrieve(
         self,
         query: str,
         *,
         max_tokens: int = 4000,
+        is_dirty: bool = False,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Perform deterministic 4-stage retrieval: Temporal -> Structural -> Lexical -> Semantic."""
+        import time
+
+        t_start = time.perf_counter()
         trace_id = str(uuid4())
         start_time = datetime.now(UTC)
 
@@ -61,21 +67,35 @@ class HybridRetrievalEngine:
                 if sid not in lexical_candidates:
                     lexical_candidates[sid] = {**sym, "reason": f"lexical:'{word}'"}
 
+        t_lexical = time.perf_counter()
+
         # Expand to Structural neighborhood
         structural_candidates: dict[str, dict[str, Any]] = {}
+        structural_hops = []
         for sid in list(lexical_candidates.keys()):
             neighbors = self.store.get_neighborhood(sid, depth=self.max_expansion_depth)
             for n in neighbors:
                 nid = n["symbol_id"]
+                dist = n.get("distance", 0)
+                structural_hops.append(
+                    {
+                        "from_symbol": lexical_candidates[sid]["name"],
+                        "to_symbol": n["name"],
+                        "distance": dist,
+                    }
+                )
                 if nid not in structural_candidates:
-                    dist = n.get("distance", 0)
                     structural_candidates[nid] = {**n, "reason": f"structural:dist={dist}"}
+
+        t_structural = time.perf_counter()
 
         # Combine and Rank
         combined = {**structural_candidates, **lexical_candidates}
 
         # 4. Semantic Ranking (simplified for recovery)
         ranked = self._rank_candidates(query, list(combined.values()))
+
+        t_ranking = time.perf_counter()
 
         # Context Packing with exact token budgeting
         packed_blocks = []
@@ -84,7 +104,8 @@ class HybridRetrievalEngine:
         tokens_used = 0
 
         # Reserve buffer for system/user prompts
-        budget = max_tokens - 600
+        reserved_buffer = 600
+        retrieval_budget = max_tokens - reserved_buffer
 
         for cand, score in ranked:
             path = cand["source_path"]
@@ -96,14 +117,15 @@ class HybridRetrievalEngine:
             block = f"### File: {path}\nSymbol: {name} ({kind})\nLines: {lines}\nReason: {reason}\n"
             block_tokens = len(self.tokenizer.encode(block))
 
-            if tokens_used + block_tokens > budget:
+            if tokens_used + block_tokens > retrieval_budget:
+                remaining = retrieval_budget - tokens_used
                 trace_elements.append(
                     TraceElement(
                         stable_id=cand["symbol_id"],
                         name=name,
                         path=path,
                         score=score,
-                        reason="truncated:over_budget",
+                        reason=f"truncated:over_budget. Requires {block_tokens} tokens, but only {remaining} remain.",
                         tokens=block_tokens,
                     )
                 )
@@ -143,6 +165,8 @@ class HybridRetrievalEngine:
         )
         user_prompt = f"Repository Context:\n{context_str}\n\nUser Question: {query}\n"
 
+        t_packing = time.perf_counter()
+
         if self.llm_provider:
             response = self.llm_provider.generate(
                 system_prompt=system_prompt,
@@ -155,14 +179,44 @@ class HybridRetrievalEngine:
                 "Mode A (Structural Only): Context retrieved, but LLM generation is disabled."
             )
 
+        t_llm = time.perf_counter()
+
+        token_allocation = {
+            "max_tokens": max_tokens,
+            "reserved_buffer": reserved_buffer,
+            "retrieval_budget": retrieval_budget,
+            "tokens_used": tokens_used,
+            "remaining": retrieval_budget - tokens_used,
+        }
+
+        timeline = {
+            "lexical_search_ms": (t_lexical - t_start) * 1000,
+            "structural_expansion_ms": (t_structural - t_lexical) * 1000,
+            "semantic_ranking_ms": (t_ranking - t_structural) * 1000,
+            "context_packing_ms": (t_packing - t_ranking) * 1000,
+            "llm_generation_ms": (t_llm - t_packing) * 1000,
+            "total_ms": (t_llm - t_start) * 1000,
+        }
+
         trace = {
             "trace_id": trace_id,
             "query": query,
             "nodes_explored": len(combined),
             "tokens_used": tokens_used,
-            "elements": [e.__dict__ for e in trace_elements[:20]],  # Show top 20 in trace
-            "latency_ms": (datetime.now(UTC) - start_time).total_seconds() * 1000,
+            "token_allocation": token_allocation,
+            "timeline": timeline,
+            "elements": [e.__dict__ for e in trace_elements[:40]],
+            "structural_hops": structural_hops[:20],
+            "dirty_tree_warning": is_dirty,
+            "latency_ms": (t_llm - t_start) * 1000,
         }
+
+        if self.trace_store:
+            self.trace_store.record_trace(
+                trace_type="retrieval",
+                summary=f"Retrieval for query: {query}",
+                details=trace,
+            )
 
         return answer_content, grounding_sources, trace
 

@@ -34,6 +34,9 @@ class SynapseRuntime:
         if settings.sqlite_path is None:
             raise ValueError("Storage paths must be configured.")
 
+        from synapse.diagnostics.tracing import TraceStore
+
+        self.trace_store = TraceStore(settings.repository_path)
         self.store = SynapseStore(settings.sqlite_path)
         self.git = GitRepository(settings.repository_path)
         self.parser_registry = CodeParserRegistry()
@@ -41,6 +44,7 @@ class SynapseRuntime:
         self.retrieval_engine = HybridRetrievalEngine(
             store=self.store,
             llm_provider=self.llm_provider,
+            trace_store=self.trace_store,
         )
         self.logger = get_logger("runtime")
 
@@ -55,8 +59,26 @@ class SynapseRuntime:
             self.logger.warning("database_corrupted_wiped")
         self.store.initialize()
 
+    def _auto_protect_synapse(self) -> None:
+        gitignore_path = self.settings.repository_path / ".gitignore"
+        try:
+            if not gitignore_path.exists():
+                gitignore_path.write_text(".synapse/\n", encoding="utf-8")
+                return
+
+            content = gitignore_path.read_text(encoding="utf-8")
+            lines = [line.strip() for line in content.splitlines()]
+            if ".synapse/" not in lines and ".synapse" not in lines:
+                if content and not content.endswith("\n"):
+                    content += "\n"
+                content += ".synapse/\n"
+                gitignore_path.write_text(content, encoding="utf-8")
+        except Exception as e:
+            self.logger.warning("failed_to_auto_protect_synapse", error=str(e))
+
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
+        self._auto_protect_synapse()
         git_state = self.git.state()
         branch = git_state.effective_branch
         existing_commit = self.store.get_active_commit(branch)
@@ -288,7 +310,12 @@ class SynapseRuntime:
         max_tokens: int = 4000,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         self.initialize_storage()
-        return self.retrieval_engine.retrieve(query, max_tokens=max_tokens)
+        is_dirty = False
+        try:
+            is_dirty = self.git.state().is_dirty
+        except Exception:
+            pass
+        return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
 
     def doctor(self) -> dict[str, Any]:
         self.initialize_storage()

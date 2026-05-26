@@ -98,11 +98,28 @@ class SynapseMCPServer:
 
                     start = time.monotonic()
                     data = f(*args, **kwargs)
+                    duration_ms = (time.monotonic() - start) * 1000
                     logger.info(
                         "mcp_tool_invoked",
                         tool=f.__name__,
-                        latency_ms=(time.monotonic() - start) * 1000,
+                        latency_ms=duration_ms,
                     )
+
+                    try:
+                        self.facade.runtime.trace_store.record_trace(
+                            trace_type="mcp",
+                            summary=f"MCP Tool Invoked: {f.__name__}",
+                            details={
+                                "tool": f.__name__,
+                                "arguments": kwargs,
+                                "duration_ms": duration_ms,
+                                "success": True,
+                                "trace_id": trace_id,
+                                "dirty_tree": dirty,
+                            },
+                        )
+                    except Exception:
+                        pass
 
                     return json.dumps(
                         {
@@ -126,6 +143,22 @@ class SynapseMCPServer:
                         suggestion = "Ensure checkpoints exist for this branch."
 
                     logger.error("mcp_tool_error", tool=f.__name__, error=msg)
+
+                    try:
+                        self.facade.runtime.trace_store.record_trace(
+                            trace_type="mcp",
+                            summary=f"MCP Tool Failed: {f.__name__}",
+                            details={
+                                "tool": f.__name__,
+                                "arguments": kwargs,
+                                "error": msg,
+                                "success": False,
+                                "trace_id": trace_id,
+                            },
+                        )
+                    except Exception:
+                        pass
+
                     return json.dumps(
                         {
                             "ok": False,
