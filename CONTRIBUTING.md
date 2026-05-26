@@ -1,6 +1,6 @@
 # Contributing to Synapse
 
-Welcome to the Synapse project. We are building the **infrastructure for persistent structural context** for AI coding agents. 
+Welcome to the Synapse project. We are building the **infrastructure for persistent structural context** for AI coding agents.
 
 Because Synapse is infrastructure, we hold ourselves to rigorous standards. The codebase must remain deterministic, bounded, and highly resilient. We prioritize structural truth over AI abstraction, and stability over hype.
 
@@ -10,7 +10,7 @@ If you share this vision, we’d love your help.
 
 ## 1. Architectural Philosophy
 
-Before contributing, please read our [Architecture Documentation](ARCHITECTURE.md). 
+Before contributing, please read our [Architecture Documentation](ARCHITECTURE.md).
 
 When adding features or fixing bugs, adhere strictly to these invariants:
 - **Structural Truth is Deterministic**: AI models *never* define structural truth in Synapse. Structure is derived exclusively via AST parsers, Git state, and file hashes.
@@ -31,7 +31,7 @@ Synapse relies on `uv` for ultra-fast, deterministic dependency resolution.
 Clone the repository and bootstrap your environment:
 
 ```bash
-git clone https://github.com/synapse/synapse.git
+git clone https://github.com/saahilpal/synapse.git
 cd synapse
 
 # Sync dependencies and install the package in editable mode

@@ -10,7 +10,7 @@ Thank you for your interest in improving Synapse!
     ```
 2.  **Clone and Install:**
     ```bash
-    git clone https://github.com/synapse/synapse.git
+    git clone https://github.com/saahilpal/synapse.git
     cd synapse
     uv sync --all-extras
     ```

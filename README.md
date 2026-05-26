@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/synapse/synapse/actions"><img src="https://img.shields.io/github/actions/workflow/status/synapse/synapse/ci.yml?style=flat-square&color=3b82f6" alt="CI Status"></a>
-  <a href="LICENSE.md"><img src="https://img.shields.io/github/license/synapse/synapse?style=flat-square&color=cbd5e1" alt="License"></a>
-  <img src="https://img.shields.io/badge/architecture-spec_compliant-green?style=flat-square" alt="Spec Compliant">
+  <a href="https://github.com/saahilpal/synapse/actions"><img src="https://img.shields.io/github/actions/workflow/status/saahilpal/synapse/ci.yml?style=flat-square&color=3b82f6" alt="CI Status"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/github/license/saahilpal/synapse?style=flat-square&color=cbd5e1" alt="License"></a>
+  <a href="SYNAPSE_BUILD_SPEC.md"><img src="https://img.shields.io/badge/spec-v1.0-green?style=flat-square" alt="Spec Compliant"></a>
 </p>
 
 ---
