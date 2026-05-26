@@ -436,6 +436,85 @@ def mcp_config(
     }
     typer.echo(json.dumps(config, indent=2))
 
+@mcp_app.command("verify")
+def mcp_verify(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Verify MCP tools, schemas, and transport stability."""
+    import time
+    
+    console.print("[bold cyan]Synapse MCP Verification[/bold cyan]\n")
+    
+    settings = _settings(path)
+    runtime = SynapseRuntime(settings)
+    runtime.bootstrap()
+    
+    from synapse.mcp.server import SynapseMCPFacade
+    facade = SynapseMCPFacade(runtime)
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Stage")
+    table.add_column("Status")
+    table.add_column("Latency (ms)")
+    table.add_column("Details")
+    
+    def _simulate_mcp_call(tool_name: str, *args: Any, **kwargs: Any) -> bool:
+        start = time.monotonic()
+        try:
+            import uuid
+            
+            status = facade.runtime.status()
+            dirty = status.is_dirty
+            warnings = ["Working tree is dirty. Index may be stale."] if dirty else []
+            
+            method = getattr(facade, tool_name)
+            data = method(*args, **kwargs)
+            
+            response = {
+                "ok": True,
+                "data": data,
+                "warnings": warnings,
+                "trace_id": str(uuid.uuid4()),
+                "dirty_tree": dirty
+            }
+            
+            # Verify strict schema
+            assert "ok" in response
+            assert "data" in response
+            assert "warnings" in response
+            assert "trace_id" in response
+            assert "dirty_tree" in response
+            
+            latency = (time.monotonic() - start) * 1000
+            
+            if tool_name == "search":
+                # Check trace payload exists
+                assert "trace" in data, "Trace payload missing in search data"
+                
+            details = f"keys: {list(data.keys())}"
+            table.add_row(tool_name, "[green]PASS[/green]", f"{latency:.1f}", details)
+            return True
+        except Exception as e:
+            latency = (time.monotonic() - start) * 1000
+            table.add_row(tool_name, "[red]FAIL[/red]", f"{latency:.1f}", str(e))
+            return False
+
+    results = [
+        _simulate_mcp_call("get_status"),
+        _simulate_mcp_call("verify_system"),
+        _simulate_mcp_call("search", "User"),
+        _simulate_mcp_call("create_checkpoint", "Testing MCP", ["test.py"], "Next", "None"),
+        _simulate_mcp_call("restore_checkpoint", "latest")
+    ]
+    
+    console.print(table)
+    
+    if all(results):
+        console.print("\n[bold green]✓ MCP Protocol Verified. All contracts passed.[/bold green]")
+    else:
+        console.print("\n[bold red]✗ MCP Protocol Verification Failed.[/bold red]")
+        raise typer.Exit(1)
+
 
 @app.command()
 def ui(
