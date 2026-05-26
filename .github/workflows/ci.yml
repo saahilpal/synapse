@@ -59,10 +59,19 @@ jobs:
           git config --global user.name "Synapse CI"
 
       - name: Run tests (excluding benchmark)
-        run: uv run pytest -m "not benchmark" --cov=synapse --cov-report=term-missing --cov-report=xml
+        run: |
+          uv run pytest -m "not benchmark" --cov=synapse --cov-report=term-missing --cov-report=xml > pytest_log.txt 2>&1 || (cat pytest_log.txt && exit 1)
+
+      - name: Upload pytest log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pytest-log
+          path: pytest_log.txt
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: coverage-report
           path: coverage.xml
