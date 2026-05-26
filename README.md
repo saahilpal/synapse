@@ -1,10 +1,6 @@
 # Synapse 🧠
 
 <p align="center">
-  <img src="assets/hero.svg" alt="Synapse Hero" width="800">
-</p>
-
-<p align="center">
   <b>The Deterministic Context Injector for AI Coding Agents.</b>
 </p>
 
@@ -12,125 +8,195 @@
   <a href="https://github.com/saahilpal/synapse/actions"><img src="https://img.shields.io/github/actions/workflow/status/saahilpal/synapse/ci.yml?style=flat-square&color=3b82f6" alt="CI Status"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/github/license/saahilpal/synapse?style=flat-square&color=cbd5e1" alt="License"></a>
   <a href="SYNAPSE_BUILD_SPEC.md"><img src="https://img.shields.io/badge/spec-v1.0-green?style=flat-square" alt="Spec Compliant"></a>
-  <img src="https://img.shields.io/badge/architecture-deterministic-orange?style=flat-square" alt="Deterministic">
 </p>
 
 ---
 
-### 🛑 Stop using RAG for code.
+Synapse is **NOT a RAG system.** It is a strict, deterministic background daemon that mirrors your Git state and proactively pushes exact contextual boundaries to AI coding agents via the Model Context Protocol (MCP). Agents do not query Synapse—Synapse *injects* reality into Agents.
 
-Synapse is **NOT a RAG system.** It is a strict, deterministic background daemon that mirrors your Git state and proactively pushes exact contextual boundaries to AI coding agents via the Model Context Protocol (MCP).
+## 🏛️ Philosophy & Vision
 
-**Agents do not query Synapse—Synapse *injects* reality into Agents.**
-
----
-
-## 💡 Why Synapse?
-
-<p align="center">
-  <img src="assets/why-synapse.svg" alt="Why Synapse" width="600">
-</p>
-
-| Feature | Legacy RAG / Vector Search | Synapse (Deterministic Injection) |
-| :--- | :--- | :--- |
-| **Accuracy** | Probabilistic (can hallucinate context) | **100% Deterministic (Git-linked)** |
-| **Discovery** | "Pull" (Agent must know what to ask) | **"Push" (Synapse bounds the session)** |
-| **State** | Ignores Git branch/commit state | **Perfectly synced with `HEAD`** |
-| **Memory** | Short-term or noisy | **Structured Behavioral Memory (L3)** |
-| **Privacy** | Often sends chunks to cloud | **100% Local-First** |
+1. **DETERMINISTIC FIRST:** If the agent sees it, it exists exactly as shown in the local filesystem.
+2. **PUSH, NOT PULL:** Agents are terrible at querying for what they don't know exists. Synapse bounds their context upfront.
+3. **NOTHING HAPPENS SILENTLY:** Every action, decision, and LLM call is tracked, costed, and logged.
+4. **LOCAL ONLY:** Your code never leaves your machine unless you explicitly configure a remote LLM. All state is kept in `.synapse/synapse.db`.
+5. **MIRROR GIT EXACTLY:** Synapse's state machine is perfectly synced to `HEAD`. If you switch branches, your agent's memory switches branches instantly.
 
 ---
 
-## 🏛️ Core Pillars
+## 🏗️ High-Level Architecture (HLD)
 
-1.  **DETERMINISTIC FIRST:** If the agent sees it, it exists exactly as shown in the local filesystem.
-2.  **PUSH, NOT PULL:** Agents are terrible at querying for what they don't know exists. Synapse bounds their context upfront.
-3.  **NOTHING HAPPENS SILENTLY:** Every action, decision, and LLM call is tracked, costed, and logged.
-4.  **LOCAL ONLY:** Your code never leaves your machine. All state is kept in `.synapse/synapse.db`.
-5.  **MIRROR GIT EXACTLY:** Synapse's state machine is perfectly synced to `HEAD`.
+Synapse bridges the gap between your local file system, Git history, and the LLM via a 3-layer indexing strategy.
+
+```mermaid
+graph TD
+    subgraph Local Repository
+        FS[File System]
+        Git[Git History]
+    end
+
+    subgraph Synapse Daemon
+        I[Indexer Engine]
+        DB[(SQLite synapse.db)]
+        W[Wiki Engine .synapse/wiki/]
+        M[Context Injector memory.py]
+    end
+
+    subgraph IDE / AI
+        MCP[MCP Server]
+        Agent[AI Coding Agent]
+    end
+
+    FS -->|Change Events| I
+    Git -->|Branch/Revert Events| I
+    I -->|L1 Structural| DB
+    I -->|L2 Semantic| W
+    I -->|L3 Behavioral| DB
+
+    DB --> M
+    W --> M
+    M -->|Injection Payload| MCP
+    MCP <-->|Read/Write Tools| Agent
+```
 
 ---
 
-## 🏗️ Architecture: The 3-Layer Context
+## 🧩 The 3 Layers of Context
 
 Synapse provides three distinct layers of context to completely ground the agent:
 
-<p align="center">
-  <img src="assets/retrieval-pipeline.svg" alt="Synapse Architecture" width="700">
-</p>
-
-### 🧬 L1: Structural (The Truth)
+### 1. L1: Structural (The Truth)
 Deterministic mapping of code architecture using **Tree-sitter**.
 - Fast, 100% accurate symbol extraction.
 - Graph edges mapping `Imports`, `Inherits`, `Calls`, and `References`.
+- Primary Key: `sha256(path + content_hash)` to completely eliminate edge-case collisions.
 
-### 📚 L2: Semantic (The "Why")
+### 2. L2: Semantic (The "Why")
 Hierarchical generated documentation stored locally as Markdown files (`.synapse/wiki/`).
 - **File Level:** What does this file do?
 - **Module Level:** How do these files relate?
 - **Project Level:** `overview.md` and `architecture.md`.
 
-### 🧠 L3: Behavioral (Agent Memory)
+### 3. L3: Behavioral (Agent Memory)
 Synapse tracks the *history* of agent actions so the AI doesn't repeat past mistakes.
 - **Checkpoints:** The active task the agent is performing (`synapse checkpoint`).
 - **Decisions:** Architecture decisions logged by the agent.
-- **Lessons:** Generated automatically when you run `git revert` on an agent's commit!
+- **Lessons:** Generated automatically when a developer runs `git revert` on an agent's commit!
 
 ---
 
-## 🔄 How it Works
+## 🔄 Low-Level Data Flows (LLD)
 
-### 1. Git Mirroring
-Synapse's daemon watches your repository. Every `git checkout` or `git commit` triggers an immediate state update.
+### Git Mirroring Flow
+Synapse's daemon watches the Git repository. The state of the repository completely drives the context.
 
-### 2. Context Injection
-When an Agent starts a task, it receives a strict, pre-packaged header injection via MCP.
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Git as Git Repo
+    participant Daemon as Synapse Daemon
+    participant DB as SQLite DB
 
-<p align="center">
-  <img src="assets/cli-screenshot.svg" alt="CLI Screenshot" width="600">
-</p>
+    Dev->>Git: git checkout feature-branch
+    Git-->>Daemon: Branch Switch Event
+    Daemon->>DB: Swap active context immediately
+
+    Dev->>Git: git revert <agent-commit>
+    Git-->>Daemon: Revert Detected (20-ancestor check)
+    Daemon->>DB: Log Pending Lesson (What failed?)
+    Daemon->>Dev: Prompt interactive review of failure
+```
+
+### Context Injection Flow
+When an Agent starts a task, it receives a strict, pre-packaged header injection.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant MCP as MCP Server
+    participant Memory as Context Injector
+    participant DB as SQLite DB
+
+    Agent->>MCP: Trigger Tool / Start Task
+    MCP->>Memory: build_injection_context()
+    Memory->>DB: Fetch Active Branch & Checkpoint
+    Memory->>DB: Fetch Approved Lessons
+    Memory->>DB: Check for Dirty Git Tree (Uncommitted changes)
+    Memory-->>MCP: Formatted Context Header
+    MCP-->>Agent: Proactive Context Grounding
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Install
+### 1. Installation
+Install the Synapse CLI via `uv`:
 ```bash
 uv tool install synapse-runtime
 ```
 
-### 2. Setup
+### 2. Setup & Initialize
+Interactive onboarding to set up your LLM providers (keys stored securely in your OS keyring).
 ```bash
 synapse setup .
+```
+Initialize the repo (Use `--skip-llm` to run in pure structural Mode A):
+```bash
 synapse init .
 ```
 
-### 3. Start
+### 3. Start the Daemon
+Run the background watcher to keep Synapse perfectly synced with Git:
 ```bash
 synapse start .
 ```
 
-### 4. Connect
-Add Synapse to your MCP-capable IDE (Cursor, Windsurf, Claude Desktop):
+### 4. Connect to IDE
+Start the MCP server to expose Synapse to your AI Agent (Cursor, Windsurf, etc.):
 ```bash
 synapse mcp start .
 ```
 
 ---
 
-## 🗺️ Roadmap
+## 💻 CLI Command Reference
 
-- **v0.2.0 (Target: June 2026):** Multi-language expansion (Rust, Go, C/C++).
-- **v0.3.0:** Deep Structural Analysis & Cross-repo dependency resolution.
-- **v1.0.0:** Production Maturity & Team-wide indexing.
+Synapse uses a powerful, strict CLI interface. Every destructive action prompts for approval.
+
+### Core Lifecycle
+- `synapse init .` : Perform Pass 1 and Pass 2 indexing.
+- `synapse start .` : Launch the background polling daemon.
+- `synapse status .` : View active branch, indexed symbols, daemon state, and memory metrics.
+- `synapse rollback .` : Rollback active state to a previous commit.
+- `synapse recover .` : Recover from a corrupted database state.
+- `synapse run .` : Run all Synapse services (Daemon, MCP, UI) concurrently.
+
+### L3 Memory Management
+- `synapse memory status .` : View counts of approved, pending, and expired lessons.
+- `synapse memory prune .` : Prune expired rules and cleanup memory.
+- `synapse memory verify .` : Detect dangling file references in active memory.
+- `synapse lessons approve <id> .` : Approve a pending revert lesson to activate it.
+- `synapse lessons reject <id> .` : Reject and discard a pending lesson.
+- `synapse checkpoint create . --doing "..."` : Save the current context state.
+- `synapse checkpoint list .` : List all checkpoints for the active branch in a table.
+- `synapse checkpoint restore <id> .` : Show details of a checkpoint (or "latest").
+
+### Developer Tools
+- `synapse wiki list .` : List all generated wiki documentation files.
+- `synapse wiki show <filepath> .` : Render a specific wiki markdown page to the console.
+- `synapse cost show .` : Display detailed aggregated LLM token usage and estimated costs.
+- `synapse cost clear .` : Purge all LLM call cost history.
+- `synapse doctor .` : Validate SQLite integrity, Tree-sitter, tokenizers, LLM providers, and daemon heartbeat.
+- `synapse mcp verify .` : Verify MCP protocol, tool schemas, and contract stability.
 
 ---
 
-## 🤝 Community & Contributing
+## 🤝 Contributing
 
-Synapse is built on the philosophy that AI tools must be transparent and controllable.
-
-- **Spec-First:** Adhere to the `SYNAPSE_BUILD_SPEC.md` strictly.
-- **Deterministic:** No implicit RAG features.
+Synapse is built on the philosophy that AI tools must be transparent and controllable. If you're contributing:
+- Do not introduce implicit RAG features.
+- Adhere to the `SYNAPSE_BUILD_SPEC.md` strictly.
+- Ensure all states are stored exclusively in `synapse.db` or `.synapse/wiki/`.
 
 License: [Apache 2.0](LICENSE.md)
