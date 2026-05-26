@@ -50,7 +50,7 @@ class GeminiProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
                 data = json.loads(resp.read().decode("utf-8"))
             candidates = data.get("candidates", [])
             if not candidates:
@@ -84,7 +84,7 @@ class GeminiProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
                 data = json.loads(resp.read().decode("utf-8"))
             embedding = data["embedding"]["values"]
             return [float(x) for x in embedding]

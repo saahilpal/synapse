@@ -48,7 +48,7 @@ class OllamaProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=300.0) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=300.0) as resp:  # nosec B310
                 data = json.loads(resp.read().decode("utf-8"))
             message = data["message"]
             # Ollama provides prompt_eval_count and eval_count
@@ -81,7 +81,7 @@ class OllamaProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=60.0) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=60.0) as resp:  # nosec B310
                 data = json.loads(resp.read().decode("utf-8"))
             embedding = data["embedding"]
             return [float(x) for x in embedding]

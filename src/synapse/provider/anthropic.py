@@ -45,7 +45,7 @@ class AnthropicProvider(LLMProvider):
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=45.0) as resp:  # noqa: S310
+            with urllib.request.urlopen(req, timeout=45.0) as resp:  # nosec B310
                 data = json.loads(resp.read().decode("utf-8"))
 
             content = data["content"][0]["text"]

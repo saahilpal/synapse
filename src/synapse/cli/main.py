@@ -791,13 +791,17 @@ def lessons_reject(
 
 @checkpoint_app.command("create")
 def checkpoint_create(
-    doing: Annotated[str, typer.Option(help="What the agent is currently doing.")],
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    doing: Annotated[str, typer.Option(help="What the agent is currently doing.")] = "",
     files: Annotated[str, typer.Option(help="Comma-separated list of changed files.")] = "",
     next_step: Annotated[str, typer.Option(help="The next step to be taken.")] = "",
     blockers: Annotated[str, typer.Option(help="Current blockers or obstacles.")] = "",
 ) -> None:
     """Create a new context checkpoint."""
+    if not doing:
+        console.print("[red]✗ The --doing option is required.[/red]")
+        raise typer.Exit(1)
+
     runtime = SynapseRuntime(_settings(path))
     import uuid
 

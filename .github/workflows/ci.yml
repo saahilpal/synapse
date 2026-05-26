@@ -30,6 +30,9 @@ jobs:
       - name: Mypy strict type check
         run: uv run mypy src tests
 
+      - name: Bandit security check
+        run: uv run bandit -r src/ -ll
+
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
