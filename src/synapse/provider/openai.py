@@ -40,7 +40,7 @@ class OpenAIProvider(LLMProvider):
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:
@@ -69,7 +69,7 @@ class OpenAIProvider(LLMProvider):
             "Authorization": f"Bearer {self.api_key}",
         }
         payload = {"input": text, "model": model_name}
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310
             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
         )
         try:

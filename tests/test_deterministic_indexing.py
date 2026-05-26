@@ -44,7 +44,8 @@ def test_deterministic_rebuild(settings: SynapseSettings) -> None:
         assert count1 > 0
 
     # Wipe and rebuild
-    settings.sqlite_path.unlink()
+    if settings.sqlite_path:
+        settings.sqlite_path.unlink()
     runtime.store.initialize()
 
     commit2 = runtime.bootstrap()
