@@ -5,9 +5,6 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   lint:
     name: Lint & Type Check
@@ -62,30 +59,10 @@ jobs:
           git config --global user.name "Synapse CI"
 
       - name: Run tests (excluding benchmark)
-        run: |
-          uv run pytest -m "not benchmark" --cov=synapse --cov-report=term-missing --cov-report=xml > pytest_log.txt 2>&1 || {
-            echo "=== PYTEST LOGS ==="
-            cat pytest_log.txt
-            echo "==================="
-            git config --global user.email "ci-debug@synapse.local"
-            git config --global user.name "CI Debugger"
-            git checkout -b ci-debug || git checkout ci-debug
-            git add pytest_log.txt
-            git commit -m "ci: save pytest failure log"
-            git push -f origin ci-debug
-            exit 1
-          }
-
-      - name: Upload pytest log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pytest-log
-          path: pytest_log.txt
+        run: uv run pytest -m "not benchmark" --cov=synapse --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: coverage-report
           path: coverage.xml

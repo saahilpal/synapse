@@ -154,7 +154,7 @@ def test_indexing_10k_files(tmp_path: Path) -> None:
     repo.mkdir()
 
     git_bin = shutil.which("git") or "git"
-    subprocess.run([git_bin, "init"], cwd=repo, check=True)
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
     subprocess.run([git_bin, "config", "user.email", "stress@synapse.local"], cwd=repo, check=True)
     subprocess.run([git_bin, "config", "user.name", "Stress Tester"], cwd=repo, check=True)
 

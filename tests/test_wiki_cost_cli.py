@@ -18,7 +18,7 @@ def temp_repo(tmp_path: Path) -> Path:
     repo.mkdir()
 
     git_bin = shutil.which("git") or "git"
-    subprocess.run([git_bin, "init"], cwd=repo, check=True)
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
     subprocess.run([git_bin, "config", "user.email", "you@example.com"], cwd=repo, check=True)
     subprocess.run([git_bin, "config", "user.name", "Your Name"], cwd=repo, check=True)
 

@@ -31,7 +31,7 @@ def settings(tmp_path: Path) -> SynapseSettings:
     repo = tmp_path / "repo"
     repo.mkdir()
     git_bin = shutil.which("git") or "git"
-    subprocess.run([git_bin, "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
     subprocess.run(
         [git_bin, "config", "user.email", "test@synapse.local"],
         cwd=repo,
