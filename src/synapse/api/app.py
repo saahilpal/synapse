@@ -75,14 +75,31 @@ def create_app(runtime: SynapseRuntime) -> FastAPI:
 
     @app.get("/wiki/{filepath:path}")
     async def get_wiki_page(filepath: str) -> dict[str, Any]:
-        return {"status": "Not implemented"}
+        wiki_path = runtime.wiki.wiki_dir / f"{filepath}.md"
+        if wiki_path.exists():
+            return {"status": "ok", "content": wiki_path.read_text(encoding="utf-8")}
+        return {"status": "error", "message": "Wiki not found"}
 
-    @app.get("/memory")
+    @app.get("/api/v1/memory")
     async def get_memory_page() -> dict[str, Any]:
-        return {"status": "Not implemented"}
+        approved = runtime.store.get_lessons("approved")
+        pending = runtime.store.get_lessons("pending")
+        return {"status": "ok", "approved": approved, "pending": pending}
 
-    @app.get("/cost")
+    @app.get("/api/v1/cost")
     async def get_cost_page() -> dict[str, Any]:
-        return {"status": "Not implemented"}
+        with runtime.store.connect() as conn:
+            rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
+            calls = [dict(r) for r in rows]
+        return {"status": "ok", "calls": calls}
+
+    @app.get("/api/v1/checkpoints")
+    async def get_checkpoints_page() -> dict[str, Any]:
+        with runtime.store.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT 20"
+            ).fetchall()
+            cps = [dict(r) for r in rows]
+        return {"status": "ok", "checkpoints": cps}
 
     return app

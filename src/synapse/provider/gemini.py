@@ -90,3 +90,9 @@ class GeminiProvider(LLMProvider):
             return [float(x) for x in embedding]
         except Exception as exc:
             raise RuntimeError(f"Gemini embed failed: {exc}") from exc
+
+    def count_tokens(self, text: str) -> int:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text, disallowed_special=()))

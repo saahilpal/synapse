@@ -23,6 +23,7 @@ class RuntimeStatus:
     symbols: int
     files: int
     mode: str
+    is_dirty: bool = False
 
 
 class SynapseRuntime:
@@ -46,9 +47,12 @@ class SynapseRuntime:
         from synapse.indexer.wiki import WikiEngine
 
         self.wiki = WikiEngine(settings, self.store)
+        self.commit_count = 0
 
     def initialize_storage(self) -> None:
         self.settings.ensure_directories()
+        if self.store.path.exists() and self.store.recover_if_corrupted():
+            self.logger.warning("database_corrupted_wiped")
         self.store.initialize()
 
     def bootstrap(self, *, force: bool = False) -> str | None:
@@ -60,6 +64,27 @@ class SynapseRuntime:
         if existing_commit == git_state.head_commit and not force:
             self.logger.info("bootstrap_skipped", branch=branch, commit=existing_commit)
             return existing_commit
+
+        if (
+            existing_commit
+            and existing_commit != git_state.head_commit
+            and existing_commit != "unknown"
+        ):
+            try:
+                from synapse.git.state import GitState
+
+                prev = GitState(
+                    repository_path=self.settings.repository_path,
+                    is_repository=True,
+                    head_commit=existing_commit,
+                    branch=branch,
+                )
+                change = self.git.classify(prev, git_state)
+                if change.kind == "revert":
+                    self.handle_revert(prev, git_state)
+                    return git_state.head_commit
+            except Exception:
+                pass
 
         return self.index_repository(git_state=git_state)
 
@@ -85,8 +110,20 @@ class SynapseRuntime:
         revert_commit = current_state.head_commit or "unknown"
         reverted_from = previous_state.head_commit if previous_state else "unknown"
 
+        import json
+        import subprocess
         import uuid
         from datetime import UTC, datetime
+
+        try:
+            diff_out = subprocess.check_output(
+                ["git", "show", "--name-only", "--format=", revert_commit],
+                cwd=self.settings.repository_path,
+                text=True,
+            )
+            affected = [f.strip() for f in diff_out.splitlines() if f.strip()]
+        except Exception:
+            affected = []
 
         now = int(datetime.now(UTC).timestamp())
 
@@ -103,7 +140,7 @@ class SynapseRuntime:
                     reverted_from,
                     "Revert detected automatically",
                     "Awaiting analysis from LLM or User",
-                    "[]",
+                    json.dumps(affected),
                     now,
                     now + (86400 * 7),  # 7 days
                 ),
@@ -137,32 +174,34 @@ class SynapseRuntime:
 
             import hashlib
 
-            file_id_input = rel_path + file_info.content_hash
+            file_id_input = rel_path
             file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
 
-            file_id = self.store.update_file(
+            parse_result = self.parser_registry.parse(file_info.path, relative_path=rel_path)
+            all_parse_results.append((file_id_hash, parse_result))
+
+            symbols_list = []
+            for sym in parse_result.symbols:
+                symbols_list.append(
+                    {
+                        "symbol_id": sym.stable_id,
+                        "name": sym.name,
+                        "kind": sym.kind,
+                        "start_line": sym.start_line,
+                        "end_line": sym.end_line,
+                        "ast_hash": sym.ast_hash,
+                        "metadata": sym.metadata,
+                    }
+                )
+
+            file_id = self.store.upsert_file_and_symbols(
                 file_id=file_id_hash,
                 path=rel_path,
                 git_oid=file_info.git_oid or "",
                 content_hash=file_info.content_hash,
                 language=file_info.language or "unknown",
+                symbols=symbols_list,
             )
-
-            parse_result = self.parser_registry.parse(file_info.path, relative_path=rel_path)
-            all_parse_results.append((file_id, parse_result))
-
-            self.store.clear_file_symbols(file_id)
-            for sym in parse_result.symbols:
-                self.store.put_symbol(
-                    symbol_id=sym.stable_id,
-                    file_id=file_id,
-                    name=sym.name,
-                    kind=sym.kind,
-                    start_line=sym.start_line,
-                    end_line=sym.end_line,
-                    ast_hash=sym.ast_hash,
-                    metadata=sym.metadata,
-                )
 
         # Pass 2: Create structural edges
         # In a real system, we'd only do this for changed files or their dependents.
@@ -197,13 +236,29 @@ class SynapseRuntime:
 
             import hashlib
 
-            file_id_input = rel_path + file_info.content_hash
+            file_id_input = rel_path
             file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
             self.wiki.generate_file_wiki(file_id_hash, rel_path, content)
 
         self.wiki.generate_project_wiki()
 
         self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
+
+        self.commit_count += 1
+        if self.commit_count % 10 == 0:
+            import uuid
+
+            self.store.put_checkpoint(
+                checkpoint_id=str(uuid.uuid4()),
+                branch=git_state.effective_branch,
+                commit_hash=git_state.head_commit or "unknown",
+                doing="Automatic periodic checkpoint",
+                changed_files="[]",
+                next_step="",
+                blockers="",
+            )
+            self.logger.info("auto_checkpoint_created", commit=git_state.head_commit)
+
         return git_state.head_commit
 
     def status(self) -> RuntimeStatus:
@@ -223,6 +278,7 @@ class SynapseRuntime:
             symbols=symbol_count,
             files=file_count,
             mode=self.settings.mode.value,
+            is_dirty=git_state.is_dirty,
         )
 
     def query_hybrid(

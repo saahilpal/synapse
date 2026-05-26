@@ -37,3 +37,8 @@ class LLMProvider(ABC):
     ) -> list[float]:
         """Generate a vector embedding for the given text."""
         pass
+
+    @abstractmethod
+    def count_tokens(self, text: str) -> int:
+        """Count the number of tokens in the given text."""
+        pass

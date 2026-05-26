@@ -77,3 +77,10 @@ class AnthropicProvider(LLMProvider):
         raise NotImplementedError(
             "Anthropic does not provide a native embeddings API. Please configure SYNAPSE_EMBED_PROVIDER=ollama or openai."
         )
+
+    def count_tokens(self, text: str) -> int:
+        import tiktoken
+
+        # Anthropic approximates closely with cl100k_base
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text, disallowed_special=()))

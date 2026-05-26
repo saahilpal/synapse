@@ -90,3 +90,9 @@ class OllamaProvider(LLMProvider):
             raise RuntimeError(f"Ollama embed HTTP error {exc.code}: {err_body}") from exc
         except Exception as exc:
             raise RuntimeError(f"Ollama embed failed: {exc}") from exc
+
+    def count_tokens(self, text: str) -> int:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text, disallowed_special=()))

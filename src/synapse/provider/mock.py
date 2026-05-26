@@ -61,3 +61,6 @@ class MockLLMProvider(LLMProvider):
             embedding.append(val)
         # Pad or repeat to match embedding dimensions (e.g. 128 dimensions)
         return embedding * 8
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())

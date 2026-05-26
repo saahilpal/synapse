@@ -12,6 +12,11 @@ from synapse.utils.serialization import stable_hash
 PYTHON_SUFFIXES = {".py"}
 JAVASCRIPT_SUFFIXES = {".js", ".jsx"}
 TYPESCRIPT_SUFFIXES = {".ts", ".tsx"}
+GO_SUFFIXES = {".go"}
+RUST_SUFFIXES = {".rs"}
+JAVA_SUFFIXES = {".java"}
+CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
+RUBY_SUFFIXES = {".rb"}
 
 
 @dataclass(frozen=True)
@@ -58,8 +63,17 @@ class CodeParserRegistry:
         if suffix in JAVASCRIPT_SUFFIXES:
             return self._parse_tree_sitter(text, "javascript", relative_path)
         if suffix in TYPESCRIPT_SUFFIXES:
-            # tree-sitter-languages usually provides 'tsx' for typescript
             return self._parse_tree_sitter(text, "tsx", relative_path)
+        if suffix in GO_SUFFIXES:
+            return self._parse_tree_sitter(text, "go", relative_path)
+        if suffix in RUST_SUFFIXES:
+            return self._parse_tree_sitter(text, "rust", relative_path)
+        if suffix in JAVA_SUFFIXES:
+            return self._parse_tree_sitter(text, "java", relative_path)
+        if suffix in CPP_SUFFIXES:
+            return self._parse_tree_sitter(text, "cpp", relative_path)
+        if suffix in RUBY_SUFFIXES:
+            return self._parse_tree_sitter(text, "ruby", relative_path)
 
         return CodeParseResult(path=relative_path, language="unknown", symbols=())
 
@@ -121,6 +135,56 @@ class CodeParserRegistry:
                         imports.append(
                             text[source_node.start_byte : source_node.end_byte].strip("'\"")
                         )
+
+            elif lang_name == "go":
+                if kind in ("function_declaration", "method_declaration", "type_spec"):
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        name = text[name_node.start_byte : name_node.end_byte]
+                elif kind == "import_spec":
+                    path_node = node.child_by_field_name("path")
+                    if path_node:
+                        imports.append(text[path_node.start_byte : path_node.end_byte].strip('"'))
+
+            elif lang_name == "rust":
+                if kind in ("function_item", "struct_item", "enum_item", "trait_item", "impl_item"):
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        name = text[name_node.start_byte : name_node.end_byte]
+                    elif kind == "impl_item":
+                        type_node = node.child_by_field_name("type")
+                        if type_node:
+                            name = "impl " + text[type_node.start_byte : type_node.end_byte]
+
+            elif lang_name == "java":
+                if kind in (
+                    "class_declaration",
+                    "method_declaration",
+                    "interface_declaration",
+                    "enum_declaration",
+                ):
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        name = text[name_node.start_byte : name_node.end_byte]
+
+            elif lang_name == "cpp":
+                if kind in ("function_definition", "class_specifier", "struct_specifier"):
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        name = text[name_node.start_byte : name_node.end_byte]
+                    else:
+                        # Fallback to declarator
+                        declarator = node.child_by_field_name("declarator")
+                        if declarator:
+                            name_node = declarator.child_by_field_name("declarator")
+                            if name_node:
+                                name = text[name_node.start_byte : name_node.end_byte]
+
+            elif lang_name == "ruby":
+                if kind in ("class", "module", "method"):
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        name = text[name_node.start_byte : name_node.end_byte]
 
             if name:
                 # Compute hash of the node's subtree for change detection

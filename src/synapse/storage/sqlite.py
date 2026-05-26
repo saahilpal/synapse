@@ -154,8 +154,14 @@ class SynapseStore:
         finally:
             conn.close()
 
-    def update_file(
-        self, file_id: str, path: str, git_oid: str, content_hash: str, language: str
+    def upsert_file_and_symbols(
+        self,
+        file_id: str,
+        path: str,
+        git_oid: str,
+        content_hash: str,
+        language: str,
+        symbols: list[dict[str, Any]],
     ) -> str:
         now = datetime.now(UTC).isoformat()
         with self.connect() as conn:
@@ -169,51 +175,28 @@ class SynapseStore:
                     content_hash = excluded.content_hash,
                     language = excluded.language,
                     updated_at = excluded.updated_at
-            """,
+                """,
                 (file_id, path, git_oid, content_hash, language, now),
             )
-        return file_id
-
-    def clear_file_symbols(self, file_id: str) -> None:
-        with self.connect() as conn:
             conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
-
-    def put_symbol(
-        self,
-        symbol_id: str,
-        file_id: str,
-        name: str,
-        kind: str,
-        start_line: int,
-        end_line: int,
-        ast_hash: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO symbols (symbol_id, file_id, name, kind, start_line, end_line, ast_hash, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol_id) DO UPDATE SET
-                    file_id = excluded.file_id,
-                    name = excluded.name,
-                    kind = excluded.kind,
-                    start_line = excluded.start_line,
-                    end_line = excluded.end_line,
-                    ast_hash = excluded.ast_hash,
-                    metadata_json = excluded.metadata_json
-            """,
-                (
-                    symbol_id,
-                    file_id,
-                    name,
-                    kind,
-                    start_line,
-                    end_line,
-                    ast_hash,
-                    json.dumps(metadata or {}),
-                ),
-            )
+            for sym in symbols:
+                conn.execute(
+                    """
+                    INSERT INTO symbols (symbol_id, file_id, name, kind, start_line, end_line, ast_hash, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sym["symbol_id"],
+                        file_id,
+                        sym["name"],
+                        sym["kind"],
+                        sym["start_line"],
+                        sym["end_line"],
+                        sym["ast_hash"],
+                        json.dumps(sym.get("metadata") or {}),
+                    ),
+                )
+        return file_id
 
     def get_file_by_path(self, path: str) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -341,6 +324,59 @@ class SynapseStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def put_decision(
+        self, decision_id: str, branch: str, commit_hash: str, content: str, context_info: str
+    ) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO decisions (decision_id, branch, commit_hash, content, context, agent_id, created_at)
+                VALUES (?, ?, ?, ?, ?, 'agent', ?)
+                """,
+                (decision_id, branch, commit_hash, content, context_info, now),
+            )
+
+    def put_checkpoint(
+        self,
+        checkpoint_id: str,
+        branch: str,
+        commit_hash: str,
+        doing: str,
+        changed_files: str,
+        next_step: str,
+        blockers: str,
+    ) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO checkpoints (checkpoint_id, branch, commit_hash, doing, changed_files, next_step, blockers, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    checkpoint_id,
+                    branch,
+                    commit_hash,
+                    doing,
+                    changed_files,
+                    next_step,
+                    blockers,
+                    now,
+                ),
+            )
+
+    def update_lesson(self, lesson_id: str, why_failed: str, status: str) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE lessons SET why_failed = ?, status = ?, approved_at = ?
+                WHERE lesson_id = ?
+                """,
+                (why_failed, status, now, lesson_id),
+            )
+
     def get_decisions(self, branch: str, limit: int = 10) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -375,6 +411,28 @@ class SynapseStore:
     def integrity_check(self) -> str:
         with self.connect() as conn:
             return str(conn.execute("PRAGMA quick_check").fetchone()[0])
+
+    def recover_if_corrupted(self) -> bool:
+        """Checks DB integrity. If corrupted, deletes SQLite files to force a clean rebuild from Git."""
+        try:
+            if not self.path.exists():
+                return False
+            with self.connect() as conn:
+                res = conn.execute("PRAGMA quick_check").fetchone()[0]
+                if res == "ok":
+                    return False
+        except Exception:
+            pass
+
+        # If we got here, it's corrupted or unreachable. Wipe it securely.
+        for ext in ["", "-wal", "-shm"]:
+            f = Path(f"{self.path}{ext}")
+            if f.exists():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+        return True
 
     def clear_all(self) -> None:
         with self.connect() as conn:

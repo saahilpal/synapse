@@ -79,3 +79,12 @@ class OpenAIProvider(LLMProvider):
             return [float(x) for x in embedding]
         except Exception as exc:
             raise RuntimeError(f"OpenAI embed failed: {exc}") from exc
+
+    def count_tokens(self, text: str) -> int:
+        import tiktoken
+
+        try:
+            encoding = tiktoken.encoding_for_model(self.default_model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text, disallowed_special=()))

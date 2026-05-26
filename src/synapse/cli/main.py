@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
 from synapse.config import LoggingMode, RuntimeMode, RuntimeProfile, SynapseSettings
 from synapse.diagnostics.logging import configure_logging
@@ -22,6 +25,7 @@ app = typer.Typer(
 )
 
 JSON_OPTION = typer.Option("--json", help="Emit machine-readable JSON.")
+console = Console()
 
 
 def _settings(
@@ -43,13 +47,13 @@ def _settings(
 
 def _emit(value: Any, *, json_output: bool) -> None:
     if json_output:
-        typer.echo(json.dumps(_jsonable(value), indent=2, sort_keys=True))
+        console.print(json.dumps(_jsonable(value), indent=2, sort_keys=True))
         return
     if isinstance(value, str):
-        typer.echo(value)
+        console.print(value)
         return
     for key, item in _jsonable(value).items():
-        typer.echo(f"{key}: {item}")
+        console.print(f"{key}: {item}")
 
 
 def _jsonable(value: Any) -> Any:
@@ -97,15 +101,15 @@ def setup(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Interactive first-run setup and onboarding."""
-    typer.secho("Welcome to Synapse AI Context Runtime", fg=typer.colors.CYAN, bold=True)
-    typer.echo("This wizard will bootstrap your local AI environment.\n")
+    console.print("[bold cyan]Welcome to Synapse AI Context Runtime[/bold cyan]")
+    console.print("This wizard will bootstrap your local AI environment.\n")
 
     config_dir = Path("~/.config/synapse").expanduser()
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "config.toml"
 
-    typer.secho("Synapse stores API keys securely in your system keyring.", fg=typer.colors.YELLOW)
-    typer.echo(f"Global configuration: {config_file.as_posix()}\n")
+    console.print("[yellow]Synapse stores API keys securely in your system keyring.[/yellow]")
+    console.print(f"Global configuration: {config_file.as_posix()}\n")
 
     # 1. Choose Provider
     provider = typer.prompt(
@@ -143,13 +147,28 @@ llm_model = "{llm_model}"
 ollama_url = "{ollama_url}"
 """
     config_file.write_text(config_content)
-    typer.secho(f"\n✓ Configuration saved to {config_file.as_posix()}", fg=typer.colors.GREEN)
-    typer.secho("✓ Secrets saved to system keyring.", fg=typer.colors.GREEN)
+    console.print(f"\n[green]✓ Configuration saved to {config_file.as_posix()}[/green]")
+    console.print("[green]✓ Secrets saved to system keyring.[/green]")
 
     # Initialize storage
     runtime = SynapseRuntime(_settings(path))
     runtime.bootstrap(force=True)
-    typer.secho("✓ Storage initialized.", fg=typer.colors.GREEN)
+    console.print("[green]✓ Storage initialized.[/green]")
+
+
+def _auto_protect_synapse(repository_path: Path) -> None:
+    gitignore_path = repository_path / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_path.write_text(".synapse/\n")
+        return
+
+    content = gitignore_path.read_text()
+    lines = content.splitlines()
+    if ".synapse/" not in lines and ".synapse" not in lines:
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += ".synapse/\n"
+        gitignore_path.write_text(content)
 
 
 @app.command()
@@ -170,13 +189,15 @@ def init(
     if skip_llm:
         settings.llm_provider = None
 
+    _auto_protect_synapse(settings.repository_path)
+
     runtime = SynapseRuntime(settings)
     commit = runtime.bootstrap(force=force)
 
     if json_output:
         _emit({"active_commit": commit, "state": "initialized"}, json_output=True)
     elif not quiet:
-        typer.secho(f"✓ Initialized repository at {commit}", fg=typer.colors.GREEN)
+        console.print(f"[green]✓ Initialized repository at {commit}[/green]")
 
 
 @app.command()
@@ -188,7 +209,7 @@ def wipe(
         raise typer.Abort()
     runtime = SynapseRuntime(_settings(path))
     runtime.wipe_index()
-    typer.secho("✓ Index wiped.", fg=typer.colors.GREEN)
+    console.print("[green]✓ Index wiped.[/green]")
 
 
 @app.command()
@@ -209,7 +230,28 @@ def status(
 ) -> None:
     """Show current repository context status."""
     runtime = SynapseRuntime(_settings(path, json_output=json_output))
-    _emit(runtime.status(), json_output=json_output)
+    status_info = runtime.status()
+    if json_output:
+        _emit(status_info, json_output=True)
+    else:
+        table = Table(title="Synapse Repository Status", show_header=True, header_style="bold cyan")
+        table.add_column("Property", style="dim")
+        table.add_column("Value")
+
+        table.add_row("Repository", status_info.repository_path)
+        table.add_row("Branch", status_info.branch)
+        table.add_row("Git Commit", status_info.git_commit or "None")
+        table.add_row("Indexed Commit", status_info.active_commit or "None")
+        table.add_row("Files Indexed", str(status_info.files))
+        table.add_row("Symbols Indexed", str(status_info.symbols))
+        table.add_row("Mode", status_info.mode)
+
+        console.print(table)
+
+        if status_info.is_dirty:
+            console.print(
+                "[bold yellow]Warning: Working tree is dirty. Uncommitted changes are not indexed.[/bold yellow]"
+            )
 
 
 @app.command()
@@ -217,7 +259,7 @@ def rollback(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Rollback active state to a previous commit."""
-    typer.secho("Rollback not implemented yet.", fg=typer.colors.YELLOW)
+    console.print("[yellow]Rollback not implemented yet.[/yellow]")
 
 
 @app.command()
@@ -225,7 +267,7 @@ def recover(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Recover from a broken index state."""
-    typer.secho("Recover not implemented yet.", fg=typer.colors.YELLOW)
+    console.print("[yellow]Recover not implemented yet.[/yellow]")
 
 
 @app.command()
@@ -239,62 +281,85 @@ def doctor(
     ] = False,
 ) -> None:
     """Validate environment and system health."""
-    typer.secho("Synapse Doctor: System Health Check", fg=typer.colors.CYAN, bold=True)
+    console.print("[bold cyan]Synapse Doctor: System Health Check[/bold cyan]\n")
 
     settings = _settings(path)
     runtime = SynapseRuntime(settings)
 
-    # 1. Check SQLite
-    try:
-        runtime.initialize_storage()
-        res = runtime.doctor()
-        typer.secho(f"✓ Database integrity: {res['database_integrity']}", fg=typer.colors.GREEN)
-    except Exception as e:
-        typer.secho(f"✗ Database error: {e}", fg=typer.colors.RED)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task_db = progress.add_task("Checking SQLite Database...", total=1)
+        try:
+            runtime.initialize_storage()
+            res = runtime.doctor()
+            progress.update(
+                task_db,
+                completed=1,
+                description=f"[green]✓ Database integrity: {res['database_integrity']}[/green]",
+            )
+        except Exception as e:
+            progress.update(task_db, completed=1, description=f"[red]✗ Database error: {e}[/red]")
 
-    # 2. Check Parsers
-    try:
-        from synapse.parser.registry import CodeParserRegistry
+        task_parsers = progress.add_task("Checking Tree-Sitter Parsers...", total=1)
+        try:
+            from synapse.parser.registry import CodeParserRegistry
 
-        registry = CodeParserRegistry()
-        # Test with a dummy python string
-        test_file = Path(path) / ".synapse_test.py"
-        test_file.write_text("def test(): pass")
-        registry.parse(test_file, relative_path=".synapse_test.py")
-        test_file.unlink()
-        typer.secho("✓ Tree-sitter parsers functional", fg=typer.colors.GREEN)
-    except Exception as e:
-        typer.secho(f"✗ Parser error: {e}", fg=typer.colors.RED)
+            registry = CodeParserRegistry()
+            test_file = Path(path) / ".synapse_test.py"
+            test_file.write_text("def test(): pass")
+            registry.parse(test_file, relative_path=".synapse_test.py")
+            test_file.unlink()
+            progress.update(
+                task_parsers,
+                completed=1,
+                description="[green]✓ Tree-sitter parsers functional[/green]",
+            )
+        except Exception as e:
+            progress.update(
+                task_parsers, completed=1, description=f"[red]✗ Parser error: {e}[/red]"
+            )
 
-    # 3. Check Tokenizer
-    try:
-        import tiktoken
+        task_tok = progress.add_task("Checking Tokenizer...", total=1)
+        try:
+            import tiktoken
 
-        tiktoken.get_encoding("cl100k_base")
-        typer.secho("✓ Tokenizer (tiktoken) ready", fg=typer.colors.GREEN)
-    except Exception as e:
-        typer.secho(f"✗ Tokenizer error: {e}", fg=typer.colors.RED)
+            tiktoken.get_encoding("cl100k_base")
+            progress.update(
+                task_tok, completed=1, description="[green]✓ Tokenizer (tiktoken) ready[/green]"
+            )
+        except Exception as e:
+            progress.update(task_tok, completed=1, description=f"[red]✗ Tokenizer error: {e}[/red]")
 
-    # 4. Check Provider & Keyring
-    try:
-        errors = settings.validate_configuration()
-        if errors:
-            for err in errors:
-                typer.secho(f"✗ Config error: {err}", fg=typer.colors.RED)
-        else:
-            typer.secho(f"✓ Provider configured: {settings.llm_provider}", fg=typer.colors.GREEN)
-            typer.secho("✓ Keyring secrets accessible", fg=typer.colors.GREEN)
+        task_prov = progress.add_task("Checking LLM Provider...", total=1)
+        try:
+            errors = settings.validate_configuration()
+            if errors:
+                progress.update(
+                    task_prov, completed=1, description=f"[red]✗ Config error: {errors[0]}[/red]"
+                )
+            else:
+                conn_errors = settings.test_connectivity()
+                if conn_errors:
+                    progress.update(
+                        task_prov,
+                        completed=1,
+                        description=f"[red]✗ Connectivity error: {conn_errors[0]}[/red]",
+                    )
+                else:
+                    progress.update(
+                        task_prov,
+                        completed=1,
+                        description=f"[green]✓ Provider ({settings.llm_provider}) connectivity verified[/green]",
+                    )
+        except Exception as e:
+            progress.update(
+                task_prov, completed=1, description=f"[red]✗ Unexpected error: {e}[/red]"
+            )
 
-        conn_errors = settings.test_connectivity()
-        if conn_errors:
-            for err in conn_errors:
-                typer.secho(f"✗ Connectivity error: {err}", fg=typer.colors.RED)
-        else:
-            typer.secho("✓ Provider connectivity verified", fg=typer.colors.GREEN)
-    except Exception as e:
-        typer.secho(f"✗ Unexpected error: {e}", fg=typer.colors.RED)
-
-    typer.echo("\nAll checks complete.")
+    console.print("\n[bold]All checks complete.[/bold]")
 
 
 @app.command()
@@ -328,8 +393,8 @@ def run(
             processes.append((name, p))
             time.sleep(0.5)
 
-        typer.secho("\n✓ Synapse Runtime active!", fg=typer.colors.GREEN, bold=True)
-        typer.secho(f"UI: http://{host}:{port}", fg=typer.colors.CYAN)
+        console.print("\n[bold green]✓ Synapse Runtime active![/bold green]")
+        console.print(f"[cyan]UI: http://{host}:{port}[/cyan]")
         while True:
             time.sleep(1)
     except KeyboardInterrupt:

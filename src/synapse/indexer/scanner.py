@@ -3,10 +3,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+
+import structlog
+
+logger = structlog.get_logger()
 
 DEFAULT_EXCLUDES = {
     ".git",
@@ -109,7 +114,26 @@ class RepositoryScanner:
     def scan(self) -> RepositoryScan:
         files: list[FileObservation] = []
         manifests: list[ManifestObservation] = []
-        for path in sorted(self.repository_path.rglob("*")):
+
+        paths: list[Path] = []
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "-z", "-c", "-o", "--exclude-standard"],
+                cwd=self.repository_path,
+                capture_output=True,
+                check=True,
+            )
+            for rel_path in result.stdout.split(b"\0"):
+                if rel_path:
+                    try:
+                        paths.append(self.repository_path / rel_path.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        pass
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Fallback to rglob if not a git repository
+            paths = list(self.repository_path.rglob("*"))
+
+        for path in paths:
             if not path.is_file():
                 continue
             if self._excluded(path):
@@ -120,6 +144,10 @@ class RepositoryScanner:
                 continue
             if stat.st_size > self.max_file_bytes:
                 continue
+            if _is_binary_file(path):
+                logger.debug("Skipped binary file", path=path.name)
+                continue
+
             relative_path = path.relative_to(self.repository_path).as_posix()
             content_hash = _hash_file(path)
             language = LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
@@ -197,6 +225,17 @@ class RepositoryScanner:
         except Exception:
             return ManifestObservation(relative_path, "unknown", ())
         return ManifestObservation(relative_path, "unknown", ())
+
+
+def _is_binary_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as f:
+            chunk = f.read(1024)
+            if b"\x00" in chunk:
+                return True
+    except Exception:
+        return True
+    return False
 
 
 def _hash_file(path: Path) -> str:

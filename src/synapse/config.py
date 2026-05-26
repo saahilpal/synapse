@@ -70,22 +70,39 @@ class SynapseSettings(BaseSettings):
 
     daemon_poll_interval_seconds: float = 2.0
 
+    def _get_fallback_credential(self, key: str) -> str | None:
+        try:
+            cred_file = Path.home() / ".synapse" / "credentials"
+            if cred_file.exists():
+                for line in cred_file.read_text().splitlines():
+                    if line.strip().startswith(f"{key}="):
+                        return line.split("=", 1)[1].strip().strip("\"'")
+        except Exception:
+            pass
+        return None
+
     @property
     def openai_api_key(self) -> str | None:
-        return keyring.get_password("synapse", "openai_api_key") or os.environ.get(
-            "SYNAPSE_OPENAI_API_KEY"
+        return (
+            keyring.get_password("synapse", "openai_api_key")
+            or os.environ.get("SYNAPSE_OPENAI_API_KEY")
+            or self._get_fallback_credential("SYNAPSE_OPENAI_API_KEY")
         )
 
     @property
     def gemini_api_key(self) -> str | None:
-        return keyring.get_password("synapse", "gemini_api_key") or os.environ.get(
-            "SYNAPSE_GEMINI_API_KEY"
+        return (
+            keyring.get_password("synapse", "gemini_api_key")
+            or os.environ.get("SYNAPSE_GEMINI_API_KEY")
+            or self._get_fallback_credential("SYNAPSE_GEMINI_API_KEY")
         )
 
     @property
     def anthropic_api_key(self) -> str | None:
-        return keyring.get_password("synapse", "anthropic_api_key") or os.environ.get(
-            "SYNAPSE_ANTHROPIC_API_KEY"
+        return (
+            keyring.get_password("synapse", "anthropic_api_key")
+            or os.environ.get("SYNAPSE_ANTHROPIC_API_KEY")
+            or self._get_fallback_credential("SYNAPSE_ANTHROPIC_API_KEY")
         )
 
     @field_validator("repository_path", "state_path", mode="before")
