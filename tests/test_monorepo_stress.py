@@ -17,6 +17,8 @@ SYNAPSE_SKIP_STRESS env variable is set (e.g. in fast CI passes).
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -140,3 +142,71 @@ def test_integrity_after_stress(stress_runtime: SynapseRuntime | None) -> None:
 
     result = stress_runtime.store.integrity_check()
     assert result == "ok", f"Database integrity failed: {result}"
+
+
+@pytest.mark.benchmark
+def test_indexing_10k_files(tmp_path: Path) -> None:
+    """Stress test indexing 10,000 files to measure latency, DB growth, and RSS."""
+    if os.environ.get("SYNAPSE_SKIP_STRESS"):
+        pytest.skip("Stress test skipped")
+
+    repo = tmp_path / "10k_repo"
+    repo.mkdir()
+
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "init"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.email", "stress@synapse.local"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.name", "Stress Tester"], cwd=repo, check=True)
+
+    # Batch write 10,000 files
+    subdirs = [repo / f"dir_{d}" for d in range(10)]
+    for sd in subdirs:
+        sd.mkdir()
+
+    # Create 10,000 small files
+    for i in range(10000):
+        sd = subdirs[i % 10]
+        (sd / f"file_{i}.py").write_text(f"def func_{i}():\n    pass\n", encoding="utf-8")
+
+    # Add and commit so git ls-files works
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "10k files", "--quiet"], cwd=repo, check=True)
+
+    settings = SynapseSettings(
+        repository_path=repo,
+        profile=RuntimeProfile.TEST,
+        sqlite_path=tmp_path / "synapse.db",
+        object_path=tmp_path / "objects",
+    )
+    runtime = SynapseRuntime(settings)
+
+    t0 = time.perf_counter()
+    runtime.bootstrap(force=True)
+    elapsed = time.perf_counter() - t0
+
+    print(f"\n  ⏱  10k Files Indexing Elapsed: {elapsed:.2f}s")
+
+    # Assert budgets
+    assert elapsed < 60.0, f"Indexing 10k files took {elapsed:.2f}s (budget: 60s)"
+
+    # Verify counts
+    status = runtime.status()
+    assert status.files >= 10000
+    assert status.symbols >= 10000
+
+    # Measure DB size
+    assert settings.sqlite_path is not None
+    db_size = settings.sqlite_path.stat().st_size / (1024 * 1024)
+    print(f"  📦  SQLite DB Size: {db_size:.2f} MiB")
+    assert db_size < 50.0, f"DB size {db_size:.2f} MiB is too large"
+
+    # Measure retrieval p95
+    latencies = []
+    for q in ["func_10", "func_5000", "func_9999"]:
+        t_q = time.perf_counter()
+        ans, _, _ = runtime.query_hybrid(q, max_tokens=1000)
+        latencies.append(time.perf_counter() - t_q)
+
+    avg = sum(latencies) / len(latencies)
+    print(f"  ⏱  10k Repo Retrieval Average Latency: {avg * 1000:.0f}ms")
+    assert avg < 2.0, f"Retrieval latency too high: {avg:.2f}s"
