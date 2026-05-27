@@ -133,59 +133,312 @@ def setup(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Interactive first-run setup and onboarding."""
-    console.print("[bold cyan]Welcome to Synap AI Context Runtime[/bold cyan]")
-    console.print("This wizard will bootstrap your local AI environment.\n")
+    import sys
 
-    config_dir = Path("~/.config/synap").expanduser()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_file = config_dir / "config.toml"
-
-    console.print("[yellow]Synap stores API keys securely in your system keyring.[/yellow]")
-    console.print(f"Global configuration: {config_file.as_posix()}\n")
-
-    # 1. Choose Provider
-    provider = typer.prompt(
-        "Which primary LLM provider would you like to use?",
-        default="ollama",
-    ).lower()
-
-    # 2. Configure LLM
-    llm_model = typer.prompt(
-        f"Which model would you like to use for {provider}?",
-        default="qwen2.5-coder:14b" if provider == "ollama" else "gpt-4o",
-    )
-
-    # Gather Keys if needed
-    ollama_url = "http://localhost:11434"
-
+    import httpx
     import keyring
+    import questionary
 
-    if provider == "openai":
-        key = typer.prompt("Enter OpenAI API Key", hide_input=True)
-        keyring.set_password("synap", "openai_api_key", key)
-    elif provider == "gemini":
-        key = typer.prompt("Enter Gemini API Key", hide_input=True)
-        keyring.set_password("synap", "gemini_api_key", key)
-    elif provider == "anthropic":
-        key = typer.prompt("Enter Anthropic API Key", hide_input=True)
-        keyring.set_password("synap", "anthropic_api_key", key)
-    elif provider == "ollama":
-        ollama_url = typer.prompt("Enter Ollama URL", default="http://localhost:11434")
+    # Print a beautiful header to wow the user
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+    console.print("[bold cyan]          Synap Initial Setup           [/bold cyan]")
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
 
-    # Build TOML config (non-sensitive only)
+    from synap_git.config import _get_config_file_path
+
+    config_file = _get_config_file_path()
+    config_dir = config_file.parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"[dim]Configuration directory:[/dim] [bold]{config_dir.as_posix()}[/bold]")
+    console.print(f"[dim]Configuration file:[/dim] [bold]{config_file.as_posix()}[/bold]")
+    console.print("[dim]Secrets store:[/dim] [bold]System Keyring[/bold]\n")
+
+    # Detect non-TTY fallback
+    is_tty = sys.stdin.isatty() and sys.stdout.isatty()
+
+    provider = None
+    llm_model = None
+    ollama_url = "http://localhost:11434"
+    key = None
+
+    if is_tty:
+        # 1. Select Provider
+        provider = questionary.select(
+            "Select LLM provider:",
+            choices=[
+                questionary.Choice("Ollama (Local first)", value="ollama"),
+                questionary.Choice("OpenAI", value="openai"),
+                questionary.Choice("Anthropic", value="anthropic"),
+                questionary.Choice("Gemini", value="gemini"),
+            ],
+        ).ask()
+
+        if not provider:
+            console.print("[red]Setup cancelled.[/red]")
+            raise typer.Exit(1)
+
+        # 2. Select Model based on provider
+        model_choices: dict[str, list[str | questionary.Choice]] = {
+            "ollama": [
+                "qwen2.5-coder:14b",
+                "deepseek-coder",
+                "llama3",
+                "mistral",
+                questionary.Choice("Custom model name...", value="custom"),
+            ],
+            "openai": [
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4-turbo",
+                "o1-mini",
+                "o3-mini",
+                questionary.Choice("Custom model name...", value="custom"),
+            ],
+            "anthropic": [
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-haiku-latest",
+                "claude-3-opus-latest",
+                questionary.Choice("Custom model name...", value="custom"),
+            ],
+            "gemini": [
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+                questionary.Choice("Custom model name...", value="custom"),
+            ],
+        }
+
+        llm_model = questionary.select(
+            "Select model:",
+            choices=model_choices[provider],
+        ).ask()
+
+        if not llm_model:
+            console.print("[red]Setup cancelled.[/red]")
+            raise typer.Exit(1)
+
+        if llm_model == "custom":
+            llm_model = questionary.text(
+                "Enter custom model name:",
+                validate=lambda text: len(text.strip()) > 0 or "Model name cannot be empty.",
+            ).ask()
+            if not llm_model:
+                console.print("[red]Setup cancelled.[/red]")
+                raise typer.Exit(1)
+            llm_model = llm_model.strip()
+
+        # 3. Gather Keys / Ollama URL
+        if provider == "ollama":
+            ollama_url = questionary.text(
+                "Enter Ollama URL:",
+                default="http://localhost:11434",
+                validate=lambda text: (text.startswith("http://") or text.startswith("https://"))
+                or "Ollama URL must start with http:// or https://",
+            ).ask()
+            if not ollama_url:
+                console.print("[red]Setup cancelled.[/red]")
+                raise typer.Exit(1)
+            ollama_url = ollama_url.strip()
+        else:
+            key = questionary.password(
+                f"Enter {provider.capitalize()} API Key:",
+                validate=lambda text: len(text.strip()) > 0 or "API Key cannot be empty.",
+            ).ask()
+            if not key:
+                console.print("[red]Setup cancelled.[/red]")
+                raise typer.Exit(1)
+            key = key.strip()
+
+    else:
+        # Non-TTY plain text fallback
+        console.print(
+            "[yellow]Non-TTY terminal detected. Falling back to plain text inputs.[/yellow]"
+        )
+
+        # Provider
+        console.print("Available providers: ollama, openai, anthropic, gemini")
+        provider = input("Select LLM provider [ollama]: ").strip().lower() or "ollama"
+        if provider not in ("ollama", "openai", "anthropic", "gemini"):
+            console.print(f"[red]Error: Invalid provider '{provider}'.[/red]")
+            raise typer.Exit(1)
+
+        # Model
+        default_models = {
+            "ollama": "qwen2.5-coder:14b",
+            "openai": "gpt-4o",
+            "anthropic": "claude-3-5-sonnet-latest",
+            "gemini": "gemini-2.5-pro",
+        }
+        default_model = default_models[provider]
+        llm_model = input(f"Select model [{default_model}]: ").strip() or default_model
+
+        # Keys/URL
+        if provider == "ollama":
+            ollama_url = (
+                input("Enter Ollama URL [http://localhost:11434]: ").strip()
+                or "http://localhost:11434"
+            )
+            if not (ollama_url.startswith("http://") or ollama_url.startswith("https://")):
+                console.print("[red]Error: Ollama URL must start with http:// or https://[/red]")
+                raise typer.Exit(1)
+        else:
+            import getpass
+
+            key = getpass.getpass(f"Enter {provider.capitalize()} API Key: ").strip()
+            if not key:
+                console.print("[red]Error: API Key cannot be empty.[/red]")
+                raise typer.Exit(1)
+
+    # 4. Connection and API Key validation with timeout
+    console.print()
+    with console.status("[yellow]Verifying provider connectivity...[/yellow]", spinner="dots"):
+        try:
+            if provider == "ollama":
+                try:
+                    resp = httpx.get(f"{ollama_url}/api/tags", timeout=3.0)
+                    if resp.status_code != 200:
+                        raise ValueError(f"Ollama returned status code {resp.status_code}")
+
+                    # Model presence warning
+                    models_data = resp.json().get("models", [])
+                    installed_models = [m.get("name", "") for m in models_data]
+
+                    if llm_model != "custom":
+                        model_matched = False
+                        for name in installed_models:
+                            if (
+                                llm_model == name
+                                or name.startswith(llm_model + ":")
+                                or llm_model.startswith(name + ":")
+                            ):
+                                model_matched = True
+                                break
+                        if not model_matched:
+                            console.print(
+                                f"\n[yellow]⚠ Warning: Model '{llm_model}' is not currently pulled/installed in Ollama.[/yellow]"
+                            )
+                            console.print(
+                                f"  Run [bold]ollama pull {llm_model}[/bold] in another terminal to download it.\n"
+                            )
+                except httpx.ConnectError:
+                    raise ValueError(
+                        f"Could not connect to Ollama at {ollama_url}. Is Ollama running?"
+                    )
+                except httpx.TimeoutException:
+                    raise ValueError(f"Connection to Ollama at {ollama_url} timed out (3s).")
+
+            elif provider == "openai":
+                try:
+                    assert key is not None
+                    resp = httpx.get(
+                        "https://api.openai.com/v1/models",
+                        headers={"Authorization": f"Bearer {key}"},
+                        timeout=3.0,
+                    )
+                    if resp.status_code == 401:
+                        raise ValueError(
+                            "API key validation failed: Invalid OpenAI API key (401 Unauthorized)."
+                        )
+                    elif resp.status_code != 200:
+                        raise ValueError(f"OpenAI API returned status code {resp.status_code}")
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    raise ValueError(
+                        "Could not connect to OpenAI API. Check your internet connection."
+                    )
+                except httpx.TimeoutException:
+                    raise ValueError("Connection to OpenAI API timed out (3s).")
+
+            elif provider == "anthropic":
+                try:
+                    assert key is not None
+                    resp = httpx.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={},
+                        timeout=3.0,
+                    )
+                    if resp.status_code in (401, 403):
+                        raise ValueError(
+                            "API key validation failed: Invalid Anthropic API key (401/403 Unauthorized/Forbidden)."
+                        )
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    raise ValueError(
+                        "Could not connect to Anthropic API. Check your internet connection."
+                    )
+                except httpx.TimeoutException:
+                    raise ValueError("Connection to Anthropic API timed out (3s).")
+
+            elif provider == "gemini":
+                try:
+                    assert key is not None
+                    resp = httpx.get(
+                        f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                        timeout=3.0,
+                    )
+                    if resp.status_code in (400, 403):
+                        try:
+                            err_msg = (
+                                resp.json()
+                                .get("error", {})
+                                .get("message", "Invalid Gemini API key")
+                            )
+                        except Exception:
+                            err_msg = "Invalid Gemini API key"
+                        raise ValueError(f"API key validation failed: {err_msg}")
+                    elif resp.status_code != 200:
+                        raise ValueError(f"Gemini API returned status code {resp.status_code}")
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    raise ValueError(
+                        "Could not connect to Gemini API. Check your internet connection."
+                    )
+                except httpx.TimeoutException:
+                    raise ValueError("Connection to Gemini API timed out (3s).")
+
+            console.print("[green]✓ Connection verified[/green]")
+        except Exception as e:
+            console.print(f"[bold red]✗ Connection Verification Failed:[/bold red] {e}")
+
+            # Interactive check override
+            save_anyway = False
+            if is_tty:
+                save_anyway = questionary.confirm(
+                    "Connection check failed. Save configuration anyway?"
+                ).ask()
+            else:
+                save_anyway = input(
+                    "Connection check failed. Save configuration anyway? [y/N]: "
+                ).strip().lower() in ("y", "yes")
+
+            if not save_anyway:
+                console.print("[red]Setup cancelled.[/red]")
+                raise typer.Exit(1)
+
+    # 5. Write configurations & secrets (only now)
+    if provider != "ollama" and key:
+        keyring.set_password("synap", f"{provider}_api_key", key)
+
     config_content = f"""[llm]
 llm_provider = "{provider}"
 llm_model = "{llm_model}"
 ollama_url = "{ollama_url}"
 """
     config_file.write_text(config_content)
-    console.print(f"\n[green]✓ Configuration saved to {config_file.as_posix()}[/green]")
-    console.print("[green]✓ Secrets saved to system keyring.[/green]")
+    console.print("[green]✓ Configuration saved[/green]")
+    if provider != "ollama":
+        console.print("[green]✓ Secrets saved securely[/green]")
 
     # Initialize storage
-    runtime = SynapRuntime(_settings(path))
-    runtime.bootstrap(force=True)
-    console.print("[green]✓ Storage initialized.[/green]")
+    with console.status("[yellow]Initializing storage...[/yellow]"):
+        runtime = SynapRuntime(_settings(path))
+        runtime.bootstrap(force=True)
+    console.print("[green]✓ Storage initialized[/green]")
+    console.print("\n[bold green]✓ Setup complete[/bold green]")
 
 
 def _auto_protect_synapse(repository_path: Path) -> None:
