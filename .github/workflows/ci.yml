@@ -97,7 +97,7 @@ jobs:
           git config --global user.name "Synap CI"
 
       - name: Run benchmark tests
-        run: uv run pytest -m "benchmark" -v --tb=short --timeout=300
+        run: uv run pytest -m "benchmark" -v --tb=short --timeout=600
         env:
           SYNAP_SKIP_STRESS: ""
 

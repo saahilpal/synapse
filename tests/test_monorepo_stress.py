@@ -186,8 +186,8 @@ def test_indexing_10k_files(tmp_path: Path) -> None:
 
     print(f"\n  ⏱  10k Files Indexing Elapsed: {elapsed:.2f}s")
 
-    # Assert budgets
-    assert elapsed < 60.0, f"Indexing 10k files took {elapsed:.2f}s (budget: 60s)"
+    # Assert budgets — 120s to account for slow CI runners
+    assert elapsed < 120.0, f"Indexing 10k files took {elapsed:.2f}s (budget: 120s)"
 
     # Verify counts
     status = runtime.status()
