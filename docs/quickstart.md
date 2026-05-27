@@ -7,7 +7,7 @@ This guide will help you get Synap up and running in your repository in under 5 
 Synap is distributed as a Python package. We recommend using `uv` for a fast, isolated installation.
 
 ```bash
-uv tool install synapse
+uv tool install synap-git
 ```
 
 ## 2. Global Setup

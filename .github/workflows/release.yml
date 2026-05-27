@@ -69,6 +69,8 @@ jobs:
           uv pip install dist/*.whl
           git config --global user.email "release@synapse.local"
           git config --global user.name "Synap Release"
+          synap --version
+          synap --help
           synap init . --skip-llm --quiet
           synap doctor .
           synap mcp verify .
@@ -87,7 +89,7 @@ jobs:
     needs: build-and-test
     environment:
       name: pypi
-      url: https://pypi.org/p/synapse
+      url: https://pypi.org/p/synap-git
     steps:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -101,10 +103,56 @@ jobs:
           skip-existing: false
 
 
+  post-publish-smoke:
+    name: Post-Publish Verification
+    runs-on: ubuntu-latest
+    needs: publish-pypi
+    steps:
+      - name: Wait for PyPI Index
+        run: sleep 30
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Verify PyPI Installation
+        run: |
+          uv venv test_env
+          source test_env/bin/activate
+          # Force download from PyPI
+          uv pip install --no-cache-dir synap-git
+
+          mkdir test_repo && cd test_repo
+          git init
+          git config --global user.email "release@synapse.local"
+          git config --global user.name "Synap Release"
+          git commit -m "init" --allow-empty
+
+          # Verify package versions
+          synap --version
+          synap --help
+
+          # Verify initialization and daemon boot
+          synap init . --skip-llm --quiet
+          synap start .
+          sleep 2
+          synap status .
+          synap stop .
+
+          # Verify doctor repairs and status
+          synap doctor .
+
+          # Verify update command works
+          synap update
+
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: publish-pypi
+    needs: post-publish-smoke
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,13 +179,14 @@ jobs:
           ## Installation
 
           ```bash
-          pip install synapse
+          pip install synap-git
           ```
 
           ## Verification
 
           After installation, verify your environment:
           ```bash
+          synap --help
           synap init .
           synap doctor .
           ```

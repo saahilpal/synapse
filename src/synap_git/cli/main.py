@@ -985,14 +985,14 @@ def version() -> None:
     """Print the Synap package version."""
     from synap_git import __version__
 
-    console.print(f"Synap version: [bold]{__version__}[/bold]")
+    console.print(f"Synap v{__version__}")
 
 
 def version_callback(value: bool) -> None:
     if value:
         from synap_git import __version__
 
-        typer.echo(f"Synap version: {__version__}")
+        typer.echo(f"Synap v{__version__}")
         raise typer.Exit()
 
 

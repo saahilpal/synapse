@@ -133,9 +133,9 @@ sequenceDiagram
 ### 1. Installation
 Install the Synap CLI via `pip` or `uv`:
 ```bash
-pip install synapse
+pip install synap-git
 # or using uv:
-uv tool install synapse
+uv tool install synap-git
 ```
 
 ### 2. Setup & Initialize
