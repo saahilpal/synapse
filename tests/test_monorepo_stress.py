@@ -32,7 +32,7 @@ def _synapse_repo_root() -> Path | None:
     """Find the root of the Synap repository relative to this test file."""
     here = Path(__file__).resolve().parent
     candidate = here.parent
-    if (candidate / "pyproject.toml").exists() and (candidate / "src" / "synap").exists():
+    if (candidate / "pyproject.toml").exists() and (candidate / "src" / "synap_git").exists():
         return candidate
     return None
 

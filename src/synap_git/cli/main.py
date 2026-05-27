@@ -294,9 +294,7 @@ def setup(
                 console.print("[red]Error: Ollama URL must start with http:// or https://[/red]")
                 raise typer.Exit(1)
         else:
-            import getpass
-
-            key = getpass.getpass(f"Enter {provider.capitalize()} API Key: ").strip()
+            key = typer.prompt(f"Enter {provider.capitalize()} API Key", hide_input=True).strip()
             if not key:
                 console.print("[red]Error: API Key cannot be empty.[/red]")
                 raise typer.Exit(1)

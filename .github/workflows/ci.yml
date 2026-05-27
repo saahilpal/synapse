@@ -59,7 +59,7 @@ jobs:
           git config --global user.name "Synap CI"
 
       - name: Run tests (excluding benchmark)
-        run: uv run pytest -m "not benchmark" --cov=synap --cov-report=term-missing --cov-report=xml
+        run: uv run pytest -m "not benchmark" --cov=synap_git --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
