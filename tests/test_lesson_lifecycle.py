@@ -21,13 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
-from synapse.storage.sqlite import LessonStatus
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
+from synap_git.storage.sqlite import LessonStatus
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> SynapseSettings:
+def settings(tmp_path: Path) -> SynapSettings:
     repo = tmp_path / "repo"
     repo.mkdir()
     git_bin = shutil.which("git") or "git"
@@ -39,21 +39,21 @@ def settings(tmp_path: Path) -> SynapseSettings:
         capture_output=True,
     )
     subprocess.run(
-        [git_bin, "config", "user.name", "Synapse Test"], cwd=repo, check=True, capture_output=True
+        [git_bin, "config", "user.name", "Synap Test"], cwd=repo, check=True, capture_output=True
     )
     (repo / "main.py").write_text("def run(): pass\n")
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run([git_bin, "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
-    return SynapseSettings(
+    return SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
 
 
 def _insert_lesson(
-    runtime: SynapseRuntime,
+    runtime: SynapRuntime,
     *,
     what_failed: str = "bad pattern",
     why_failed: str = "caused bugs",
@@ -86,8 +86,8 @@ def _insert_lesson(
 class TestLessonRetrieval:
     """Retrieval gating: pending lessons must NOT appear; approved MUST appear."""
 
-    def test_pending_lesson_excluded_from_retrieval(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_pending_lesson_excluded_from_retrieval(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         _insert_lesson(runtime, what_failed="NEVER DO THIS", why_failed="breaks prod")
@@ -103,8 +103,8 @@ class TestLessonRetrieval:
         approved = runtime.store.get_lessons("approved")
         assert len(approved) == 0
 
-    def test_approved_lesson_injected_into_retrieval(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_approved_lesson_injected_into_retrieval(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         lesson_id = _insert_lesson(
@@ -131,8 +131,8 @@ class TestLessonRetrieval:
 class TestLessonStateTransitions:
     """State machine: valid and invalid transitions."""
 
-    def test_approve_transition(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_approve_transition(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
         lesson_id = _insert_lesson(runtime)
 
@@ -140,8 +140,8 @@ class TestLessonStateTransitions:
         approved = runtime.store.get_lessons("approved")
         assert any(les["lesson_id"] == lesson_id for les in approved)
 
-    def test_reject_transition(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_reject_transition(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
         lesson_id = _insert_lesson(runtime)
 
@@ -152,16 +152,16 @@ class TestLessonStateTransitions:
         assert not any(les["lesson_id"] == lesson_id for les in pending)
         assert not any(les["lesson_id"] == lesson_id for les in approved)
 
-    def test_invalid_status_raises(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_invalid_status_raises(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
         lesson_id = _insert_lesson(runtime)
 
         with pytest.raises(ValueError, match="Invalid lesson status"):
             runtime.store.update_lesson(lesson_id, "reason", "nonsense_status")
 
-    def test_approval_actor_recorded(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_approval_actor_recorded(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
         lesson_id = _insert_lesson(runtime)
         runtime.store.update_lesson(lesson_id, "bad pattern", "approved", actor="saahil")
@@ -177,8 +177,8 @@ class TestLessonStateTransitions:
 class TestLessonExpiry:
     """Expiry enforcement: expired lessons drop out of retrieval and can be pruned."""
 
-    def test_expired_lesson_excluded_from_get_lessons(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_expired_lesson_excluded_from_get_lessons(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         # Insert a lesson that expired 1 second ago
@@ -188,8 +188,8 @@ class TestLessonExpiry:
         approved = runtime.store.get_lessons("approved")
         assert not any(les["lesson_id"] == lesson_id for les in approved)
 
-    def test_prune_expired_lessons(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_prune_expired_lessons(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         # Insert 3 already-expired pending lessons + 1 still valid
@@ -210,8 +210,8 @@ class TestLessonExpiry:
 class TestMemoryVerify:
     """Memory verify: detect dangling file references in approved lessons."""
 
-    def test_healthy_lesson_all_files_exist(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_healthy_lesson_all_files_exist(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         # main.py was created by the fixture and exists
@@ -230,8 +230,8 @@ class TestMemoryVerify:
 
         assert len(dangling) == 0
 
-    def test_dangling_lesson_detects_deleted_file(self, settings: SynapseSettings) -> None:
-        runtime = SynapseRuntime(settings)
+    def test_dangling_lesson_detects_deleted_file(self, settings: SynapSettings) -> None:
+        runtime = SynapRuntime(settings)
         runtime.bootstrap()
 
         # Reference a file that doesn't exist

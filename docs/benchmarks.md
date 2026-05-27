@@ -1,6 +1,6 @@
 # Benchmarks
 
-Performance is a first-class citizen in Synapse. We benchmark every core component against real-world repositories to ensure low-latency operations.
+Performance is a first-class citizen in Synap. We benchmark every core component against real-world repositories to ensure low-latency operations.
 
 ## Indexing Latency
 
@@ -15,7 +15,7 @@ Performance is a first-class citizen in Synapse. We benchmark every core compone
 | Metric | Score | Explanation |
 | :--- | :--- | :--- |
 | **Grounding Accuracy** | 98.2% | Percentage of retrieved symbols relevant to query. |
-| **Hallucination Rate** | < 1% | AI inventions when using Synapse context. |
+| **Hallucination Rate** | < 1% | AI inventions when using Synap context. |
 | **Token Efficiency** | 94.5% | Ratio of signal-to-noise in packed context. |
 
 ## Resource Usage

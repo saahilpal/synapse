@@ -2,8 +2,8 @@ import sys
 import time
 from pathlib import Path
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 def run_benchmark(repo_path: str) -> None:
@@ -12,13 +12,13 @@ def run_benchmark(repo_path: str) -> None:
         print(f"Path {repo_path} does not exist.")
         return
 
-    print(f"Benchmarking Synapse on {path.name}...")
+    print(f"Benchmarking Synap on {path.name}...")
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=path,
         profile=RuntimeProfile.DEV,
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
 
     # 1. Indexing Benchmark
     start = time.perf_counter()

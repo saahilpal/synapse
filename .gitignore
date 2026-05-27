@@ -11,8 +11,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-.synapse/
-!.synapse.example/
+.synap/
+!.synap.example/
 *.db
 *.sqlite
 *.sqlite3
@@ -22,4 +22,3 @@ build/
 .env
 .env.*
 .env.local
-

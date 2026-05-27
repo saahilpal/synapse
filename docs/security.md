@@ -1,18 +1,18 @@
 # Security
 
-Synapse is designed with a "Security-First" approach for professional development environments.
+Synap is designed with a "Security-First" approach for professional development environments.
 
 ## Secret Management
 
-Synapse **never** stores API keys or secrets in the repository or in plaintext configuration files.
+Synap **never** stores API keys or secrets in the repository or in plaintext configuration files.
 1.  **System Keyring:** We use `python-keyring` to store secrets in your OS-native secure storage (macOS Keychain, Windows Credential Locker, or Secret Service).
-2.  **Environment Variables:** As a secondary option, Synapse respects `SYNAPSE_*_API_KEY` environment variables.
+2.  **Environment Variables:** As a secondary option, Synap respects `SYNAP_*_API_KEY` environment variables.
 
 ## Data Privacy
 
-1.  **Local-First:** By default, Synapse indices and structural data remain on your local machine in the `.synapse` directory.
+1.  **Local-First:** By default, Synap indices and structural data remain on your local machine in the `.synap` directory.
 2.  **Ollama Support:** For maximum privacy, use [Ollama](https://ollama.com/) to perform embeddings and LLM reasoning entirely on your local hardware.
-3.  **Telemetry:** Synapse does **not** include any hidden telemetry or "phone-home" features.
+3.  **Telemetry:** Synap does **not** include any hidden telemetry or "phone-home" features.
 
 ## Supply Chain Security
 

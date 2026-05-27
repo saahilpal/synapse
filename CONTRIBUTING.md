@@ -1,8 +1,8 @@
-# Contributing to Synapse
+# Contributing to Synap
 
-Welcome to the Synapse project. We are building the **infrastructure for persistent structural context** for AI coding agents.
+Welcome to the Synap project. We are building the **infrastructure for persistent structural context** for AI coding agents.
 
-Because Synapse is infrastructure, we hold ourselves to rigorous standards. The codebase must remain deterministic, bounded, and highly resilient. We prioritize structural truth over AI abstraction, and stability over hype.
+Because Synap is infrastructure, we hold ourselves to rigorous standards. The codebase must remain deterministic, bounded, and highly resilient. We prioritize structural truth over AI abstraction, and stability over hype.
 
 If you share this vision, we’d love your help.
 
@@ -13,14 +13,14 @@ If you share this vision, we’d love your help.
 Before contributing, please read our [Architecture Documentation](ARCHITECTURE.md).
 
 When adding features or fixing bugs, adhere strictly to these invariants:
-- **Structural Truth is Deterministic**: AI models *never* define structural truth in Synapse. Structure is derived exclusively via AST parsers, Git state, and file hashes.
+- **Structural Truth is Deterministic**: AI models *never* define structural truth in Synap. Structure is derived exclusively via AST parsers, Git state, and file hashes.
 - **Append-Only History**: The SQLite event store is append-only. We do not patch nodes in place. We invalidate them and append deltas.
 - **Strict Boundaries**: Keep provider-specific LLM logic (e.g., OpenAI, Anthropic) out of the structural extraction and storage layers. LLMs belong in the retrieval synthesis and overlay generation phases.
 - **Bounded Retrieval**: Protect context limits. Every structural traversal must respect hard node limits and token budgets to prevent agent overflow.
 
 ## 2. Development Setup
 
-Synapse relies on `uv` for ultra-fast, deterministic dependency resolution.
+Synap relies on `uv` for ultra-fast, deterministic dependency resolution.
 
 ### Prerequisites
 - Python 3.10+
@@ -31,7 +31,7 @@ Synapse relies on `uv` for ultra-fast, deterministic dependency resolution.
 Clone the repository and bootstrap your environment:
 
 ```bash
-git clone https://github.com/saahilpal/synapse.git
+git clone https://github.com/saahilpal/synap-git.git
 cd synapse
 
 # Sync dependencies and install the package in editable mode
@@ -74,8 +74,8 @@ uv run pytest
 
 ## 5. Adding New Parsers / Languages
 
-Synapse’s strength lies in its AST extraction. If you are adding support for a new language:
-- Implement it within `src/synapse/context/parsers.py` (or a dedicated language submodule).
+Synap’s strength lies in its AST extraction. If you are adding support for a new language:
+- Implement it within `src/synap_git/context/parsers.py` (or a dedicated language submodule).
 - Only extract bounded structure: functions, classes, imports, packages. Do *not* extract block-level logic or variable assignments.
 - You must add a corresponding test file validating the parser against standard structural boundaries.
 
@@ -91,12 +91,12 @@ This compiles the output to the `dist/` directory. You can verify it by installi
 python -m venv test_env
 source test_env/bin/activate
 pip install dist/*.whl
-synapse --help
+synap --help
 ```
 
 ### Semantic Versioning & Release Strategy
 We follow semantic versioning (`major.minor.patch`). When releasing:
-1. Increment the version in `pyproject.toml` and in `src/synapse/__init__.py`'s `__version__`.
+1. Increment the version in `pyproject.toml` and in `src/synap_git/__init__.py`'s `__version__`.
 2. Commit the changes and tag it with `v<version>`, for example `v0.2.0`:
    ```bash
    git tag v0.2.0

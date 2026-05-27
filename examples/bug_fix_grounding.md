@@ -1,13 +1,13 @@
 # Example: Bug Fix Grounding
 
-This example demonstrates how Synapse provides deterministic grounding for a common bug fix task.
+This example demonstrates how Synap provides deterministic grounding for a common bug fix task.
 
 ## Scenario
 A developer needs to fix a bug where the authentication session doesn't expire correctly.
 
 ## Task Command
 ```bash
-synapse task-context "fix session expiration bug" .
+synap task-context "fix session expiration bug" .
 ```
 
 ## Retrieval Trace (Diagnostic Output)
@@ -22,8 +22,8 @@ synapse task-context "fix session expiration bug" .
 ## Generated Context Package
 
 ### PRIMARY FILES
-- `src/synapse/auth/session.py`: Contains the `SessionManager` class and `expire_session` function.
-- `src/synapse/api/middleware.py`: Uses the session manager to validate requests.
+- `src/synap_git/auth/session.py`: Contains the `SessionManager` class and `expire_session` function.
+- `src/synap_git/api/middleware.py`: Uses the session manager to validate requests.
 
 ### DEPENDENCIES
 - `auth.models.Session`: Defines the data structure for sessions, including the `expires_at` field.

@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> SynapseSettings:
+def settings(tmp_path: Path) -> SynapSettings:
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -24,16 +24,16 @@ def settings(tmp_path: Path) -> SynapseSettings:
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "initial"], cwd=repo, check=True)
 
-    return SynapseSettings(
+    return SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
 
 
-def test_database_recovery_on_corruption(settings: SynapseSettings) -> None:
-    runtime = SynapseRuntime(settings)
+def test_database_recovery_on_corruption(settings: SynapSettings) -> None:
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Verify we indexed some files
@@ -45,7 +45,7 @@ def test_database_recovery_on_corruption(settings: SynapseSettings) -> None:
     assert db_path is not None
     db_path.write_text("THIS IS NOT A SQLITE FILE - TOTAL CORRUPTION")
 
-    # Run recover check (this simulates synapse recover/daemon recovery)
+    # Run recover check (this simulates synap recover/daemon recovery)
     is_wiped = runtime.store.recover_if_corrupted()
     assert is_wiped is True
     assert not db_path.exists()

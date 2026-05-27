@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> SynapseSettings:
+def settings(tmp_path: Path) -> SynapSettings:
     repo = tmp_path / "repo"
     repo.mkdir()
     import shutil
@@ -24,16 +24,16 @@ def settings(tmp_path: Path) -> SynapseSettings:
     (repo / "main.py").write_text("def hello(): pass")
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "initial"], cwd=repo, check=True)
-    return SynapseSettings(
+    return SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
 
 
-def test_deterministic_rebuild(settings: SynapseSettings) -> None:
-    runtime = SynapseRuntime(settings)
+def test_deterministic_rebuild(settings: SynapSettings) -> None:
+    runtime = SynapRuntime(settings)
 
     # First build
     commit1 = runtime.bootstrap()
@@ -56,8 +56,8 @@ def test_deterministic_rebuild(settings: SynapseSettings) -> None:
         assert count2 == count1
 
 
-def test_incremental_indexing(settings: SynapseSettings) -> None:
-    runtime = SynapseRuntime(settings)
+def test_incremental_indexing(settings: SynapSettings) -> None:
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     repo = settings.repository_path

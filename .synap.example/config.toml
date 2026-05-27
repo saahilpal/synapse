@@ -1,0 +1,20 @@
+# Synap Global Configuration Example
+# Place this in ~/.config/synap/config.toml or point to it via SYNAP_CONFIG
+
+[llm]
+llm_provider = "anthropic"
+llm_model = "claude-3-5-sonnet-20241022"
+
+# Local Ollama fallback
+# llm_provider = "ollama"
+# llm_model = "qwen2.5-coder:14b"
+# ollama_url = "http://localhost:11434"
+
+[runtime]
+profile = "prod"
+max_file_bytes = 1000000
+daemon_poll_interval_seconds = 2.0
+
+[mcp]
+mcp_host = "127.0.0.1"
+mcp_port = 9876

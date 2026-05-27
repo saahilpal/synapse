@@ -8,54 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-05-26
 
 ### Added — Final Polish & Release Readiness
-- CLI cost management: `synapse cost show` (displays Rich aggregated pricing table and summary panel) and `synapse cost clear`.
-- CLI wiki management: `synapse wiki list` and `synapse wiki show <filepath>` (renders page in terminal via Rich Markdown).
+- CLI cost management: `synap cost show` (displays Rich aggregated pricing table and summary panel) and `synap cost clear`.
+- CLI wiki management: `synap wiki list` and `synap wiki show <filepath>` (renders page in terminal via Rich Markdown).
 - LLM call database logging: records `prompt_tokens`, `completion_tokens`, and calculates `cost_usd` dynamically for retrieval and wiki generation passes.
-- Real-time daemon state: heartbeats integrated into `synapse status`, `synapse doctor`, and the Web UI status endpoints.
+- Real-time daemon state: heartbeats integrated into `synap status`, `synap doctor`, and the Web UI status endpoints.
 - Premium Web UI dashboard polish: dual L3 memory (Approved vs Pending) view, real-time LLM cost analytics, and active daemon PID badge.
 - Defensive GHA release pipeline: `.github/workflows/release.yml` automates TestPyPI and PyPI publishing, tag alignment checking, and draft release generation.
-- Clean Typer execution wrapper: intercepts configuration and credential exceptions to output actionable suggestions (e.g. `synapse setup`) instead of tracebacks.
+- Clean Typer execution wrapper: intercepts configuration and credential exceptions to output actionable suggestions (e.g. `synap setup`) instead of tracebacks.
 
 ### Added — Hardening Loop 2: MCP Stability & Protocol Polish
 - Deterministic MCP JSON envelope: every tool response carries `ok`, `data`, `warnings`, `trace_id`, `dirty_tree`.
 - Structured error objects with `code`, `message`, and `suggestion` fields for all failure paths.
 - `dirty_tree` propagation: agents are warned when the working tree is ahead of the index.
 - `get_approved_memory()` and `get_pending_memory()` MCP tools exposing lesson trust status.
-- `synapse mcp verify` command to assert full protocol contract compliance.
+- `synap mcp verify` command to assert full protocol contract compliance.
 
 ### Added — Hardening Loop 3: Lesson System Trust & Memory Lifecycle
 - Formal `LessonStatus` enum enforcing explicit state machine: `PENDING → APPROVED/REJECTED`, `APPROVED → EXPIRED`.
 - Retrieval gating: only `APPROVED`, non-expired lessons are injected into LLM context as `# APPROVED SYSTEM MEMORY`.
 - `prune_expired_lessons()` transitions stale lessons to `EXPIRED` state on demand.
 - `approval_actor` field on lessons for full human-governance provenance.
-- `synapse memory status` — counts of pending, approved, expired lessons.
-- `synapse memory prune` — forces expiry evaluation and prunes dead memory.
-- `synapse memory verify` — checks approved lessons' `files_affected` against current repo state; reports dangling references.
-- `synapse lessons approve <id>` and `synapse lessons reject <id>` — explicit human governance over pending lessons.
+- `synap memory status` — counts of pending, approved, expired lessons.
+- `synap memory prune` — forces expiry evaluation and prunes dead memory.
+- `synap memory verify` — checks approved lessons' `files_affected` against current repo state; reports dangling references.
+- `synap lessons approve <id>` and `synap lessons reject <id>` — explicit human governance over pending lessons.
 
 ### Added — Hardening Loop 4: Tracing, Git Compliance & Release Hardening
 - `GitIgnoreSpec` glob-to-regex parser in `RepositoryScanner` respects `.gitignore` patterns.
-- Auto-protection: `SynapseRuntime.bootstrap()` automatically adds `.synapse/` to `.gitignore`.
+- Auto-protection: `SynapRuntime.bootstrap()` automatically adds `.synap/` to `.gitignore`.
 - Enhanced binary file detection via extension blocklist + control-character ratio analysis.
 - Symlink traversal prevention in `RepositoryScanner` (path-containment enforcement).
-- `TraceStore` writes structured operational traces to `.synapse/trace_latest.json`.
+- `TraceStore` writes structured operational traces to `.synap/trace_latest.json`.
 - Full hybrid retrieval tracing: latency timeline, token allocation, truncation explanations, structural hops, dirty-tree warnings.
 - `/api/v1/trace/latest` REST endpoint exposing the latest trace.
 - Diagnostic Web UI with visual latency timeline, source provenance table, and dirty-tree badge.
-- Daemon heartbeat file (`.synapse/daemon_heartbeat.json`) with PID, uptime, and recovery metrics.
+- Daemon heartbeat file (`.synap/daemon_heartbeat.json`) with PID, uptime, and recovery metrics.
 - Daemon self-healing: SQLite corruption detected via `PRAGMA quick_check` triggers a wipe + re-bootstrap.
-- `synapse rollback` — interactive rollback to a previous git commit with lesson preservation.
-- `synapse recover` — explicit manual DB corruption recovery flow.
+- `synap rollback` — interactive rollback to a previous git commit with lesson preservation.
+- `synap recover` — explicit manual DB corruption recovery flow.
 - `py.typed` marker for PEP 561 compliance.
 
 ### Changed
 - CI pipeline split into 4 focused jobs: `lint`, `test`, `benchmark` (main only), `release-validation`.
-- Release validation now runs `synapse init` before `synapse doctor` to ensure a valid Synapse DB context.
+- Release validation now runs `synap init` before `synap doctor` to ensure a valid Synap DB context.
 - `pytest` configured with `asyncio_default_fixture_loop_scope = "function"` to eliminate deprecation warnings.
 - Benchmark tests gated behind `benchmark` marker; skipped in fast PR CI passes.
 
 ### Fixed
-- `synapse doctor` in CI release validation step previously ran against an uninitialized directory.
+- `synap doctor` in CI release validation step previously ran against an uninitialized directory.
 - `ruff format` drift in `cli/main.py` and `indexer/daemon.py` resolved.
 
 ## [0.1.0] - 2026-05-25
@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Model Context Protocol (MCP) server for IDE integration.
 - "Why-This-Context" retrieval tracing system.
 - Secure secret management via `python-keyring`.
-- `synapse doctor` for system validation.
+- `synap doctor` for system validation.
 - Diagnostic UI dashboard.
 
 ### Changed

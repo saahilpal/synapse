@@ -1,6 +1,6 @@
 # Deterministic Indexing
 
-Synapse ensures that your code context is always accurate and up-to-date through a robust incremental indexing pipeline.
+Synap ensures that your code context is always accurate and up-to-date through a robust incremental indexing pipeline.
 
 ## Ingestion Flow
 
@@ -13,11 +13,11 @@ Synapse ensures that your code context is always accurate and up-to-date through
 
 ## Rebuild Guarantees
 
-Because the index is a deterministic projection of the Git state, you can always safely delete the `.synapse` directory and run `synapse init` to perfectly reconstruct the state. This "wipe-and-rebuild" property is critical for maintaining developer trust.
+Because the index is a deterministic projection of the Git state, you can always safely delete the `.synap` directory and run `synap init` to perfectly reconstruct the state. This "wipe-and-rebuild" property is critical for maintaining developer trust.
 
 ## Incremental Performance
 
-Synapse is designed for large codebases. By using content hashes and surgical updates, a change to a single file in a monorepo typically results in less than 1 second of indexing overhead.
+Synap is designed for large codebases. By using content hashes and surgical updates, a change to a single file in a monorepo typically results in less than 1 second of indexing overhead.
 
 ## Supported Parsers
 
@@ -31,7 +31,7 @@ Synapse is designed for large codebases. By using content hashes and surgical up
 
 ## Git Snapshot Grounding
 
-Synapse treats every Git commit as an immutable snapshot. This ensures that context remains consistent even as the repository evolves.
+Synap treats every Git commit as an immutable snapshot. This ensures that context remains consistent even as the repository evolves.
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ flowchart LR
 
 ## Embedding Invalidation Flow
 
-To prevent semantic drift, Synapse automatically invalidates embeddings when the underlying code changes.
+To prevent semantic drift, Synap automatically invalidates embeddings when the underlying code changes.
 
 ```mermaid
 flowchart TD

@@ -1,7 +1,7 @@
 """
-Monorepo stress test: indexes the Synapse repository itself.
+Monorepo stress test: indexes the Synap repository itself.
 
-This test bootstraps Synapse against its own source tree and measures:
+This test bootstraps Synap against its own source tree and measures:
   - Indexing latency
   - File and symbol counts
   - Retrieval latency under realistic load
@@ -10,8 +10,8 @@ This test bootstraps Synapse against its own source tree and measures:
 Run with:
     uv run pytest tests/test_monorepo_stress.py -v -m benchmark
 
-Skipped automatically when not in the synapse repo or if the
-SYNAPSE_SKIP_STRESS env variable is set (e.g. in fast CI passes).
+Skipped automatically when not in the synap repo or if the
+SYNAP_SKIP_STRESS env variable is set (e.g. in fast CI passes).
 """
 
 from __future__ import annotations
@@ -24,15 +24,15 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 def _synapse_repo_root() -> Path | None:
-    """Find the root of the Synapse repository relative to this test file."""
+    """Find the root of the Synap repository relative to this test file."""
     here = Path(__file__).resolve().parent
     candidate = here.parent
-    if (candidate / "pyproject.toml").exists() and (candidate / "src" / "synapse").exists():
+    if (candidate / "pyproject.toml").exists() and (candidate / "src" / "synap").exists():
         return candidate
     return None
 
@@ -41,29 +41,29 @@ pytestmark = pytest.mark.benchmark
 
 
 @pytest.fixture(scope="module")
-def stress_runtime(tmp_path_factory: pytest.TempPathFactory) -> SynapseRuntime | None:
-    if os.environ.get("SYNAPSE_SKIP_STRESS"):
+def stress_runtime(tmp_path_factory: pytest.TempPathFactory) -> SynapRuntime | None:
+    if os.environ.get("SYNAP_SKIP_STRESS"):
         return None
     repo_root = _synapse_repo_root()
     if repo_root is None:
         return None
 
     tmp = tmp_path_factory.mktemp("stress_db")
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=repo_root,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp / "synapse.db",
+        sqlite_path=tmp / "synap.db",
         object_path=tmp / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     return runtime
 
 
 @pytest.mark.benchmark
-def test_indexing_latency(stress_runtime: SynapseRuntime | None) -> None:
+def test_indexing_latency(stress_runtime: SynapRuntime | None) -> None:
     """Full-repo indexing must complete under 60 seconds."""
     if stress_runtime is None:
-        pytest.skip("Stress test skipped (SYNAPSE_SKIP_STRESS or repo not found)")
+        pytest.skip("Stress test skipped (SYNAP_SKIP_STRESS or repo not found)")
 
     t0 = time.perf_counter()
     stress_runtime.bootstrap(force=True)
@@ -74,7 +74,7 @@ def test_indexing_latency(stress_runtime: SynapseRuntime | None) -> None:
 
 
 @pytest.mark.benchmark
-def test_file_and_symbol_counts(stress_runtime: SynapseRuntime | None) -> None:
+def test_file_and_symbol_counts(stress_runtime: SynapRuntime | None) -> None:
     """Monorepo indexing should produce substantial symbol coverage."""
     if stress_runtime is None:
         pytest.skip("Stress test skipped")
@@ -87,7 +87,7 @@ def test_file_and_symbol_counts(stress_runtime: SynapseRuntime | None) -> None:
 
 
 @pytest.mark.benchmark
-def test_retrieval_latency_p95(stress_runtime: SynapseRuntime | None) -> None:
+def test_retrieval_latency_p95(stress_runtime: SynapRuntime | None) -> None:
     """Single retrieval queries must complete in under 2 seconds each."""
     if stress_runtime is None:
         pytest.skip("Stress test skipped")
@@ -114,7 +114,7 @@ def test_retrieval_latency_p95(stress_runtime: SynapseRuntime | None) -> None:
 
 
 @pytest.mark.benchmark
-def test_memory_footprint(stress_runtime: SynapseRuntime | None) -> None:
+def test_memory_footprint(stress_runtime: SynapRuntime | None) -> None:
     """Process RSS after indexing must stay under 512 MiB."""
     if stress_runtime is None:
         pytest.skip("Stress test skipped")
@@ -135,7 +135,7 @@ def test_memory_footprint(stress_runtime: SynapseRuntime | None) -> None:
 
 
 @pytest.mark.benchmark
-def test_integrity_after_stress(stress_runtime: SynapseRuntime | None) -> None:
+def test_integrity_after_stress(stress_runtime: SynapRuntime | None) -> None:
     """Database must remain intact after full indexing pass."""
     if stress_runtime is None:
         pytest.skip("Stress test skipped")
@@ -147,7 +147,7 @@ def test_integrity_after_stress(stress_runtime: SynapseRuntime | None) -> None:
 @pytest.mark.benchmark
 def test_indexing_10k_files(tmp_path: Path) -> None:
     """Stress test indexing 10,000 files to measure latency, DB growth, and RSS."""
-    if os.environ.get("SYNAPSE_SKIP_STRESS"):
+    if os.environ.get("SYNAP_SKIP_STRESS"):
         pytest.skip("Stress test skipped")
 
     repo = tmp_path / "10k_repo"
@@ -172,13 +172,13 @@ def test_indexing_10k_files(tmp_path: Path) -> None:
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "10k files", "--quiet"], cwd=repo, check=True)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
 
     t0 = time.perf_counter()
     runtime.bootstrap(force=True)

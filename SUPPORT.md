@@ -1,6 +1,6 @@
-# Getting Support for Synapse
+# Getting Support for Synap
 
-We want to make your experience with Synapse as smooth and productive as possible. Please consult the resources below if you run into problems, have questions, or want to suggest improvements.
+We want to make your experience with Synap as smooth and productive as possible. Please consult the resources below if you run into problems, have questions, or want to suggest improvements.
 
 ## 1. Documentation
 Before opening an issue or seeking manual support, check our structured documentation:

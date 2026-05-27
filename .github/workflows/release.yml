@@ -68,10 +68,10 @@ jobs:
           source test_env/bin/activate
           uv pip install dist/*.whl
           git config --global user.email "release@synapse.local"
-          git config --global user.name "Synapse Release"
-          synapse init . --skip-llm --quiet
-          synapse doctor .
-          synapse mcp verify .
+          git config --global user.name "Synap Release"
+          synap init . --skip-llm --quiet
+          synap doctor .
+          synap mcp verify .
           deactivate
 
       - name: Upload Build Artifacts
@@ -143,7 +143,7 @@ jobs:
           # Extract notes from CHANGELOG.md if matching tag header is found
           # Otherwise default to basic changelog
           cat << 'EOF' > release_notes.md
-          # Synapse Release ${{ github.ref_name }}
+          # Synap Release ${{ github.ref_name }}
 
           Persistent, deterministic Git-aware structural retrieval engine for AI coding agents.
 
@@ -157,8 +157,8 @@ jobs:
 
           After installation, verify your environment:
           ```bash
-          synapse init .
-          synapse doctor .
+          synap init .
+          synap doctor .
           ```
           EOF
 

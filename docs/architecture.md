@@ -1,6 +1,6 @@
-# Synapse Architecture
+# Synap Architecture
 
-Synapse is built as a deterministic indexing engine and retrieval runtime. It is designed to be the "infrastructure of record" for AI coding agents, providing a stable, verifiable substrate of repository knowledge.
+Synap is built as a deterministic indexing engine and retrieval runtime. It is designed to be the "infrastructure of record" for AI coding agents, providing a stable, verifiable substrate of repository knowledge.
 
 ## Core Philosophies
 
@@ -11,7 +11,7 @@ Synapse is built as a deterministic indexing engine and retrieval runtime. It is
 ## System Components
 
 ### 1. Git Source of Truth
-Synapse monitors the Git working tree. Every index operation begins by resolving the current `HEAD` and identifying changed files via content hashes.
+Synap monitors the Git working tree. Every index operation begins by resolving the current `HEAD` and identifying changed files via content hashes.
 
 ### 2. Tree-sitter Parser Registry
 Files are parsed into Concrete Syntax Trees (CST) using Tree-sitter. We currently support:
@@ -37,7 +37,7 @@ Retrieval follows a strict 4-stage pipeline:
 4.  **Semantic:** conceptually related matches (fallback).
 
 ### 5. Model Context Protocol (MCP)
-Synapse exposes its capabilities via the standard MCP. This allows any MCP-compatible agent (Cursor, Claude, Roo) to consume grounded context via standard tools.
+Synap exposes its capabilities via the standard MCP. This allows any MCP-compatible agent (Cursor, Claude, Roo) to consume grounded context via standard tools.
 
 ---
 

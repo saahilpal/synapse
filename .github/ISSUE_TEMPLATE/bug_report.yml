@@ -1,5 +1,5 @@
 name: Bug report
-description: Create a report to help us improve Synapse.
+description: Create a report to help us improve Synap.
 labels: [bug]
 body:
   - type: markdown
@@ -17,13 +17,13 @@ body:
   - type: input
     id: version
     attributes:
-      label: Synapse version
-      description: Run `synapse --version`
+      label: Synap version
+      description: Run `synap --version`
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Relevant logs
-      description: Please paste relevant logs from `synapse run` or `synapse doctor`.
+      description: Please paste relevant logs from `synap run` or `synap doctor`.
       render: shell

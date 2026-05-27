@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 def create_complex_repo(repo: Path) -> None:
@@ -42,23 +42,23 @@ def create_complex_repo(repo: Path) -> None:
 
 
 @pytest.fixture
-def complex_runtime(tmp_path: Path) -> SynapseRuntime:
+def complex_runtime(tmp_path: Path) -> SynapRuntime:
     repo = tmp_path / "complex_repo"
     repo.mkdir()
     create_complex_repo(repo)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
     return runtime
 
 
-def test_grounding_accuracy_structural_hop(complex_runtime: SynapseRuntime) -> None:
+def test_grounding_accuracy_structural_hop(complex_runtime: SynapRuntime) -> None:
     # If I ask about 'login_handler', it should find it and its direct dependency 'AuthService'
     _, sources, trace = complex_runtime.query_hybrid("Explain login_handler dependencies")
 
@@ -70,7 +70,7 @@ def test_grounding_accuracy_structural_hop(complex_runtime: SynapseRuntime) -> N
     assert any("auth/service.py" in p for p in source_paths) or "AuthService" in source_names
 
 
-def test_grounding_accuracy_lexical_match(complex_runtime: SynapseRuntime) -> None:
+def test_grounding_accuracy_lexical_match(complex_runtime: SynapRuntime) -> None:
     # Query for 'User' - should find the User class
     _, sources, _ = complex_runtime.query_hybrid("What is the User model?")
 
@@ -78,7 +78,7 @@ def test_grounding_accuracy_lexical_match(complex_runtime: SynapseRuntime) -> No
     assert "User" in source_names
 
 
-def test_retrieval_latency(complex_runtime: SynapseRuntime) -> None:
+def test_retrieval_latency(complex_runtime: SynapRuntime) -> None:
     # Basic performance check
     _, _, trace = complex_runtime.query_hybrid("How does the api work?")
 

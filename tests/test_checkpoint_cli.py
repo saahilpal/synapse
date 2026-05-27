@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from synapse.cli.main import app
+from synap_git.cli.main import app
 
 
 @pytest.fixture

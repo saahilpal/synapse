@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from synapse.indexer.scanner import RepositoryScanner
+from synap_git.indexer.scanner import RepositoryScanner
 
 
 def test_gitignore_compliance(tmp_path: Path) -> None:

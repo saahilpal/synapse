@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.daemon import RuntimeDaemon
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.daemon import RuntimeDaemon
 
 
 @pytest.fixture
-def torture_settings(tmp_path: Path) -> SynapseSettings:
+def torture_settings(tmp_path: Path) -> SynapSettings:
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -26,10 +26,10 @@ def torture_settings(tmp_path: Path) -> SynapseSettings:
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "initial commit"], cwd=repo, check=True)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
         daemon_poll_interval_seconds=0.05,
     )
@@ -37,7 +37,7 @@ def torture_settings(tmp_path: Path) -> SynapseSettings:
 
 
 @pytest.mark.asyncio
-async def test_daemon_survives_rapid_file_saves(torture_settings: SynapseSettings) -> None:
+async def test_daemon_survives_rapid_file_saves(torture_settings: SynapSettings) -> None:
     """Torture test: rapid saves to files should not crash or trigger lock contention."""
     daemon = RuntimeDaemon(torture_settings)
     daemon_task = asyncio.create_task(daemon.start())
@@ -67,7 +67,7 @@ async def test_daemon_survives_rapid_file_saves(torture_settings: SynapseSetting
 
 
 @pytest.mark.asyncio
-async def test_daemon_survives_branch_switching(torture_settings: SynapseSettings) -> None:
+async def test_daemon_survives_branch_switching(torture_settings: SynapSettings) -> None:
     """Verify daemon updates its active commit and indices correctly on branch checkout."""
     daemon = RuntimeDaemon(torture_settings)
     daemon_task = asyncio.create_task(daemon.start())
@@ -99,7 +99,7 @@ async def test_daemon_survives_branch_switching(torture_settings: SynapseSetting
 
 
 @pytest.mark.asyncio
-async def test_daemon_ignores_rebase_merge_in_progress(torture_settings: SynapseSettings) -> None:
+async def test_daemon_ignores_rebase_merge_in_progress(torture_settings: SynapSettings) -> None:
     """Ensure that the daemon does not crash when rebase or merge conflict indicators exist."""
     repo = torture_settings.repository_path
     git_dir = repo / ".git"
@@ -126,7 +126,7 @@ async def test_daemon_ignores_rebase_merge_in_progress(torture_settings: Synapse
 
 
 @pytest.mark.asyncio
-async def test_daemon_recovery_on_restart(torture_settings: SynapseSettings) -> None:
+async def test_daemon_recovery_on_restart(torture_settings: SynapSettings) -> None:
     """Verify that restarting the daemon after dirty shutdowns recover db state cleanly."""
     daemon1 = RuntimeDaemon(torture_settings)
     daemon1.runtime.store.recover_if_corrupted()
@@ -147,7 +147,7 @@ async def test_daemon_recovery_on_restart(torture_settings: SynapseSettings) -> 
 
 
 @pytest.mark.asyncio
-async def test_concurrent_reads_and_writes(torture_settings: SynapseSettings) -> None:
+async def test_concurrent_reads_and_writes(torture_settings: SynapSettings) -> None:
     """Run retrieval queries concurrently while background daemon is actively indexing."""
     daemon = RuntimeDaemon(torture_settings)
     daemon_task = asyncio.create_task(daemon.start())

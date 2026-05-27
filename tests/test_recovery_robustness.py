@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 @pytest.fixture
@@ -32,13 +32,13 @@ def temp_repo(tmp_path: Path) -> Path:
 
 def test_wal_corruption_recovery(temp_repo: Path, tmp_path: Path) -> None:
     """Intentionally corrupt sqlite db-wal or db-shm files and verify recover_if_corrupted wipes and heals."""
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Verify db exists and is healthy
@@ -68,16 +68,16 @@ def test_wal_corruption_recovery(temp_repo: Path, tmp_path: Path) -> None:
 
 def test_malformed_trace_handling(temp_repo: Path, tmp_path: Path) -> None:
     """Verify that a corrupted or malformed trace JSON file does not crash the system when read."""
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
-    trace_file = temp_repo / ".synapse" / "trace_latest.json"
+    trace_file = temp_repo / ".synap" / "trace_latest.json"
     trace_file.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Non-JSON data
@@ -101,13 +101,13 @@ def test_malformed_gitignore_handling(temp_repo: Path, tmp_path: Path) -> None:
     # Write invalid regex/glob patterns to .gitignore
     (temp_repo / ".gitignore").write_text("[[[invalid-glob-pattern***\n", encoding="utf-8")
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
 
     # Re-bootstrap. It should not raise PatternError or any re.error
     runtime.bootstrap(force=True)

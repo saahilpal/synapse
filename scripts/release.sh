@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "========================================="
-echo "  Synapse Production Release Hardening  "
+echo "  Synap Production Release Hardening  "
 echo "========================================="
 
 # 1. Run static checks
@@ -23,7 +23,7 @@ echo "-> Running PyTest unit and integration tests..."
 uv run pytest -m "not benchmark" -q
 
 echo "-> Running PyTest monorepo stress benchmarks..."
-SYNAPSE_SKIP_STRESS="" uv run pytest -m "benchmark" -v --tb=short
+SYNAP_SKIP_STRESS="" uv run pytest -m "benchmark" -v --tb=short
 
 # 3. Packaging & Build validation
 echo "-> Cleaning old builds..."
@@ -47,7 +47,7 @@ echo "-> Validating CLI execution and doctor checks..."
 git config --global user.email "release@synapse.local" || true
 git config --global user.name "Release Builder" || true
 
-# Initialize synapse in a temporary folder
+# Initialize synap in a temporary folder
 rm -rf tmp_release_test
 mkdir tmp_release_test
 cd tmp_release_test
@@ -59,15 +59,15 @@ git add .
 git commit -m "initial"
 
 # Verify CLI commands
-synapse init . --skip-llm --quiet
-synapse doctor .
-synapse mcp verify .
-synapse checkpoint create . --doing "Verifying release wheel" --files "test.py" --next-step "done" --blockers "None"
-synapse checkpoint list .
-synapse checkpoint restore latest .
-synapse cost show .
-synapse cost clear .
-synapse wiki list .
+synap init . --skip-llm --quiet
+synap doctor .
+synap mcp verify .
+synap checkpoint create . --doing "Verifying release wheel" --files "test.py" --next-step "done" --blockers "None"
+synap checkpoint list .
+synap checkpoint restore latest .
+synap cost show .
+synap cost clear .
+synap wiki list .
 
 # Cleanup
 cd ..
@@ -76,5 +76,5 @@ deactivate
 rm -rf test_release_env
 
 echo "========================================="
-echo "✓ SUCCESS: Synapse Release Candidate Hardening passed!"
+echo "✓ SUCCESS: Synap Release Candidate Hardening passed!"
 echo "========================================="

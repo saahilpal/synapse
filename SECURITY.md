@@ -1,6 +1,6 @@
 # Security Policy
 
-Synapse handles repository structure, source summaries, manual notes, and agent-facing context. Treat the local `.synapse/` directory as sensitive development infrastructure.
+Synap handles repository structure, source summaries, manual notes, and agent-facing context. Treat the local `.synap/` directory as sensitive development infrastructure.
 
 ## Security Principles
 
@@ -25,7 +25,7 @@ Synapse handles repository structure, source summaries, manual notes, and agent-
 - `InputValidator` clamps limits and enforces repository path containment.
 - `IngestionSanitizer` rejects unsafe manual note content.
 - SQLite runs locally in WAL mode.
-- `synapse doctor` verifies database health, object integrity, and replay diagnostics.
+- `synap doctor` verifies database health, object integrity, and replay diagnostics.
 
 ## Reporting Vulnerabilities
 

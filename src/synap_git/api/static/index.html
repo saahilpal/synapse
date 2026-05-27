@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synap Operational Dashboard</title>
+    <style>
+        :root {
+            --bg: #09090b;
+            --surface: #18181b;
+            --surface-hover: #27272a;
+            --border: #27272a;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --accent: #3b82f6;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+            --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; }
+        h2 { margin: 0 0 1rem 0; font-size: 1.125rem; font-weight: 500; color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;}
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 1.5rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+
+        .stat-box {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 1rem;
+            border-radius: 0.375rem;
+        }
+
+        .stat-value { font-size: 1.5rem; font-weight: 600; font-family: var(--font-mono); }
+        .stat-label { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-secondary); font-weight: 500; }
+
+        code {
+            background: var(--bg);
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-family: var(--font-mono);
+            font-size: 0.8125rem;
+            color: var(--accent);
+            border: 1px solid var(--border);
+        }
+
+        .empty-state {
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 2rem;
+            font-style: italic;
+            background: var(--bg);
+            border-radius: 0.375rem;
+            border: 1px dashed var(--border);
+        }
+
+        .row-hover:hover {
+            background: var(--bg);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Synap <span style="color: var(--text-secondary); font-weight: 400;">Operations</span></h1>
+            <p id="repo-path" style="margin: 0.25rem 0 0 0; font-size: 0.875rem; color: var(--text-secondary); font-family: var(--font-mono);">Connecting...</p>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot"></div>
+            Daemon Active
+        </div>
+    </header>
+
+    <div class="grid">
+        <!-- Index Health -->
+        <div class="card">
+            <h2>State Overview</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value" id="stat-files">-</div>
+                    <div class="stat-label">Indexed Files</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="stat-symbols">-</div>
+                    <div class="stat-label">Symbols Extracted</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="stat-branch">-</div>
+                    <div class="stat-label">Active Branch</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="stat-commit" style="font-size: 1rem; margin-top:0.3rem;">-</div>
+                    <div class="stat-label">HEAD OID</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- L3 Memory (Lessons) -->
+        <div class="card" style="grid-column: span 2;">
+            <h2>L3 Agent Memory (Lessons)</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                <div>
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--success);">Approved (Active)</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Rule / Details</th>
+                                <th>Expires</th>
+                            </tr>
+                        </thead>
+                        <tbody id="approved-lessons-body">
+                            <tr><td colspan="3" class="empty-state">Loading approved lessons...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div>
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--warning);">Pending Approval</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Commit</th>
+                                <th>What Failed</th>
+                                <th>Files</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pending-lessons-body">
+                            <tr><td colspan="3" class="empty-state">Loading pending lessons...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- LLM Cost & Usage -->
+        <div class="card" style="grid-column: span 2;">
+            <h2>LLM Call Cost & Usage</h2>
+            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem;">
+                <div class="stats-grid" style="grid-template-columns: 1fr; gap: 0.75rem;">
+                    <div class="stat-box">
+                        <div class="stat-value" id="cost-total-usd">$0.000000</div>
+                        <div class="stat-label">Total Cost (USD)</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="cost-total-calls">0</div>
+                        <div class="stat-label">Total LLM Calls</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="cost-total-tokens">0</div>
+                        <div class="stat-label">Total Tokens (In+Out)</div>
+                    </div>
+                </div>
+                <div>
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Recent LLM Calls</h3>
+                    <div style="max-height: 220px; overflow-y: auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Provider</th>
+                                    <th>Model</th>
+                                    <th>Purpose</th>
+                                    <th>Tokens</th>
+                                    <th>Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cost-calls-body">
+                                <tr><td colspan="6" class="empty-state">No calls recorded.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Checkpoints -->
+        <div class="card" style="grid-column: span 2;">
+            <h2>Recent Checkpoints</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Action</th>
+                        <th>Branch</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="checkpoints-body">
+                    <tr><td colspan="4" class="empty-state">Loading checkpoints...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Latest Operational Trace -->
+        <div class="card" style="grid-column: span 2;" id="trace-card">
+            <h2>Latest Operational Trace</h2>
+            <div id="trace-info" style="display: none;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
+                    <div>
+                        <strong style="color: var(--accent);">Type:</strong> <span id="trace-type" style="text-transform: uppercase; font-weight: 500; font-family: var(--font-mono); color: var(--accent);">-</span>
+                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">ID:</strong> <code id="trace-id" style="font-size: 0.75rem;">-</code></span>
+                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">Time:</strong> <span id="trace-time" style="font-family: var(--font-mono);">-</span></span>
+                    </div>
+                    <div>
+                        <span id="trace-dirty-warning" class="status-badge" style="background: rgba(234, 179, 8, 0.1); color: var(--warning); border: 1px solid rgba(234, 179, 8, 0.2); display: none;">
+                            <div class="status-dot" style="background: var(--warning);"></div> Dirty Tree
+                        </span>
+                    </div>
+                </div>
+
+                <p style="margin: 0 0 1rem 0; font-weight: 500; font-size: 1rem; color: var(--text-primary);" id="trace-summary">-</p>
+
+                <!-- Retrieval Specific Details -->
+                <div id="retrieval-details" style="display: none;">
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="stat-box">
+                            <div class="stat-value" id="trace-retrieval-nodes">-</div>
+                            <div class="stat-label">Nodes Explored</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="trace-retrieval-tokens">-</div>
+                            <div class="stat-label">Tokens Used / Budget</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="trace-retrieval-latency">-</div>
+                            <div class="stat-label">Latency (ms)</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="trace-retrieval-budget-pct">-</div>
+                            <div class="stat-label">Budget Utilized</div>
+                        </div>
+                    </div>
+
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Phase Latencies (Timeline)</h3>
+                    <div style="display: flex; gap: 4px; height: 16px; background: var(--border); border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;" id="timeline-bar">
+                        <!-- timeline segments filled dynamically -->
+                    </div>
+                    <div id="timeline-labels" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        <!-- timeline labels filled dynamically -->
+                    </div>
+
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Structural Traversal (Hops)</h3>
+                    <div id="structural-hops-container" style="margin-bottom: 1.5rem; font-family: var(--font-mono); font-size: 0.75rem; max-height: 150px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 0.375rem;">
+                        <!-- structural hops list -->
+                    </div>
+
+                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Grounding Source Provenance & Truncation</h3>
+                    <table style="font-size: 0.75rem;">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Path</th>
+                                <th>Score</th>
+                                <th>Tokens</th>
+                                <th>Status / Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="provenance-body">
+                            <!-- filled dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Generic/Other Details (JSON view) -->
+                <div id="generic-details" style="display: none;">
+                    <pre id="generic-json" style="background: var(--bg); border: 1px solid var(--border); padding: 1rem; border-radius: 0.375rem; font-family: var(--font-mono); font-size: 0.8125rem; overflow-x: auto; max-height: 300px; color: var(--text-secondary);"></pre>
+                </div>
+            </div>
+            <div id="trace-empty" class="empty-state">
+                No operational traces recorded. Run queries or tool invocations to populate.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function timeAgo(timestamp) {
+            const seconds = Math.floor((new Date() - new Date(timestamp * 1000)) / 1000);
+            if (seconds < 60) return `${seconds}s ago`;
+            if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`;
+            return `${Math.floor(seconds/3600)}h ago`;
+        }
+
+        async function updateDashboard() {
+            try {
+                // Fetch Status
+                const statusRes = await fetch('/api/v1/status');
+                const status = await statusRes.json();
+
+                document.getElementById('repo-path').textContent = status.repository_path;
+                document.getElementById('stat-files').textContent = status.files.toLocaleString();
+                document.getElementById('stat-symbols').textContent = status.symbols.toLocaleString();
+                document.getElementById('stat-branch').textContent = status.branch;
+                document.getElementById('stat-commit').innerHTML = `<code>${status.git_commit?.substring(0,7) || 'unknown'}</code>`;
+
+                // Update Daemon Status Badge
+                const daemonBadge = document.querySelector('.status-badge');
+                if (status.daemon) {
+                    const statusStr = status.daemon.status.toUpperCase();
+                    if (statusStr === 'HEALTHY') {
+                        daemonBadge.style.color = 'var(--success)';
+                        daemonBadge.style.background = 'rgba(34, 197, 94, 0.1)';
+                        daemonBadge.style.borderColor = 'rgba(34, 197, 94, 0.2)';
+                        daemonBadge.innerHTML = `<div class="status-dot"></div> Daemon Active (PID ${status.daemon.pid})`;
+                    } else if (statusStr === 'STALE') {
+                        daemonBadge.style.color = 'var(--warning)';
+                        daemonBadge.style.background = 'rgba(234, 179, 8, 0.1)';
+                        daemonBadge.style.borderColor = 'rgba(234, 179, 8, 0.2)';
+                        daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--warning);"></div> Daemon Stale (PID ${status.daemon.pid})`;
+                    } else {
+                        daemonBadge.style.color = 'var(--danger)';
+                        daemonBadge.style.background = 'rgba(239, 68, 68, 0.1)';
+                        daemonBadge.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                        daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--danger);"></div> Daemon Degraded`;
+                    }
+                } else {
+                    daemonBadge.style.color = 'var(--text-secondary)';
+                    daemonBadge.style.background = 'rgba(161, 161, 170, 0.1)';
+                    daemonBadge.style.borderColor = 'rgba(161, 161, 170, 0.2)';
+                    daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--text-secondary); animation: none;"></div> Daemon Inactive`;
+                }
+
+                // Fetch Checkpoints
+                const cpRes = await fetch('/api/v1/checkpoints');
+                const cpData = await cpRes.json();
+                const cpBody = document.getElementById('checkpoints-body');
+                if (cpData.checkpoints && cpData.checkpoints.length > 0) {
+                    cpBody.innerHTML = cpData.checkpoints.map(cp => `
+                        <tr class="row-hover">
+                            <td><code>${cp.checkpoint_id.split('-')[0]}</code></td>
+                            <td>${cp.doing}</td>
+                            <td><span style="border:1px solid var(--border); padding:2px 6px; border-radius:4px; font-size:11px;">${cp.branch}</span></td>
+                            <td style="color:var(--text-secondary);">${timeAgo(cp.created_at)}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    cpBody.innerHTML = `<tr><td colspan="4" class="empty-state">No checkpoints recorded yet.</td></tr>`;
+                }
+
+                // Fetch Lessons
+                const memRes = await fetch('/api/v1/memory');
+                const memData = await memRes.json();
+
+                const approvedBody = document.getElementById('approved-lessons-body');
+                if (memData.approved && memData.approved.length > 0) {
+                    approvedBody.innerHTML = memData.approved.map(l => {
+                        const expires = new Date(l.expires_at * 1000).toLocaleDateString();
+                        return `
+                        <tr class="row-hover">
+                            <td><code>${l.lesson_id.substring(0,8)}</code></td>
+                            <td><span style="font-weight:500;">Failed:</span> ${l.what_failed}<br/><span style="color:var(--text-secondary); font-size:11px;">Why: ${l.why_failed}</span></td>
+                            <td style="color:var(--text-secondary);">${expires}</td>
+                        </tr>
+                        `;
+                    }).join('');
+                } else {
+                    approvedBody.innerHTML = `<tr><td colspan="3" class="empty-state">No approved rules in memory.</td></tr>`;
+                }
+
+                const pendingBody = document.getElementById('pending-lessons-body');
+                if (memData.pending && memData.pending.length > 0) {
+                    pendingBody.innerHTML = memData.pending.map(l => {
+                        let files = [];
+                        try { files = JSON.parse(l.files_affected); } catch(e){}
+                        return `
+                        <tr class="row-hover">
+                            <td><code>${l.revert_commit.substring(0,7)}</code></td>
+                            <td>${l.what_failed}</td>
+                            <td>${files.length} file(s)</td>
+                        </tr>
+                        `;
+                    }).join('');
+                } else {
+                    pendingBody.innerHTML = `<tr><td colspan="3" class="empty-state">No pending lessons needing approval.</td></tr>`;
+                }
+
+                // Fetch Cost & Usage
+                const costRes = await fetch('/api/v1/cost');
+                const costData = await costRes.json();
+                const costBody = document.getElementById('cost-calls-body');
+
+                let totalCost = 0;
+                let totalCalls = 0;
+                let totalTokens = 0;
+
+                if (costData.calls && costData.calls.length > 0) {
+                    totalCalls = costData.calls.length;
+                    costBody.innerHTML = costData.calls.slice(0, 15).map(c => {
+                        totalCost += c.cost_usd;
+                        const tokens = c.input_tokens + c.output_tokens;
+                        totalTokens += tokens;
+
+                        const timeStr = new Date(c.created_at * 1000).toLocaleTimeString();
+                        return `
+                        <tr class="row-hover">
+                            <td>${timeStr}</td>
+                            <td>${c.provider}</td>
+                            <td><code>${c.model}</code></td>
+                            <td>${c.purpose}</td>
+                            <td>${tokens.toLocaleString()}</td>
+                            <td style="color:var(--success); font-family:var(--font-mono); font-size:11px;">$${c.cost_usd.toFixed(6)}</td>
+                        </tr>
+                        `;
+                    }).join('');
+
+                    costData.calls.slice(15).forEach(c => {
+                        totalCost += c.cost_usd;
+                        totalTokens += (c.input_tokens + c.output_tokens);
+                    });
+                } else {
+                    costBody.innerHTML = `<tr><td colspan="6" class="empty-state">No LLM calls recorded yet.</td></tr>`;
+                }
+
+                document.getElementById('cost-total-usd').textContent = `$${totalCost.toFixed(6)}`;
+                document.getElementById('cost-total-calls').textContent = totalCalls.toLocaleString();
+                document.getElementById('cost-total-tokens').textContent = totalTokens.toLocaleString();
+
+                // Fetch Latest Trace
+                const traceRes = await fetch('/api/v1/trace/latest');
+                const trace = await traceRes.json();
+                const traceInfo = document.getElementById('trace-info');
+                const traceEmpty = document.getElementById('trace-empty');
+
+                if (trace && trace.trace_id && trace.trace_id !== 'none' && trace.trace_id !== 'error') {
+                    traceEmpty.style.display = 'none';
+                    traceInfo.style.display = 'block';
+
+                    document.getElementById('trace-type').textContent = trace.type;
+                    document.getElementById('trace-id').textContent = trace.trace_id;
+                    document.getElementById('trace-time').textContent = new Date(trace.timestamp).toLocaleTimeString();
+                    document.getElementById('trace-summary').textContent = trace.summary;
+
+                    if (trace.type === 'retrieval' && trace.details) {
+                        document.getElementById('retrieval-details').style.display = 'block';
+                        document.getElementById('generic-details').style.display = 'none';
+
+                        const details = trace.details;
+
+                        const dirtyWarning = document.getElementById('trace-dirty-warning');
+                        if (details.dirty_tree_warning) {
+                            dirtyWarning.style.display = 'inline-flex';
+                        } else {
+                            dirtyWarning.style.display = 'none';
+                        }
+
+                        document.getElementById('trace-retrieval-nodes').textContent = details.nodes_explored;
+
+                        const alloc = details.token_allocation || {};
+                        const used = details.tokens_used || 0;
+                        const budget = alloc.retrieval_budget || 3400;
+                        document.getElementById('trace-retrieval-tokens').textContent = `${used} / ${budget}`;
+
+                        const lat = details.latency_ms || 0;
+                        document.getElementById('trace-retrieval-latency').textContent = lat.toFixed(1);
+
+                        const pct = budget > 0 ? (used / budget * 100).toFixed(1) : 0;
+                        document.getElementById('trace-retrieval-budget-pct').textContent = `${pct}%`;
+
+                        const tl = details.timeline || {};
+                        const phases = [
+                            { key: 'lexical_search_ms', name: 'Lexical', color: '#3b82f6' },
+                            { key: 'structural_expansion_ms', name: 'Structural', color: '#8b5cf6' },
+                            { key: 'semantic_ranking_ms', name: 'Semantic', color: '#ec4899' },
+                            { key: 'context_packing_ms', name: 'Packing', color: '#f59e0b' },
+                            { key: 'llm_generation_ms', name: 'LLM Gen', color: '#10b981' }
+                        ];
+
+                        const totalMs = tl.total_ms || 1;
+                        const barContainer = document.getElementById('timeline-bar');
+                        const labelContainer = document.getElementById('timeline-labels');
+
+                        barContainer.innerHTML = '';
+                        labelContainer.innerHTML = '';
+
+                        phases.forEach(phase => {
+                            const val = tl[phase.key] || 0;
+                            const share = (val / totalMs * 100);
+
+                            if (val > 0) {
+                                  const segment = document.createElement('div');
+                                  segment.style.width = `${share}%`;
+                                  segment.style.backgroundColor = phase.color;
+                                  segment.title = `${phase.name}: ${val.toFixed(1)} ms`;
+                                  barContainer.appendChild(segment);
+                            }
+
+                            const label = document.createElement('div');
+                            label.innerHTML = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${phase.color}; margin-right:4px;"></span>${phase.name}: ${val.toFixed(1)}ms`;
+                            labelContainer.appendChild(label);
+                        });
+
+                        const hops = details.structural_hops || [];
+                        const hopsContainer = document.getElementById('structural-hops-container');
+                        if (hops.length > 0) {
+                            hopsContainer.innerHTML = hops.map(h =>
+                                  `<div style="margin-bottom: 2px;">• <span style="color:var(--accent);">${h.from_symbol}</span> ➔ <span style="color:var(--success);">${h.to_symbol}</span> <span style="color:var(--text-secondary); font-size:10px;">(dist: ${h.distance})</span></div>`
+                            ).join('');
+                        } else {
+                            hopsContainer.innerHTML = '<div class="empty-state" style="padding:0.5rem; font-size:11px;">No hops navigated</div>';
+                        }
+
+                        const elements = details.elements || [];
+                        const provBody = document.getElementById('provenance-body');
+                        if (elements.length > 0) {
+                            provBody.innerHTML = elements.map(el => {
+                                  const isTruncated = el.reason && el.reason.startsWith('truncated');
+                                  const statusHtml = isTruncated
+                                      ? `<span style="color:var(--danger); font-weight:500;">Truncated</span><br/><span style="color:var(--text-secondary); font-size:10px;">${el.reason}</span>`
+                                      : `<span style="color:var(--success); font-weight:500;">Packed</span><br/><span style="color:var(--text-secondary); font-size:10px;">${el.reason}</span>`;
+
+                                  return `<tr class="row-hover" style="${isTruncated ? 'opacity: 0.6;' : ''}">
+                                      <td><code>${el.name}</code></td>
+                                      <td style="font-family:var(--font-mono); font-size:11px;">${el.path}</td>
+                                      <td>${el.score ? el.score.toFixed(2) : '-'}</td>
+                                      <td>${el.tokens}</td>
+                                      <td>${statusHtml}</td>
+                                  </tr>`;
+                            }).join('');
+                        } else {
+                            provBody.innerHTML = `<tr><td colspan="5" class="empty-state">No elements in trace.</td></tr>`;
+                        }
+
+                    } else {
+                        document.getElementById('retrieval-details').style.display = 'none';
+                        document.getElementById('generic-details').style.display = 'block';
+                        document.getElementById('generic-json').textContent = JSON.stringify(trace.details, null, 2);
+                    }
+                } else {
+                    traceEmpty.style.display = 'block';
+                    traceInfo.style.display = 'none';
+                }
+
+            } catch (e) {
+                console.error("Dashboard update failed:", e);
+                document.querySelector('.status-badge').style.color = 'var(--danger)';
+                document.querySelector('.status-badge').style.background = 'rgba(239, 68, 68, 0.1)';
+                document.querySelector('.status-badge').style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                document.querySelector('.status-badge').innerHTML = '<div class="status-dot"></div> Connection Lost';
+            }
+        }
+
+        updateDashboard();
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html>

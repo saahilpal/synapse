@@ -1,6 +1,6 @@
 # Diagnostic Observability
 
-Trust is built through explainability. Synapse provides deep visibility into its internal operations so that developers can verify why specific context was provided to an AI agent.
+Trust is built through explainability. Synap provides deep visibility into its internal operations so that developers can verify why specific context was provided to an AI agent.
 
 ## Retrieval Traces
 
@@ -20,7 +20,7 @@ Monitor the state of your local context repository:
 
 ## Parser Diagnostics
 
-Synapse logs all parser failures, such as:
+Synap logs all parser failures, such as:
 - **Syntax Errors:** Files that could not be parsed due to invalid code.
 - **Unsupported Syntax:** Language constructs that the current Tree-sitter grammar does not support.
 - **Performance Timing:** How long each file took to index.

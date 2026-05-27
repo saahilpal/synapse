@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from synapse.cli.main import app
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.cli.main import app
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 @pytest.fixture
@@ -42,8 +42,8 @@ def test_wiki_and_cost_cli(temp_repo: Path) -> None:
     assert "No LLM calls recorded yet" in cost_res.output
 
     # 3. Manually add an LLM call to database
-    settings = SynapseSettings(repository_path=temp_repo, profile=RuntimeProfile.TEST)
-    runtime = SynapseRuntime(settings)
+    settings = SynapSettings(repository_path=temp_repo, profile=RuntimeProfile.TEST)
+    runtime = SynapRuntime(settings)
     runtime.initialize_storage()
     runtime.store.put_llm_call(
         provider="openai",

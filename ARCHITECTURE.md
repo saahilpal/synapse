@@ -1,10 +1,10 @@
-# Synapse Architecture
+# Synap Architecture
 
-Synapse is a **deterministic structural context substrate** designed for AI coding agents. It provides a stable, verifiable memory layer by projecting Git repository states into a searchable structural graph.
+Synap is a **deterministic structural context substrate** designed for AI coding agents. It provides a stable, verifiable memory layer by projecting Git repository states into a searchable structural graph.
 
 ## System Overview
 
-Synapse operates as a pure projection engine. It does not "guess" code structure using AI; it extracts it deterministically using **Tree-sitter** parsers and **Recursive SQL** traversals.
+Synap operates as a pure projection engine. It does not "guess" code structure using AI; it extracts it deterministically using **Tree-sitter** parsers and **Recursive SQL** traversals.
 
 ```mermaid
 graph TD
@@ -31,21 +31,21 @@ graph TD
 
 ## 1. Deterministic Grounding
 
-The fundamental invariant of Synapse is **Git Grounding**.
+The fundamental invariant of Synap is **Git Grounding**.
 - Every indexed symbol is tied to a specific Git commit OID and file content hash.
 - The system state is a pure function of the Git working tree.
 - Wiping the local index and rebuilding it always produces identical results.
 
 ## 2. Ingestion Pipeline
 
-Synapse implements a highly optimized incremental indexing pipeline:
+Synap implements a highly optimized incremental indexing pipeline:
 1.  **Fast Scan**: Identifies changed files using SHA-256 content hashes.
 2.  **Tree-sitter Parsing**: Extracts high-fidelity symbols (Classes, Functions, Interfaces) and structural relationships (Imports, Call Edges).
 3.  **Atomic Persistence**: Updates the SQLite index within a single WAL-mode transaction.
 
 ## 3. Storage Layer
 
-Synapse uses a simple, infrastructure-grade storage model:
+Synap uses a simple, infrastructure-grade storage model:
 - **SQLite (Primary Index)**: Stores files, symbols, edges, and retrieval traces.
 - **Zlib Object Store**: Git-like content-addressed storage for immutable file snapshots.
 
@@ -59,13 +59,13 @@ Retrieval is executed in a strict 4-stage priority order:
 
 ## 5. Model Context Protocol (MCP)
 
-Synapse is an **MCP-first** platform. It exposes its core capabilities through standard Model Context Protocol tools, allowing any AI agent (Cursor, Claude, Roo) to perform grounded repository analysis.
+Synap is an **MCP-first** platform. It exposes its core capabilities through standard Model Context Protocol tools, allowing any AI agent (Cursor, Claude, Roo) to perform grounded repository analysis.
 
 ---
 
 ## 6. Diagnostic Observability
 
-Synapse prioritizes **Explainable AI**. Every retrieval operation generates a persistent **Diagnostic Trace**, recording:
+Synap prioritizes **Explainable AI**. Every retrieval operation generates a persistent **Diagnostic Trace**, recording:
 - Which symbols were selected and why (lexical vs structural).
 - The token weight of each context block.
 - The specific truncation decisions made to fit within the agent's window.

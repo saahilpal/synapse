@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-Synapse follows the Contributor Covenant spirit: participate with respect, assume good faith, and make technical disagreement precise rather than personal.
+Synap follows the Contributor Covenant spirit: participate with respect, assume good faith, and make technical disagreement precise rather than personal.
 
 ## Expected Behavior
 
@@ -19,4 +19,3 @@ Synapse follows the Contributor Covenant spirit: participate with respect, assum
 ## Enforcement
 
 Maintainers may edit, hide, or remove comments; close issues; pause discussions; or restrict participation when behavior harms the project community.
-

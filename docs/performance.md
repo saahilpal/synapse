@@ -1,6 +1,6 @@
 # Performance
 
-Synapse is engineered for high-performance indexing and low-latency retrieval, even on massive monorepos.
+Synap is engineered for high-performance indexing and low-latency retrieval, even on massive monorepos.
 
 ## Indexing Performance
 
@@ -17,5 +17,5 @@ Retrieval is optimized via SQLite:
 
 ## Resource Constraints
 
-- **Memory:** Synapse maintains a minimal footprint by keeping the graph in SQLite rather than in-memory Python objects.
-- **CPU:** High bursts are only expected during the initial `synapse init` or a large rebase.
+- **Memory:** Synap maintains a minimal footprint by keeping the graph in SQLite rather than in-memory Python objects.
+- **CPU:** High bursts are only expected during the initial `synap init` or a large rebase.

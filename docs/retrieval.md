@@ -1,6 +1,6 @@
 # Retrieval Pipeline
 
-Synapse implements a 4-stage retrieval pipeline designed to provide high-signal context while strictly managing the token budget of AI agents.
+Synap implements a 4-stage retrieval pipeline designed to provide high-signal context while strictly managing the token budget of AI agents.
 
 ## Retrieval Order
 
@@ -11,7 +11,7 @@ Synapse implements a 4-stage retrieval pipeline designed to provide high-signal 
 
 ## Token Budgeting
 
-Character counting is imprecise and leads to unpredictable LLM failures. Synapse uses **tiktoken** to perform exact token counting.
+Character counting is imprecise and leads to unpredictable LLM failures. Synap uses **tiktoken** to perform exact token counting.
 - **Priority Packing:** We pack context blocks in order of their combined score.
 - **Deterministic Truncation:** We stop packing as soon as the budget is reached, ensuring the agent never receives a malformed request.
 

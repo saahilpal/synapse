@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from synapse.utils.serialization import pack_canonical, stable_hash
+from synap_git.utils.serialization import pack_canonical, stable_hash
 
 
 def test_stable_hash_is_order_independent() -> None:

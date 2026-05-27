@@ -1,16 +1,16 @@
 import sys
 from pathlib import Path
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 def evaluate_structural_grounding(repo_path: str) -> None:
     path = Path(repo_path)
     print(f"Evaluating Grounding on {path.name}...")
 
-    settings = SynapseSettings(repository_path=path, profile=RuntimeProfile.TEST)
-    runtime = SynapseRuntime(settings)
+    settings = SynapSettings(repository_path=path, profile=RuntimeProfile.TEST)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap(force=True)
 
     # 1. Measure Precision/Recall for a known symbol

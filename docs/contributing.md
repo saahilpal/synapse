@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in improving Synapse!
+Thank you for your interest in improving Synap!
 
 ## Development Setup
 
@@ -10,7 +10,7 @@ Thank you for your interest in improving Synapse!
     ```
 2.  **Clone and Install:**
     ```bash
-    git clone https://github.com/saahilpal/synapse.git
+    git clone https://github.com/saahilpal/synap-git.git
     cd synapse
     uv sync --all-extras
     ```
@@ -21,7 +21,7 @@ Thank you for your interest in improving Synapse!
 
 ## Quality Gates
 
-Synapse has strict quality requirements. All PRs must pass:
+Synap has strict quality requirements. All PRs must pass:
 - `ruff check .` (linting)
 - `ruff format .` (formatting)
 - `mypy src tests` (type checking)

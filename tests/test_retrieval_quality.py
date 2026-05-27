@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from synapse.config import RuntimeProfile, SynapseSettings
-from synapse.indexer.engine import SynapseRuntime
+from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.indexer.engine import SynapRuntime
 
 
 @pytest.fixture
@@ -40,13 +40,13 @@ def test_duplicate_symbol_indexing_and_ranking(temp_repo: Path, tmp_path: Path) 
     subprocess.run([git_bin, "add", "."], cwd=temp_repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "add duplicate symbols"], cwd=temp_repo, check=True)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Query for process_data
@@ -77,13 +77,13 @@ def test_circular_imports_traversal(temp_repo: Path, tmp_path: Path) -> None:
     subprocess.run([git_bin, "add", "."], cwd=temp_repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "circular imports"], cwd=temp_repo, check=True)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Query for func_a. Neighborhood traversal will traverse to module_b via import, then back to module_a.
@@ -108,13 +108,13 @@ def test_unicode_and_malformed_files(temp_repo: Path, tmp_path: Path) -> None:
         [git_bin, "commit", "-m", "unicode and malformed files"], cwd=temp_repo, check=True
     )
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Unicode file should be indexed successfully
@@ -144,13 +144,13 @@ def test_retrieval_determinism(temp_repo: Path, tmp_path: Path) -> None:
     subprocess.run([git_bin, "add", "."], cwd=temp_repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "add calc module"], cwd=temp_repo, check=True)
 
-    settings = SynapseSettings(
+    settings = SynapSettings(
         repository_path=temp_repo,
         profile=RuntimeProfile.TEST,
-        sqlite_path=tmp_path / "synapse.db",
+        sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
     )
-    runtime = SynapseRuntime(settings)
+    runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
     # Query 5 times

@@ -56,10 +56,10 @@ jobs:
       - name: Configure git identity (required for integration tests)
         run: |
           git config --global user.email "ci@synapse.local"
-          git config --global user.name "Synapse CI"
+          git config --global user.name "Synap CI"
 
       - name: Run tests (excluding benchmark)
-        run: uv run pytest -m "not benchmark" --cov=synapse --cov-report=term-missing --cov-report=xml
+        run: uv run pytest -m "not benchmark" --cov=synap --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -90,13 +90,13 @@ jobs:
       - name: Configure git identity
         run: |
           git config --global user.email "ci@synapse.local"
-          git config --global user.name "Synapse CI"
+          git config --global user.name "Synap CI"
 
       - name: Run benchmark tests
         run: uv run pytest -m "benchmark" -v --tb=short
         env:
           # Unset to allow benchmarks to run against this checkout
-          SYNAPSE_SKIP_STRESS: ""
+          SYNAP_SKIP_STRESS: ""
 
   release-validation:
     name: Release Package Validation
@@ -129,11 +129,11 @@ jobs:
         run: |
           source test_env/bin/activate
           git config --global user.email "ci@synapse.local"
-          git config --global user.name "Synapse CI"
-          # synapse doctor requires an initialized repo — use the checkout itself
-          synapse init . --skip-llm --quiet
-          synapse doctor .
-          synapse mcp verify .
+          git config --global user.name "Synap CI"
+          # synap doctor requires an initialized repo — use the checkout itself
+          synap init . --skip-llm --quiet
+          synap doctor .
+          synap mcp verify .
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@v4

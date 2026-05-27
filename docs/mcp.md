@@ -1,19 +1,19 @@
 # MCP Integration
 
-Synapse exposes its capabilities via the **Model Context Protocol (MCP)**, allowing AI agents to perform grounded repository search and task analysis.
+Synap exposes its capabilities via the **Model Context Protocol (MCP)**, allowing AI agents to perform grounded repository search and task analysis.
 
 ## IDE Setup
 
-To connect Synapse to your IDE (Cursor, Claude Desktop, Roo, etc.), run:
+To connect Synap to your IDE (Cursor, Claude Desktop, Roo, etc.), run:
 ```bash
-synapse mcp config .
+synap mcp config .
 ```
 This will output a JSON configuration block. Follow the IDE-specific instructions below.
 
 ### Cursor
 1. Open Cursor Settings -> Models -> MCP.
 2. Click "Add New MCP Server".
-3. Use the `command` and `args` from the Synapse output.
+3. Use the `command` and `args` from the Synap output.
 
 ### Claude Desktop
 1. Open `~/Library/Application Support/Claude/claude_desktop_config.json`.
@@ -34,5 +34,5 @@ This will output a JSON configuration block. Follow the IDE-specific instruction
 **Agent (Cursor/Claude):**
 1. Calls `search(query="authentication flow")`.
 2. Receives symbols from `auth.py`, `service.py`, and `models.py`.
-3. Explains the flow using the grounded code provided by Synapse.
+3. Explains the flow using the grounded code provided by Synap.
 4. Cites exact file paths and symbol names.

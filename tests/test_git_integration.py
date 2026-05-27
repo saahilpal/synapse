@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from synapse.git import GitChangeKind, GitRepository
+from synap_git.git import GitChangeKind, GitRepository
 
 
 def test_git_repository_detects_commit(tmp_path: Path) -> None:
     git = pytest.importorskip("git")
     repo = git.Repo.init(tmp_path, initial_branch="main")
-    actor = git.Actor("Synapse Test", "synapse@example.invalid")
+    actor = git.Actor("Synap Test", "synapse@example.invalid")
     (tmp_path / "README.md").write_text("# Test\n", encoding="utf-8")
     repo.index.add(["README.md"])
     repo.index.commit("initial", author=actor, committer=actor)
