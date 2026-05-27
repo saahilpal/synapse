@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from synap_git import __version__
 from synap_git.indexer.engine import SynapRuntime
 
 
@@ -17,7 +18,7 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
     app = FastAPI(
         title="Synap Context Diagnostics",
         description="Deterministic structural context infrastructure for AI coding agents.",
-        version="0.2.0",
+        version=__version__,
     )
 
     app.add_middleware(

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-27
+
+### Added — Final Production Hardening & Release Execution
+- `synap rollback --commit <ref>` option: directly target a commit by hash/reference without interactive selection prompt.
+- `synap rollback --yes` / `-y` option: suppress confirmation prompt for non-interactive and scripted rollback flows.
+- Non-interactive guard in `synap rollback`: fails fast with a clear error when used in piped/CI contexts without `--commit` or `--yes`.
+- `synap rollback` invalid commit detection: validates commit reference via `git rev-parse --verify` and rejects unknown refs with a clear message.
+
+### Fixed
+- **SQLite migration short-circuit bug**: legacy un-versioned databases (user_version = 0) incorrectly skipped `CREATE TABLE IF NOT EXISTS` execution, leaving the `symbols` table and others uninitialized. The premature short-circuit is removed; all schema tables are now created correctly before bumping to version 1.
+- **Python `import_from_statement` missing symbol extraction**: Tree-sitter AST parser only extracted the module identifier from `from X import Y` statements, discarding `Y`. Now correctly emits `module:symbol` pairs for all imported names, aliases, and grouped imports.
+- **Namespace-aware call edge resolution**: Pass 2 import resolver now splits `module:symbol` import entries to narrow edge targets to the correct module file, eliminating false-positive dependency edges to duplicate class names in sibling namespaces.
+- **FastAPI app version hardcoded**: `create_app()` used a hardcoded version string `"0.2.0"` instead of the canonical `__version__`. Now dynamically imported from `synap_git.__init__`.
+- **Streaming generator cancellation safety**: confirmed `httpx` stream connections are closed cleanly on partial consumption (no socket leaks).
+- **Degraded mode retry logic**: confirmed 2-stage exponential backoff and graceful structural fallback under fully-offline and timeout conditions.
+
+### Changed
+- Daemon resilience test (`test_daemon_resilience.py`) hardened against race condition where `SIGKILL` test read a stale PID from a prior run that had already exited.
+
 ## [0.2.0] - 2026-05-26
 
 ### Added — Final Polish & Release Readiness

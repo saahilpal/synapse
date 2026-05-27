@@ -1029,57 +1029,108 @@ def main(
 @app.command()
 def rollback(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    commit: Annotated[
+        str | None,
+        typer.Option(
+            "--commit",
+            "-c",
+            help="Commit hash or reference to rollback to directly.",
+        ),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Automatically approve rollback without prompting.",
+        ),
+    ] = False,
 ) -> None:
     """Rollback active state to a previous commit."""
     import subprocess
+    import sys
 
     settings = _settings(path)
     runtime = SynapRuntime(settings)
 
-    # 1. Get recent commits
-    try:
-        log_out = subprocess.check_output(  # noqa: S603
-            ["git", "log", "-n", "5", "--pretty=format:%h|%ar|%s"],  # noqa: S607
-            cwd=settings.repository_path,
-            text=True,
-        )
-        commits = []
-        for line in log_out.splitlines():
-            if line.strip():
-                parts = line.split("|", 2)
-                if len(parts) == 3:
-                    commits.append((parts[0], parts[1], parts[2]))
-    except Exception as e:
-        console.print(f"[red]✗ Failed to read git history: {e}[/red]")
-        raise typer.Abort()
+    selected_commit = None
 
-    if not commits:
-        console.print("[yellow]No commits found in git log.[/yellow]")
-        return
+    if commit:
+        # Resolve and verify the provided commit reference
+        try:
+            subprocess.check_output(  # noqa: S603
+                ["git", "rev-parse", "--verify", commit],  # noqa: S607
+                cwd=settings.repository_path,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            selected_commit = subprocess.check_output(  # noqa: S603
+                ["git", "rev-parse", "--short", commit],  # noqa: S607
+                cwd=settings.repository_path,
+                text=True,
+            ).strip()
+        except Exception:
+            console.print(f"[red]✗ Commit reference '{commit}' is invalid or not found.[/red]")
+            raise typer.Abort()
+    else:
+        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+        if not is_interactive:
+            console.print(
+                "[red]✗ Non-interactive terminal detected. Must specify --commit / -c option.[/red]"
+            )
+            raise typer.Abort()
 
-    console.print("Recent commits:")
-    for idx, (h, ar, s) in enumerate(commits, 1):
-        suffix = "  ← current" if idx == 1 else ""
-        console.print(f'  [{idx}] {h}  {ar}   "{s}"{suffix}')
+        # 1. Get recent commits
+        try:
+            log_out = subprocess.check_output(  # noqa: S603
+                ["git", "log", "-n", "5", "--pretty=format:%h|%ar|%s"],  # noqa: S607
+                cwd=settings.repository_path,
+                text=True,
+            )
+            commits = []
+            for line in log_out.splitlines():
+                if line.strip():
+                    parts = line.split("|", 2)
+                    if len(parts) == 3:
+                        commits.append((parts[0], parts[1], parts[2]))
+        except Exception as e:
+            console.print(f"[red]✗ Failed to read git history: {e}[/red]")
+            raise typer.Abort()
 
-    choice = typer.prompt("\nRoll back to which commit? [1-5]", default="1")
-    try:
-        choice_idx = int(choice) - 1
-        if choice_idx < 0 or choice_idx >= len(commits):
-            raise ValueError()
-    except ValueError:
-        console.print("[red]Invalid choice.[/red]")
-        raise typer.Abort()
+        if not commits:
+            console.print("[yellow]No commits found in git log.[/yellow]")
+            return
 
-    selected_commit = commits[choice_idx][0]
+        console.print("Recent commits:")
+        for idx, (h, ar, s) in enumerate(commits, 1):
+            suffix = "  ← current" if idx == 1 else ""
+            console.print(f'  [{idx}] {h}  {ar}   "{s}"{suffix}')
+
+        choice = typer.prompt("\nRoll back to which commit? [1-5]", default="1")
+        try:
+            choice_idx = int(choice) - 1
+            if choice_idx < 0 or choice_idx >= len(commits):
+                raise ValueError()
+        except ValueError:
+            console.print("[red]Invalid choice.[/red]")
+            raise typer.Abort()
+
+        selected_commit = commits[choice_idx][0]
 
     console.print(f"\n[bold yellow]⚠ Rolling back to {selected_commit} will:[/bold yellow]")
     console.print("    - Restore index to that commit's state (via git checkout)")
     console.print("    - Preserve all approved lessons (they survive rollbacks)")
     console.print("    - Clear current checkpoint")
 
-    if not typer.confirm("\nProceed?", default=False):
-        raise typer.Abort()
+    if not yes:
+        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+        if not is_interactive:
+            console.print(
+                "[red]✗ Non-interactive terminal detected. Must use --yes / -y option to approve rollback.[/red]"
+            )
+            raise typer.Abort()
+        if not typer.confirm("\nProceed?", default=False):
+            raise typer.Abort()
 
     # Clear current checkpoint
     try:
