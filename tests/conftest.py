@@ -6,6 +6,8 @@ import sys
 import traceback
 from typing import TYPE_CHECKING, Any
 
+import keyring
+import keyring.backend
 import pytest
 
 if TYPE_CHECKING:
@@ -20,6 +22,32 @@ def _is_process_running(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+class DummyKeyring(keyring.backend.KeyringBackend):
+    """A minimal in-memory keyring for testing."""
+
+    priority: Any = 10
+
+    def __init__(self) -> None:
+        self.passwords: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.passwords.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.passwords[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        self.passwords.pop((service, username), None)
+
+
+@pytest.fixture(autouse=True)
+def mock_keyring() -> DummyKeyring:
+    """Mock the keyring backend to avoid NoKeyringError in CI."""
+    kb = DummyKeyring()
+    keyring.set_keyring(kb)
+    return kb
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
