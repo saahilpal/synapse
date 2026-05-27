@@ -8,6 +8,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Synapse contributors" }]
 keywords = ["ai", "mcp", "git", "context", "developer-tools", "repository-indexing"]
 dependencies = [
+  "click==8.1.8",
   "fastapi==0.115.11",
   "gitpython==3.1.44",
   "keyring==25.6.0",
@@ -37,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-synapse = "synapse.cli.main:app"
+synapse = "synapse.cli:app"
 
 [build-system]
 requires = ["hatchling"]
