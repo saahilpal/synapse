@@ -21,6 +21,9 @@ class TraceResult:
 
 
 def configure_logging(settings: SynapSettings) -> None:
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
     timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
     shared_processors: list[structlog.typing.Processor] = [
         structlog.contextvars.merge_contextvars,
@@ -35,11 +38,28 @@ def configure_logging(settings: SynapSettings) -> None:
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=False)
 
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stderr,
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    log_dir = Path("~/.config/synap/logs").expanduser()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "daemon.log"
+
+    root_logger = logging.getLogger()
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    # Set up rotating file handler (5MB, 5 backups)
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    root_logger.addHandler(file_handler)
+
+    # Set up stream handler (stderr)
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(logging.Formatter("%(message)s"))
+    root_logger.addHandler(stream_handler)
+
+    root_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+
     structlog.configure(
         processors=[*shared_processors, renderer],
         wrapper_class=structlog.stdlib.BoundLogger,

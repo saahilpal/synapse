@@ -105,6 +105,14 @@ class SynapSettings(BaseSettings):
             or self._get_fallback_credential("SYNAP_ANTHROPIC_API_KEY")
         )
 
+    @property
+    def openrouter_api_key(self) -> str | None:
+        return (
+            keyring.get_password("synap", "openrouter_api_key")
+            or os.environ.get("SYNAP_OPENROUTER_API_KEY")
+            or self._get_fallback_credential("SYNAP_OPENROUTER_API_KEY")
+        )
+
     @field_validator("repository_path", "state_path", mode="before")
     @classmethod
     def _expand_path(cls, value: str | Path) -> Path:
@@ -149,6 +157,8 @@ class SynapSettings(BaseSettings):
             errors.append("Missing Gemini API key in keyring or SYNAP_GEMINI_API_KEY")
         if self.llm_provider == "anthropic" and not self.anthropic_api_key:
             errors.append("Missing Anthropic API key in keyring or SYNAP_ANTHROPIC_API_KEY")
+        if self.llm_provider == "openrouter" and not self.openrouter_api_key:
+            errors.append("Missing OpenRouter API key in keyring or SYNAP_OPENROUTER_API_KEY")
 
         return errors
 

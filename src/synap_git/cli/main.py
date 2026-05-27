@@ -171,6 +171,7 @@ def setup(
                 questionary.Choice("OpenAI", value="openai"),
                 questionary.Choice("Anthropic", value="anthropic"),
                 questionary.Choice("Gemini", value="gemini"),
+                questionary.Choice("OpenRouter", value="openrouter"),
             ],
         ).ask()
 
@@ -206,6 +207,14 @@ def setup(
                 "gemini-2.5-flash",
                 "gemini-1.5-pro",
                 "gemini-1.5-flash",
+                questionary.Choice("Custom model name...", value="custom"),
+            ],
+            "openrouter": [
+                "google/gemini-2.5-pro",
+                "google/gemini-2.5-flash",
+                "anthropic/claude-3.5-sonnet",
+                "meta-llama/llama-3.3-70b-instruct",
+                "deepseek/deepseek-chat",
                 questionary.Choice("Custom model name...", value="custom"),
             ],
         }
@@ -258,9 +267,9 @@ def setup(
         )
 
         # Provider
-        console.print("Available providers: ollama, openai, anthropic, gemini")
+        console.print("Available providers: ollama, openai, anthropic, gemini, openrouter")
         provider = input("Select LLM provider [ollama]: ").strip().lower() or "ollama"
-        if provider not in ("ollama", "openai", "anthropic", "gemini"):
+        if provider not in ("ollama", "openai", "anthropic", "gemini", "openrouter"):
             console.print(f"[red]Error: Invalid provider '{provider}'.[/red]")
             raise typer.Exit(1)
 
@@ -270,6 +279,7 @@ def setup(
             "openai": "gpt-4o",
             "anthropic": "claude-3-5-sonnet-latest",
             "gemini": "gemini-2.5-pro",
+            "openrouter": "google/gemini-2.5-pro",
         }
         default_model = default_models[provider]
         llm_model = input(f"Select model [{default_model}]: ").strip() or default_model
@@ -400,6 +410,27 @@ def setup(
                 except httpx.TimeoutException:
                     raise ValueError("Connection to Gemini API timed out (3s).")
 
+            elif provider == "openrouter":
+                try:
+                    assert key is not None
+                    resp = httpx.get(
+                        "https://openrouter.ai/api/v1/models",
+                        headers={"Authorization": f"Bearer {key}"},
+                        timeout=3.0,
+                    )
+                    if resp.status_code == 401:
+                        raise ValueError(
+                            "API key validation failed: Invalid OpenRouter API key (401 Unauthorized)."
+                        )
+                    elif resp.status_code != 200:
+                        raise ValueError(f"OpenRouter API returned status code {resp.status_code}")
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    raise ValueError(
+                        "Could not connect to OpenRouter API. Check your internet connection."
+                    )
+                except httpx.TimeoutException:
+                    raise ValueError("Connection to OpenRouter API timed out (3s).")
+
             console.print("[green]✓ Connection verified[/green]")
         except Exception as e:
             console.print(f"[bold red]✗ Connection Verification Failed:[/bold red] {e}")
@@ -497,15 +528,31 @@ def wipe(
     console.print("[green]✓ Index wiped.[/green]")
 
 
-@app.command()
-def start(
-    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
-    json_output: Annotated[bool, JSON_OPTION] = False,
-) -> None:
-    """Start the simplified repository context daemon."""
-    settings = _settings(path, json_output=json_output)
-    daemon = RuntimeDaemon(settings)
-    asyncio.run(daemon.start())
+def _is_process_running(pid: int) -> bool:
+    import os
+    import sys
+
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        windll = getattr(ctypes, "windll", None)
+        if windll:
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                exit_code = ctypes.c_ulong()
+                windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                windll.kernel32.CloseHandle(handle)
+                return exit_code.value == 259
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
 
 
 def _read_daemon_heartbeat(repository_path: Path) -> dict[str, Any] | None:
@@ -527,60 +574,449 @@ def _read_daemon_heartbeat(repository_path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _detect_install_method() -> str:
+    import sys
+    from pathlib import Path
+
+    import synap_git
+
+    pkg_file = Path(synap_git.__file__).resolve()
+    root_dir = pkg_file.parent.parent.parent
+    if (root_dir / "pyproject.toml").exists() and (root_dir / "src" / "synap_git").exists():
+        return "editable"
+
+    exe_path = sys.executable.lower()
+    if "pipx" in exe_path or "pipx" in sys.argv[0]:
+        return "pipx"
+    elif "uv" in exe_path or ".uv" in exe_path:
+        return "uv"
+    elif ".venv" in exe_path or "virtualenv" in exe_path:
+        return "venv"
+    else:
+        return "pip"
+
+
+@app.command()
+def start(
+    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
+) -> None:
+    """Start the Synap daemon in the background."""
+    import subprocess
+    import sys
+    import time
+
+    abs_path = Path(path).resolve()
+    pid_file = abs_path / ".synap" / "daemon.pid"
+
+    # 1. Check if daemon is already running for the repository
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            if _is_process_running(pid):
+                console.print(f"[green]✓ Synap daemon is already running (PID {pid}).[/green]")
+                hb = _read_daemon_heartbeat(abs_path)
+                if hb and "port" in hb:
+                    console.print(f"[green]✓ UI available at http://127.0.0.1:{hb['port']}[/green]")
+                return
+            else:
+                pid_file.unlink()
+        except Exception:
+            pass
+
+    # 2. Spawn detached daemon process
+    cmd = [sys.executable, "-m", "synap_git.cli", "daemon-run", abs_path.as_posix()]
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=0x00000008,  # DETACHED_PROCESS
+            )
+        else:
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+    except Exception as e:
+        console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    console.print("[yellow]Starting Synap daemon...[/yellow]")
+    success = False
+    for _ in range(15):  # wait up to 3 seconds
+        time.sleep(0.2)
+        if pid_file.exists():
+            hb = _read_daemon_heartbeat(abs_path)
+            if hb and hb.get("status") in ("healthy", "degraded"):
+                success = True
+                port = hb.get("port", 9876)
+                pid = int(hb.get("pid", 0))
+                console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
+                console.print("[green]✓ Runtime healthy[/green]")
+                console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
+                break
+
+    if not success:
+        console.print(
+            "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
+        )
+        raise typer.Exit(1)
+
+
+@app.command("daemon-run", hidden=True)
+def daemon_run(
+    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
+) -> None:
+    """Internal command to run the daemon loop foreground inside the detached process."""
+    import os
+
+    abs_path = Path(path).resolve()
+    pid_file = abs_path / ".synap" / "daemon.pid"
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")
+
+    settings = _settings(abs_path.as_posix())
+    configure_logging(settings)
+
+    daemon = RuntimeDaemon(settings)
+    asyncio.run(daemon.start())
+
+
+@app.command()
+def stop(
+    path: Annotated[str, typer.Argument(help="Repository path to stop.")] = ".",
+) -> None:
+    """Gracefully terminate background services."""
+    import os
+    import signal
+    import time
+
+    abs_path = Path(path).resolve()
+    pid_file = abs_path / ".synap" / "daemon.pid"
+
+    if not pid_file.exists():
+        console.print("[yellow]No active daemon process found for this repository.[/yellow]")
+        return
+
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except Exception:
+        console.print("[red]Invalid PID lockfile found. Cleaning up...[/red]")
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return
+
+    if not _is_process_running(pid):
+        console.print(
+            "[yellow]Daemon process is not currently running. Cleaning up stale lockfile...[/yellow]"
+        )
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return
+
+    console.print(f"[yellow]Stopping Synap daemon (PID {pid})...[/yellow]")
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            windll = getattr(ctypes, "windll", None)
+            if windll:
+                PROCESS_TERMINATE = 0x0001
+                handle = windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                if handle:
+                    windll.kernel32.TerminateProcess(handle, 1)
+                    windll.kernel32.CloseHandle(handle)
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except Exception as e:
+        console.print(f"[red]Failed to signal daemon: {e}[/red]")
+
+    # Wait for graceful shutdown (up to 10 seconds)
+    success = False
+    for _ in range(50):
+        time.sleep(0.2)
+        if not _is_process_running(pid):
+            success = True
+            break
+
+    # If graceful failed, force kill
+    if not success:
+        console.print("[yellow]Daemon did not stop gracefully. Forcing termination...[/yellow]")
+        try:
+            if os.name != "nt":
+                os.kill(pid, signal.SIGKILL)
+            time.sleep(1.0)
+            # Try to reap zombie process
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except (ChildProcessError, OSError):
+                pass
+        except Exception:
+            pass
+        success = not _is_process_running(pid)
+
+    # Clean up lockfiles
+    for f in (pid_file, abs_path / ".synap" / "daemon_heartbeat.json"):
+        if f.exists():
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+    if success:
+        console.print("[green]✓ Synap daemon stopped successfully.[/green]")
+    else:
+        console.print("[red]✗ Failed to terminate daemon process.[/red]")
+
+
+@app.command()
+def restart(
+    path: Annotated[str, typer.Argument(help="Repository path to restart.")] = ".",
+) -> None:
+    """Restart background daemon services."""
+    abs_path = Path(path).resolve()
+    console.print("[yellow]Restarting Synap services...[/yellow]")
+
+    pid_file = abs_path / ".synap" / "daemon.pid"
+    if pid_file.exists():
+        stop(path)
+
+    start(path)
+
+
 @app.command()
 def status(
     path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Show current repository context status."""
-    settings = _settings(path, json_output=json_output)
+    abs_path = Path(path).resolve()
+    settings = _settings(abs_path.as_posix(), json_output=json_output)
     runtime = SynapRuntime(settings)
     status_info = runtime.status()
 
-    daemon_info = _read_daemon_heartbeat(settings.repository_path)
-    approved_cnt = len(runtime.store.get_lessons("approved"))
-    pending_cnt = len(runtime.store.get_lessons("pending"))
+    hb = _read_daemon_heartbeat(abs_path)
+    daemon_running = False
+    if hb:
+        pid = hb.get("pid", 0)
+        if _is_process_running(pid):
+            daemon_running = True
 
     if json_output:
         out = _jsonable(status_info)
-        out["daemon"] = daemon_info
-        out["l3_approved_memory"] = approved_cnt
-        out["l3_pending_memory"] = pending_cnt
+        out["daemon"] = hb if daemon_running else None
         _emit(out, json_output=True)
+        return
+
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+    console.print("[bold cyan]          Synap Runtime Status          [/bold cyan]")
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
+
+    daemon_status = (
+        "[bold green]Running[/bold green]" if daemon_running else "[bold red]Stopped[/bold red]"
+    )
+    if daemon_running and hb:
+        uptime_sec = hb.get("uptime_seconds", 0)
+        uptime_str = f" (PID {hb.get('pid')}, uptime {uptime_sec}s)"
+        daemon_status += uptime_str
+
+    cpu_val = f"{hb.get('cpu_percent', 0.0)}%" if (daemon_running and hb) else "0%"
+    ram_raw = hb.get("ram_mb", 0.0) if (daemon_running and hb) else 0.0
+    if ram_raw >= 1024:
+        ram_val = f"{ram_raw / 1024:.2f} GB"
     else:
-        table = Table(title="Synap Repository Status", show_header=True, header_style="bold cyan")
-        table.add_column("Property", style="dim")
-        table.add_column("Value")
+        ram_val = f"{ram_raw:.1f} MB"
 
-        table.add_row("Repository", status_info.repository_path)
-        table.add_row("Branch", status_info.branch)
-        table.add_row("Git Commit", status_info.git_commit or "None")
-        table.add_row("Indexed Commit", status_info.active_commit or "None")
-        table.add_row("Files Indexed", str(status_info.files))
-        table.add_row("Symbols Indexed", str(status_info.symbols))
-        table.add_row("Mode", status_info.mode)
+    indexed_files = str(status_info.files)
+    memory_nodes = str(status_info.symbols)
 
-        if daemon_info:
-            status_str = daemon_info["status"].upper()
-            if status_str == "HEALTHY":
-                daemon_status = f"[green]ACTIVE (PID {daemon_info['pid']}, uptime {daemon_info['uptime_seconds']}s)[/green]"
-            elif status_str == "STALE":
-                daemon_status = f"[yellow]STALE (PID {daemon_info['pid']} inactive)[/yellow]"
+    if daemon_running and hb:
+        indexed_files = f"{hb.get('indexed_files', status_info.files)} files"
+        memory_nodes = f"{hb.get('memory_nodes', status_info.symbols)} nodes"
+
+    provider = settings.llm_provider or "None (Mode A)"
+    model = settings.llm_model or "None"
+
+    from rich.table import Table
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column("Property", style="bold cyan")
+    table.add_column("Value")
+
+    table.add_row("Daemon:", daemon_status)
+    table.add_row("Repository:", abs_path.name)
+    table.add_row("Branch:", status_info.branch)
+    table.add_row("Indexed:", indexed_files)
+    table.add_row("Memory:", memory_nodes)
+    table.add_row("LLM Provider:", provider.capitalize())
+    table.add_row("Model:", model)
+    table.add_row("CPU:", cpu_val)
+    table.add_row("RAM:", ram_val)
+
+    console.print(table)
+    console.print()
+
+    if status_info.is_dirty:
+        console.print(
+            "[bold yellow]⚠ Warning: Working tree has uncommitted changes. Run git commit to index them.[/bold yellow]"
+        )
+
+
+@app.command()
+def logs(
+    tail: Annotated[
+        bool, typer.Option("--tail", "-t", help="Stream new log entries in real-time.")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Show verbose debug and trace logs.")
+    ] = False,
+) -> None:
+    """View and tail Synap runtime logs."""
+    import time
+
+    log_dir = Path("~/.config/synap/logs").expanduser()
+    log_file = log_dir / "daemon.log"
+
+    if not log_file.exists():
+        console.print("[yellow]No log files found yet.[/yellow]")
+        return
+
+    try:
+        with open(log_file, encoding="utf-8") as f:
+            if not tail:
+                lines = f.readlines()
+                for line in lines[-50:]:
+                    if not debug and '"level": "debug"' in line.lower():
+                        continue
+                    console.print(line.strip())
             else:
-                daemon_status = f"[red]{status_str} (PID {daemon_info['pid']})[/red]"
-        else:
-            daemon_status = "[dim]INACTIVE[/dim]"
-        table.add_row("Daemon State", daemon_status)
+                f.seek(0, 2)
+                console.print("[cyan]Tailing daemon logs (Ctrl+C to exit)...[/cyan]")
+                while True:
+                    line = f.readline()
+                    if not line:
+                        time.sleep(0.1)
+                        continue
+                    if not debug and '"level": "debug"' in line.lower():
+                        continue
+                    console.print(line.strip())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Tail stopped.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error reading logs: {e}[/red]")
 
-        table.add_row("L3 Approved Memory", str(approved_cnt))
-        table.add_row("L3 Pending Memory", str(pending_cnt))
 
-        console.print(table)
+@app.command()
+def update() -> None:
+    """Check for updates and upgrade the Synap runtime."""
+    import subprocess
+    import sys
 
-        if status_info.is_dirty:
+    import httpx
+
+    from synap_git import __version__ as current_version
+
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+    console.print("[bold cyan]             Synap Updater              [/bold cyan]")
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
+
+    install_method = _detect_install_method()
+    console.print(f"Installation method detected: [bold]{install_method.upper()}[/bold]")
+    console.print(f"Current version: [bold]{current_version}[/bold]")
+
+    latest_version = current_version
+    with console.status("[yellow]Checking for updates on PyPI...[/yellow]"):
+        try:
+            resp = httpx.get("https://pypi.org/pypi/synap-git/json", timeout=5.0)
+            if resp.status_code == 200:
+                latest_version = resp.json()["info"]["version"]
+        except Exception as e:
             console.print(
-                "[bold yellow]Warning: Working tree is dirty. Uncommitted changes are not indexed.[/bold yellow]"
+                f"[yellow]⚠ Failed to reach PyPI: {e}. Cannot check for updates.[/yellow]"
             )
+            return
+
+    console.print(f"Latest version on PyPI: [bold]{latest_version}[/bold]")
+
+    if current_version == latest_version and install_method != "editable":
+        console.print("[green]✓ Synap is already up to date.[/green]")
+        return
+
+    if install_method == "editable":
+        console.print("\n[yellow]Editable installation detected. Updating via git pull...[/yellow]")
+        try:
+            subprocess.run(["git", "pull", "origin", "main"], check=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+            console.print(
+                "[green]✓ Update successful (Git repository pulled and re-installed)[/green]"
+            )
+        except Exception as e:
+            console.print(f"[bold red]✗ Git update failed:[/bold red] {e}")
+            raise typer.Exit(1)
+        return
+
+    upgrade_cmds = {
+        "pipx": ["pipx", "upgrade", "synap-git"],
+        "uv": ["uv", "tool", "upgrade", "synap-git"],
+        "venv": [sys.executable, "-m", "pip", "install", "--upgrade", "synap-git"],
+        "pip": [sys.executable, "-m", "pip", "install", "--upgrade", "synap-git"],
+    }
+
+    cmd = upgrade_cmds.get(install_method)
+    if not cmd:
+        console.print("[red]Unknown installation method. Upgrade manually.[/red]")
+        return
+
+    console.print(
+        f"\n[yellow]Upgrading Synap to {latest_version} using: {' '.join(cmd)}...[/yellow]"
+    )
+    try:
+        subprocess.run(cmd, check=True)
+        console.print("[green]✓ Update successful[/green]")
+    except Exception as e:
+        console.print(f"[bold red]✗ Upgrade failed:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def version() -> None:
+    """Print the Synap package version."""
+    from synap_git import __version__
+
+    console.print(f"Synap version: [bold]{__version__}[/bold]")
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        from synap_git import __version__
+
+        typer.echo(f"Synap version: {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-v",
+            help="Print version and exit.",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    pass
 
 
 @app.command()
@@ -854,51 +1290,9 @@ def doctor(
 @app.command()
 def run(
     path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
-    host: Annotated[str, typer.Option(help="Host for UI server.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(help="Port for UI server.")] = 9876,
 ) -> None:
-    """Start all Synap services (Daemon, MCP, UI)."""
-    import subprocess
-    import sys
-    import time
-
-    settings = _settings(path)
-    runtime = SynapRuntime(settings)
-    runtime.bootstrap()
-
-    commands = [
-        ("Daemon", [sys.executable, "-m", "synap_git.cli", "start", path]),
-        ("MCP Server", [sys.executable, "-m", "synap_git.cli", "mcp", "start", path]),
-        (
-            "UI Server",
-            [
-                sys.executable,
-                "-m",
-                "synap_git.cli",
-                "ui",
-                path,
-                "--host",
-                host,
-                "--port",
-                str(port),
-            ],
-        ),
-    ]
-
-    processes = []
-    try:
-        for name, cmd in commands:
-            p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
-            processes.append((name, p))
-            time.sleep(0.5)
-
-        console.print("\n[bold green]✓ Synap Runtime active![/bold green]")
-        console.print(f"[cyan]UI: http://{host}:{port}[/cyan]")
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        for _, p in processes:
-            p.terminate()
+    """Start the Synap daemon and serve the Diagnostic UI."""
+    start(path)
 
 
 @mcp_app.command("start")
@@ -1020,20 +1414,55 @@ def mcp_verify(
 @app.command()
 def ui(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-    host: Annotated[str, typer.Option()] = "127.0.0.1",
-    port: Annotated[int, typer.Option()] = 9876,
 ) -> None:
-    """Start the diagnostic UI."""
-    import uvicorn
+    """Open the Synap diagnostic UI in your browser."""
+    import sys
+    import time
+    import webbrowser
 
-    from synap_git.api.app import create_app
+    abs_path = Path(path).resolve()
+    hb = _read_daemon_heartbeat(abs_path)
+    daemon_running = False
+    if hb:
+        pid = hb.get("pid", 0)
+        if _is_process_running(pid):
+            daemon_running = True
 
-    settings = _settings(path)
-    runtime = SynapRuntime(settings)
-    runtime.bootstrap()
+    if not daemon_running:
+        console.print("[yellow]Synap background daemon is not running.[/yellow]")
+        is_tty = sys.stdin.isatty() and sys.stdout.isatty()
+        start_it = False
+        if is_tty:
+            import questionary
 
-    api_app = create_app(runtime)
-    uvicorn.run(api_app, host=host, port=port)
+            start_it = questionary.confirm("Would you like to start the Synap daemon?").ask()
+        else:
+            start_it = input(
+                "Would you like to start the Synap daemon? [y/N]: "
+            ).strip().lower() in ("y", "yes")
+
+        if start_it:
+            start(path)
+            # Re-read heartbeat
+            for _ in range(15):
+                time.sleep(0.2)
+                hb = _read_daemon_heartbeat(abs_path)
+                if hb and _is_process_running(hb.get("pid", 0)):
+                    daemon_running = True
+                    break
+        else:
+            console.print("[red]✗ Daemon is required to serve the UI.[/red]")
+            raise typer.Exit(1)
+
+    if not daemon_running or not hb:
+        console.print("[red]✗ Failed to start daemon or retrieve UI server port.[/red]")
+        raise typer.Exit(1)
+
+    port = hb.get("port", 9876)
+    url = f"http://127.0.0.1:{port}"
+    console.print("[green]✓ Connecting to runtime...[/green]")
+    console.print(f"[green]✓ Opening browser to {url}...[/green]")
+    webbrowser.open(url)
 
 
 @memory_app.command("status")

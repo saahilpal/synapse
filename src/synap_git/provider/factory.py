@@ -62,6 +62,19 @@ def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
             default_model=settings.llm_model or "",
         )
 
+    if provider_name == "openrouter":
+        if not settings.openrouter_api_key:
+            raise ValueError(
+                "OpenRouter API key missing. Set SYNAP_OPENROUTER_API_KEY or "
+                "configure it in ~/.config/synap/config.toml"
+            )
+        from synap_git.provider.openrouter import OpenRouterProvider
+
+        return OpenRouterProvider(
+            api_key=settings.openrouter_api_key,
+            default_model=settings.llm_model or "",
+        )
+
     raise ValueError(f"Unsupported or unconfigured LLM provider: {provider_name}")
 
 

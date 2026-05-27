@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import json
+import urllib.request
+from typing import Any
+
+from synap_git.provider.base import LLMResponse
+from synap_git.provider.openai import OpenAIProvider
+
+
+class OpenRouterProvider(OpenAIProvider):
+    """OpenRouter API provider implementation using OpenAI-compatible endpoints."""
+
+    def __init__(self, api_key: str, default_model: str = "google/gemini-2.5-pro") -> None:
+        super().__init__(api_key, default_model)
+
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> LLMResponse:
+        model_name = model or self.default_model
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://github.com/saahilpal/synap-git",
+            "X-Title": "Synap Git",
+        }
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+        )
+        try:
+            # OpenRouter requests are identical to OpenAI chat completion requests
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
+                data = json.loads(resp.read().decode("utf-8"))
+            choice = data["choices"][0]["message"]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=str(choice["content"]),
+                prompt_tokens=int(usage.get("prompt_tokens", 0)),
+                completion_tokens=int(usage.get("completion_tokens", 0)),
+            )
+        except Exception as exc:
+            raise RuntimeError(f"OpenRouter generate failed: {exc}") from exc
+
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+    ) -> list[float]:
+        raise NotImplementedError(
+            "OpenRouter does not support embeddings. Configure OpenAI or Ollama for embeddings."
+        )
