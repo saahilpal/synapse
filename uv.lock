@@ -1264,7 +1264,6 @@ wheels = [
 
 [[package]]
 name = "synap-git"
-version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

@@ -108,8 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish-pypi
     steps:
-      - name: Wait for PyPI Index
-        run: sleep 30
+      - uses: actions/checkout@v4
 
       - name: Install uv
         run: |
@@ -121,25 +120,47 @@ jobs:
 
       - name: Verify PyPI Installation
         run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Expected Version: $TAG_VERSION"
+
           uv venv test_env
           source test_env/bin/activate
-          # Force download from PyPI
-          uv pip install --no-cache-dir synap-git
+
+          # Retry loop to wait for PyPI indexing
+          for i in {1..10}; do
+            echo "Attempt $i: Installing synap-git==$TAG_VERSION..."
+            if uv pip install --no-cache-dir "synap-git==$TAG_VERSION"; then
+              echo "✓ Successfully installed synap-git==$TAG_VERSION"
+              break
+            fi
+            if [ $i -eq 10 ]; then
+              echo "✗ Failed to install synap-git==$TAG_VERSION after 10 attempts."
+              exit 1
+            fi
+            echo "Waiting 30 seconds for PyPI index..."
+            sleep 30
+          done
 
           mkdir test_repo && cd test_repo
-          git init
+          git init -b main
           git config --global user.email "release@synapse.local"
           git config --global user.name "Synap Release"
           git commit -m "init" --allow-empty
 
           # Verify package versions
-          synap --version
+          INSTALLED_VERSION=$(synap --version)
+          echo "Installed Version: $INSTALLED_VERSION"
+          if [[ "$INSTALLED_VERSION" != *"$TAG_VERSION"* ]]; then
+            echo "ERROR: Installed version mismatch!"
+            exit 1
+          fi
+
           synap --help
 
           # Verify initialization and daemon boot
           synap init . --skip-llm --quiet
           synap start .
-          sleep 2
+          sleep 5
           synap status .
           synap stop .
 
