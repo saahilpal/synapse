@@ -572,4 +572,9 @@ class SynapStore:
             conn.execute("DELETE FROM activity")
             conn.execute("DELETE FROM llm_calls")
 
+        # Run VACUUM outside the transaction context
+        conn = sqlite3.connect(self.path, isolation_level=None, timeout=30.0)
+        try:
             conn.execute("VACUUM")
+        finally:
+            conn.close()
