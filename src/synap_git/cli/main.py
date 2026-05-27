@@ -1092,10 +1092,10 @@ def rollback(
 
 
 @app.command()
-def recover(
+def repair(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Recover from a broken index state."""
+    """Repair a broken index state."""
     settings = _settings(path)
     runtime = SynapRuntime(settings)
 

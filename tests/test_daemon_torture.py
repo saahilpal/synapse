@@ -153,28 +153,32 @@ async def test_concurrent_reads_and_writes(torture_settings: SynapSettings) -> N
     daemon = RuntimeDaemon(torture_settings)
     daemon_task = asyncio.create_task(daemon.start())
 
-    await asyncio.sleep(0.2)
+    try:
+        await asyncio.sleep(0.2)
 
-    repo = torture_settings.repository_path
-    app_file = repo / "app.py"
+        repo = torture_settings.repository_path
+        app_file = repo / "app.py"
 
-    async def writer_loop() -> None:
-        for i in range(15):
-            app_file.write_text(f"def fn_{i}():\n    # inline docs\n    pass\n", encoding="utf-8")
-            await asyncio.sleep(0.02)
+        async def writer_loop() -> None:
+            for i in range(15):
+                app_file.write_text(
+                    f"def fn_{i}():\n    # inline docs\n    pass\n", encoding="utf-8"
+                )
+                await asyncio.sleep(0.02)
 
-    async def reader_loop() -> None:
-        for _ in range(15):
-            # Query the retrieval engine while files are modified
-            ans, _, _ = daemon.runtime.query_hybrid("fn_0", max_tokens=1000)
-            assert ans is not None
-            await asyncio.sleep(0.02)
+        async def reader_loop() -> None:
+            for _ in range(15):
+                # Query the retrieval engine while files are modified
+                ans, _, _ = daemon.runtime.query_hybrid("fn_0", max_tokens=1000)
+                assert ans is not None
+                await asyncio.sleep(0.02)
 
-    # Run writer and reader concurrently
-    await asyncio.gather(writer_loop(), reader_loop())
+        # Run writer and reader concurrently
+        await asyncio.gather(writer_loop(), reader_loop())
 
-    await asyncio.sleep(0.3)
-    daemon.stop()
-    await daemon_task
+        await asyncio.sleep(0.3)
+    finally:
+        daemon.stop()
+        await daemon_task
 
     assert daemon.runtime.store.integrity_check() == "ok"

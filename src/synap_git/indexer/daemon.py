@@ -62,6 +62,7 @@ class RuntimeDaemon:
             port=self._port,
             log_level="warning",
             loop="asyncio",
+            lifespan="off" if self.settings.profile.name == "TEST" else "auto",
         )
         self._ui_server = Server(config)
 
@@ -88,6 +89,11 @@ class RuntimeDaemon:
             self._running = False
             self.logger.info("daemon_shutting_down")
             self._ui_server.should_exit = True
+
+            from synap_git.config import RuntimeProfile
+
+            if self.settings.profile == RuntimeProfile.TEST:
+                self._ui_server.force_exit = True
 
             # Allow uvicorn to shut down gracefully if it's running
             if self._ui_server.started:

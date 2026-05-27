@@ -85,8 +85,19 @@ def _dump_debug_info() -> None:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_daemons() -> Generator[None, None, None]:
+def cleanup_daemons(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
     """Ensure any orphaned synap daemon processes are killed after each test."""
     yield
-    # No-op for now as we use specialized fixtures for daemon tests
-    pass
+    base_temp = tmp_path_factory.getbasetemp()
+    for pid_file in base_temp.rglob("daemon.pid"):
+        try:
+            pid = int(pid_file.read_text().strip())
+            if pid > 0:
+                import signal
+
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+        except Exception:
+            pass
