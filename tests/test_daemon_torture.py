@@ -32,6 +32,7 @@ def torture_settings(tmp_path: Path) -> SynapSettings:
         sqlite_path=tmp_path / "synap.db",
         object_path=tmp_path / "objects",
         daemon_poll_interval_seconds=0.05,
+        shutdown_timeout_seconds=0.1,
     )
     return settings
 

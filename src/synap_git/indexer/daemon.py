@@ -86,13 +86,27 @@ class RuntimeDaemon:
             await self._poll_git_loop()
         finally:
             self._running = False
+            self.logger.info("daemon_shutting_down")
             self._ui_server.should_exit = True
-            server_task.cancel()
-            try:
-                await server_task
-            except (asyncio.CancelledError, Exception):
-                pass
+
+            # Allow uvicorn to shut down gracefully if it's running
+            if self._ui_server.started:
+                try:
+                    await asyncio.wait_for(
+                        server_task, timeout=self.settings.shutdown_timeout_seconds
+                    )
+                except (TimeoutError, asyncio.CancelledError):
+                    self.logger.warning("daemon_uvicorn_graceful_shutdown_failed")
+
+            if not server_task.done():
+                server_task.cancel()
+                try:
+                    await server_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
             self._delete_heartbeat()
+            self.logger.info("daemon_stopped")
 
     def stop(self) -> None:
         self._stop_event.set()

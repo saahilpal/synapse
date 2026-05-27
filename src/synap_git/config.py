@@ -69,6 +69,7 @@ class SynapSettings(BaseSettings):
     mcp_port: int = 9876
 
     daemon_poll_interval_seconds: float = 2.0
+    shutdown_timeout_seconds: float = 5.0
 
     def _get_fallback_credential(self, key: str) -> str | None:
         try:

@@ -13,9 +13,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
 
       - name: Set up Python 3.12
         run: uv python install 3.12
@@ -43,9 +44,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
 
       - name: Set up Python 3.12
         run: uv python install 3.12
@@ -59,7 +61,9 @@ jobs:
           git config --global user.name "Synap CI"
 
       - name: Run tests (excluding benchmark)
-        run: uv run pytest -m "not benchmark" --cov=synap_git --cov-report=term-missing --cov-report=xml
+        run: uv run pytest -m "not benchmark" --cov=synap_git --cov-report=term-missing --cov-report=xml -vv -s --timeout=300 -x
+        env:
+          CI: "true"
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -77,9 +81,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
 
       - name: Set up Python 3.12
         run: uv python install 3.12
@@ -106,9 +111,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
 
       - name: Set up Python 3.12
         run: uv python install 3.12

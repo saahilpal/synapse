@@ -34,6 +34,9 @@ def test_daemon_lifecycle_cli(
     # Setup configuration environment to avoid polluting user's local configs
     config_dir = tmp_path / ".config" / "synap"
     monkeypatch.setenv("SYNAP_CONFIG", (config_dir / "config.toml").as_posix())
+    # Speed up daemon polling for tests
+    monkeypatch.setenv("SYNAP_DAEMON_POLL_INTERVAL_SECONDS", "0.1")
+    monkeypatch.setenv("SYNAP_SHUTDOWN_TIMEOUT_SECONDS", "0.1")
 
     runner = CliRunner()
 
@@ -67,21 +70,37 @@ def test_daemon_lifecycle_cli(
     assert "RAM:" in status_res.output
 
     # Step 4: Restart daemon
-    restart_res = runner.invoke(app, ["restart", temp_repo.as_posix()])
-    assert restart_res.exit_code == 0, restart_res.output
-    assert "Restarting Synap services" in restart_res.output
-    assert "Synap daemon started" in restart_res.output
+    try:
+        restart_res = runner.invoke(app, ["restart", temp_repo.as_posix()])
+        assert restart_res.exit_code == 0, restart_res.output
+        assert "Restarting Synap services" in restart_res.output
+        assert "Synap daemon started" in restart_res.output
 
-    new_pid = int(pid_file.read_text().strip())
-    assert _is_process_running(new_pid)
+        new_pid = int(pid_file.read_text().strip())
+        assert _is_process_running(new_pid)
 
-    # Allow the restarted daemon to finish bootstrapping before stopping
-    time.sleep(2)
+        # Allow the restarted daemon to finish bootstrapping before stopping
+        time.sleep(0.5)
 
-    # Step 5: Stop daemon
-    stop_res = runner.invoke(app, ["stop", temp_repo.as_posix()])
-    assert stop_res.exit_code == 0, stop_res.output
-    assert "Synap daemon stopped successfully" in stop_res.output
+        # Step 5: Stop daemon
+        stop_res = runner.invoke(app, ["stop", temp_repo.as_posix()])
+        assert stop_res.exit_code == 0, stop_res.output
+        assert "Synap daemon stopped successfully" in stop_res.output
+    finally:
+        # Final safety cleanup to prevent orphaned processes in CI
+        if pid_file.exists():
+            try:
+                final_pid = int(pid_file.read_text().strip())
+                if _is_process_running(final_pid):
+                    import os
+                    import signal
+
+                    os.kill(final_pid, signal.SIGTERM)
+                    time.sleep(0.5)
+                    if _is_process_running(final_pid):
+                        os.kill(final_pid, signal.SIGKILL)
+            except Exception:
+                pass
 
     assert not pid_file.exists()
     assert not hb_file.exists()

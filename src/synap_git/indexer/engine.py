@@ -59,7 +59,7 @@ class SynapRuntime:
             self.logger.warning("database_corrupted_wiped")
         self.store.initialize()
 
-    def _auto_protect_synapse(self) -> None:
+    def _auto_protect_synap(self) -> None:
         gitignore_path = self.settings.repository_path / ".gitignore"
         try:
             if not gitignore_path.exists():
@@ -74,11 +74,11 @@ class SynapRuntime:
                 content += ".synap/\n"
                 gitignore_path.write_text(content, encoding="utf-8")
         except Exception as e:
-            self.logger.warning("failed_to_auto_protect_synapse", error=str(e))
+            self.logger.warning("failed_to_auto_protect_synap", error=str(e))
 
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
-        self._auto_protect_synapse()
+        self._auto_protect_synap()
         git_state = self.git.state()
         branch = git_state.effective_branch
         existing_commit = self.store.get_active_commit(branch)

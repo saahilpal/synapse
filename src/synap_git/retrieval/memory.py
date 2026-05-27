@@ -33,7 +33,7 @@ class InjectionContext:
         parts = []
         parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         parts.append(
-            f"SYNAPSE CONTEXT — {self.current_branch} ({self.current_commit[:8] if self.current_commit else 'none'})"
+            f"SYNAP CONTEXT — {self.current_branch} ({self.current_commit[:8] if self.current_commit else 'none'})"
         )
         parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 

@@ -266,9 +266,7 @@ def setup(
             "[yellow]Non-TTY terminal detected. Falling back to plain text inputs.[/yellow]"
         )
 
-        # Provider
-        console.print("Available providers: ollama, openai, anthropic, gemini, openrouter")
-        provider = input("Select LLM provider [ollama]: ").strip().lower() or "ollama"
+        provider = typer.prompt("Select LLM provider", default="ollama").strip().lower()
         if provider not in ("ollama", "openai", "anthropic", "gemini", "openrouter"):
             console.print(f"[red]Error: Invalid provider '{provider}'.[/red]")
             raise typer.Exit(1)
@@ -282,14 +280,11 @@ def setup(
             "openrouter": "google/gemini-2.5-pro",
         }
         default_model = default_models[provider]
-        llm_model = input(f"Select model [{default_model}]: ").strip() or default_model
+        llm_model = typer.prompt("Select model", default=default_model).strip()
 
         # Keys/URL
         if provider == "ollama":
-            ollama_url = (
-                input("Enter Ollama URL [http://localhost:11434]: ").strip()
-                or "http://localhost:11434"
-            )
+            ollama_url = typer.prompt("Enter Ollama URL", default="http://localhost:11434").strip()
             if not (ollama_url.startswith("http://") or ollama_url.startswith("https://")):
                 console.print("[red]Error: Ollama URL must start with http:// or https://[/red]")
                 raise typer.Exit(1)
@@ -440,9 +435,9 @@ def setup(
                     "Connection check failed. Save configuration anyway?"
                 ).ask()
             else:
-                save_anyway = input(
-                    "Connection check failed. Save configuration anyway? [y/N]: "
-                ).strip().lower() in ("y", "yes")
+                save_anyway = typer.confirm(
+                    "Connection check failed. Save configuration anyway?", default=False
+                )
 
             if not save_anyway:
                 console.print("[red]Setup cancelled.[/red]")
@@ -470,7 +465,7 @@ ollama_url = "{ollama_url}"
     console.print("\n[bold green]✓ Setup complete[/bold green]")
 
 
-def _auto_protect_synapse(repository_path: Path) -> None:
+def _auto_protect_synap(repository_path: Path) -> None:
     gitignore_path = repository_path / ".gitignore"
     if not gitignore_path.exists():
         gitignore_path.write_text(".synap/\n")
@@ -503,7 +498,7 @@ def init(
     if skip_llm:
         settings.llm_provider = None
 
-    _auto_protect_synapse(settings.repository_path)
+    _auto_protect_synap(settings.repository_path)
 
     runtime = SynapRuntime(settings)
     commit = runtime.bootstrap(force=force)
@@ -1435,9 +1430,7 @@ def ui(
 
             start_it = questionary.confirm("Would you like to start the Synap daemon?").ask()
         else:
-            start_it = input(
-                "Would you like to start the Synap daemon? [y/N]: "
-            ).strip().lower() in ("y", "yes")
+            start_it = typer.confirm("Would you like to start the Synap daemon?", default=False)
 
         if start_it:
             start(path)

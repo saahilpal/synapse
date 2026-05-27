@@ -1,4 +1,4 @@
-# SYNAPSE — COMPLETE BUILD SPECIFICATION
+# SYNAP — COMPLETE BUILD SPECIFICATION
 **Version:** 1.0
 **Status:** Build-Ready
 **Audience:** Developer / Agent Implementation Guide
