@@ -53,9 +53,9 @@ class SynapRuntime:
         self.wiki = WikiEngine(settings, self.store)
         self.commit_count = 0
 
-    def initialize_storage(self) -> None:
+    def initialize_storage(self, *, auto_recover: bool = True) -> None:
         self.settings.ensure_directories()
-        if self.store.path.exists() and self.store.recover_if_corrupted():
+        if auto_recover and self.store.path.exists() and self.store.recover_if_corrupted():
             self.logger.warning("database_corrupted_wiped")
         self.store.initialize()
 
@@ -225,16 +225,64 @@ class SynapRuntime:
                 symbols=symbols_list,
             )
 
-        # Pass 2: Create structural edges
-        # In a real system, we'd only do this for changed files or their dependents.
-        # For recovery, we'll re-process all parse results from this run.
+        # Pass 2: Create structural edges (Namespace/Module aware)
+        from pathlib import Path
+
         for file_id, parse_result in all_parse_results:
             file_symbols = self.store.get_symbols_by_file(file_id)
+            current_path = Path(parse_result.path)
+
             for imp in parse_result.imports:
+                target_file_id = None
+
+                # Check for relative import (e.g. .utils)
+                if imp.startswith("."):
+                    parts = imp.lstrip(".").split(".")
+                    dot_count = len(imp) - len(imp.lstrip("."))
+                    try:
+                        # Move up directories based on dots
+                        target_dir = current_path.parents[dot_count - 1]
+                        candidate_rel = (target_dir / "/".join(parts)).as_posix()
+                        for ext in [".py", ".ts", ".go", ".rs"]:
+                            cand_path = f"{candidate_rel}{ext}"
+                            target_file = self.store.get_file_by_path(cand_path)
+                            if target_file:
+                                target_file_id = target_file["file_id"]
+                                break
+                    except Exception:
+                        pass
+                else:
+                    # Absolute import (e.g. synap_git.storage.sqlite)
+                    parts = imp.split(".")
+                    for i in range(len(parts)):
+                        suffix_path = "/".join(parts[i:])
+                        for ext in [".py", ".ts", ".go", ".rs"]:
+                            cand_path = f"{suffix_path}{ext}"
+                            with self.store.connect() as conn:
+                                row = conn.execute(
+                                    "SELECT file_id FROM files WHERE path LIKE ?",
+                                    (f"%{cand_path}",),
+                                ).fetchone()
+                                if row:
+                                    target_file_id = row["file_id"]
+                                    break
+                        if target_file_id:
+                            break
+
                 target_name = imp.split(".")[-1]
-                target_symbols = self.store.get_symbols_by_name(target_name)
+
+                if target_file_id:
+                    # Narrow down targets to the resolved module/file
+                    target_symbols = self.store.get_symbols_by_file(target_file_id)
+                    target_symbols = [ts for ts in target_symbols if ts["name"] == target_name]
+                else:
+                    # Fallback to global matching if module resolution fails
+                    target_symbols = self.store.get_symbols_by_name(target_name)
+
                 for ts in target_symbols:
                     for fs in file_symbols:
+                        if fs["symbol_id"] == ts["symbol_id"]:
+                            continue
                         edge_id = stable_hash(
                             {
                                 "source": fs["symbol_id"],
@@ -317,8 +365,8 @@ class SynapRuntime:
             pass
         return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
 
-    def doctor(self) -> dict[str, Any]:
-        self.initialize_storage()
+    def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:
+        self.initialize_storage(auto_recover=auto_recover)
         with self.store.connect() as conn:
             integrity = conn.execute("PRAGMA quick_check").fetchone()[0]
         return {

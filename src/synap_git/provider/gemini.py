@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from collections.abc import Iterator
 from typing import Any
 
 from synap_git.provider.base import LLMProvider, LLMResponse
@@ -65,6 +66,20 @@ class GeminiProvider(LLMProvider):
             )
         except Exception as exc:
             raise RuntimeError(f"Gemini generate failed: {exc}") from exc
+
+    def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> Iterator[str]:
+        res = self.generate(
+            system_prompt, user_prompt, model=model, max_tokens=max_tokens, temperature=temperature
+        )
+        yield res.content
 
     def embed(
         self,

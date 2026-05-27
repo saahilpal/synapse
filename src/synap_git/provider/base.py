@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 
@@ -26,6 +27,19 @@ class LLMProvider(ABC):
         temperature: float = 0.2,
     ) -> LLMResponse:
         """Generate a response for the given prompts."""
+        pass
+
+    @abstractmethod
+    def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> Iterator[str]:
+        """Generate a streaming response yielding string chunks."""
         pass
 
     @abstractmethod

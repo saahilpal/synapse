@@ -15,11 +15,11 @@ def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
     Strictly enforces provider configuration. Returns None for explicit Mode A
     (structural only). Mock provider is ONLY allowed during TEST profile.
     """
-    if settings.profile == RuntimeProfile.TEST:
-        return MockLLMProvider()
-
     if not settings.llm_provider:
         return None
+
+    if settings.profile == RuntimeProfile.TEST:
+        return MockLLMProvider()
 
     provider_name = str(settings.llm_provider).lower().strip()
 
@@ -80,11 +80,11 @@ def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
 
 def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an embedding provider based on runtime settings."""
-    if settings.profile == RuntimeProfile.TEST:
-        return MockLLMProvider()
-
     if not settings.llm_provider:
         return None
+
+    if settings.profile == RuntimeProfile.TEST:
+        return MockLLMProvider()
 
     provider_name = str(settings.llm_provider).lower().strip()
     model = settings.llm_model or ""

@@ -168,24 +168,49 @@ class HybridRetrievalEngine:
         t_packing = time.perf_counter()
 
         if self.llm_provider:
-            response = self.llm_provider.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.1,
-            )
-            answer_content = response.content
-            try:
-                provider_name = self.llm_provider.__class__.__name__.replace("Provider", "").lower()
-                model_name = getattr(self.llm_provider, "default_model", "unknown")
-                self.store.put_llm_call(
-                    provider=provider_name,
-                    model=model_name,
-                    input_tokens=response.prompt_tokens,
-                    output_tokens=response.completion_tokens,
-                    purpose="retrieval",
+            import time
+
+            attempts = 2
+            backoff_sec = 1.0
+            last_err = None
+            response = None
+            for attempt in range(attempts):
+                try:
+                    response = self.llm_provider.generate(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        temperature=0.1,
+                    )
+                    break
+                except Exception as e:
+                    last_err = e
+                    if attempt < attempts - 1:
+                        time.sleep(backoff_sec)
+                        backoff_sec *= 2.0
+
+            if response is not None:
+                answer_content = response.content
+                try:
+                    provider_name = self.llm_provider.__class__.__name__.replace(
+                        "Provider", ""
+                    ).lower()
+                    model_name = getattr(self.llm_provider, "default_model", "unknown")
+                    self.store.put_llm_call(
+                        provider=provider_name,
+                        model=model_name,
+                        input_tokens=response.prompt_tokens,
+                        output_tokens=response.completion_tokens,
+                        purpose="retrieval",
+                    )
+                except Exception:
+                    pass
+            else:
+                err_msg = str(last_err)
+                answer_content = (
+                    f"Degraded Mode (LLM connection failed): {err_msg}\n\n"
+                    "Mode A (Structural Only): Context retrieved, but LLM generation is disabled.\n\n"
+                    f"Repository Context:\n{context_str}"
                 )
-            except Exception:
-                pass
         else:
             answer_content = (
                 "Mode A (Structural Only): Context retrieved, but LLM generation is disabled."

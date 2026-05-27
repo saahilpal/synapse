@@ -4,6 +4,8 @@ import asyncio
 import os
 import sys
 import traceback
+
+os.environ["SYNAP_PROFILE"] = "test"
 from typing import TYPE_CHECKING, Any
 
 import keyring

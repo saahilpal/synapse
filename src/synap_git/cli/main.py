@@ -63,10 +63,21 @@ console = Console()
 def _settings(
     path: str,
     *,
-    profile: RuntimeProfile = RuntimeProfile.DEV,
+    profile: RuntimeProfile | None = None,
     json_output: bool = False,
     mode: RuntimeMode = RuntimeMode.ACTIVE,
 ) -> SynapSettings:
+    if profile is None:
+        import os
+
+        env_profile = os.environ.get("SYNAP_PROFILE", "dev").lower().strip()
+        if env_profile == "test":
+            profile = RuntimeProfile.TEST
+        elif env_profile == "prod":
+            profile = RuntimeProfile.PROD
+        else:
+            profile = RuntimeProfile.DEV
+
     settings = SynapSettings(
         repository_path=Path(path),
         profile=profile,
@@ -463,6 +474,9 @@ ollama_url = "{ollama_url}"
         runtime.bootstrap(force=True)
     console.print("[green]✓ Storage initialized[/green]")
     console.print("\n[bold green]✓ Setup complete[/bold green]")
+    console.print(
+        "\n[dim]Tip: Run [bold]synap --install-completion[/bold] to set up shell command autocomplete.[/dim]"
+    )
 
 
 def _auto_protect_synap(repository_path: Path) -> None:
@@ -1094,6 +1108,14 @@ def rollback(
 @app.command()
 def repair(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Automatically approve force rebuild if database is healthy.",
+        ),
+    ] = False,
 ) -> None:
     """Repair a broken index state."""
     settings = _settings(path)
@@ -1102,7 +1124,7 @@ def repair(
     console.print("Checking database integrity...")
     corrupted = False
     try:
-        runtime.initialize_storage()
+        runtime.initialize_storage(auto_recover=False)
         integrity = runtime.store.integrity_check()
         if integrity != "ok":
             corrupted = True
@@ -1113,8 +1135,15 @@ def repair(
         console.print("[red]✗ synap.db appears corrupted[/red]\n")
     else:
         console.print("[green]✓ Database file is healthy.[/green]")
-        if not typer.confirm("Do you want to force rebuild the index anyway?"):
-            return
+        import sys
+
+        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
+        if not yes:
+            if not is_interactive:
+                console.print("Non-interactive terminal detected. Skipping force rebuild.")
+                return
+            if not typer.confirm("Do you want to force rebuild the index anyway?", default=False):
+                return
 
     console.print("Rebuilding from git history...")
     console.print("[1/3] Restoring file structure from HEAD")
@@ -1168,8 +1197,8 @@ def doctor(
     ) as progress:
         task_db = progress.add_task("Checking SQLite Database...", total=1)
         try:
-            runtime.initialize_storage()
-            res = runtime.doctor()
+            runtime.initialize_storage(auto_recover=False)
+            res = runtime.doctor(auto_recover=False)
             progress.update(
                 task_db,
                 completed=1,
@@ -1578,13 +1607,16 @@ def lessons_reject(
     lesson_id: Annotated[str, typer.Argument(help="The ID of the lesson to reject.")],
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Reject a pending lesson."""
+    """Reject a pending or approved lesson."""
     runtime = SynapRuntime(_settings(path))
     pending = runtime.store.get_lessons("pending")
-    target = next((lesson for lesson in pending if lesson["lesson_id"] == lesson_id), None)
+    approved = runtime.store.get_lessons("approved")
+    target = next(
+        (lesson for lesson in pending + approved if lesson["lesson_id"] == lesson_id), None
+    )
 
     if not target:
-        console.print(f"[red]✗ Pending lesson {lesson_id} not found.[/red]")
+        console.print(f"[red]✗ Lesson {lesson_id} not found in pending or approved queues.[/red]")
         raise typer.Exit(1)
 
     runtime.store.update_lesson(lesson_id, target["why_failed"], "rejected", actor="cli_user")

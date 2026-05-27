@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from collections.abc import Iterator
 from typing import Any
 
 from synap_git.provider.base import LLMResponse
@@ -58,6 +59,56 @@ class OpenRouterProvider(OpenAIProvider):
             )
         except Exception as exc:
             raise RuntimeError(f"OpenRouter generate failed: {exc}") from exc
+
+    def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> Iterator[str]:
+        model_name = model or self.default_model
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://github.com/saahilpal/synap-git",
+            "X-Title": "Synap Git",
+        }
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "stream": True,
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
+                for line in resp:
+                    line_str = line.decode("utf-8").strip()
+                    if line_str.startswith("data: "):
+                        data_part = line_str[6:]
+                        if data_part == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_part)
+                            delta = chunk["choices"][0].get("delta", {})
+                            if "content" in delta:
+                                yield delta["content"]
+                        except Exception:
+                            pass
+        except Exception as exc:
+            raise RuntimeError(f"OpenRouter generate stream failed: {exc}") from exc
 
     def embed(
         self,

@@ -34,122 +34,139 @@ class SynapStore:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
 
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS files (
-                    file_id TEXT PRIMARY KEY,
-                    path TEXT UNIQUE,
-                    git_oid TEXT,
-                    content_hash TEXT,
-                    language TEXT,
-                    updated_at TEXT NOT NULL
-                );
+            # Get current user version
+            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
 
-                CREATE TABLE IF NOT EXISTS symbols (
-                    symbol_id TEXT PRIMARY KEY,
-                    file_id TEXT,
-                    name TEXT,
-                    kind TEXT,
-                    start_line INTEGER,
-                    end_line INTEGER,
-                    ast_hash TEXT,
-                    metadata_json TEXT,
-                    FOREIGN KEY(file_id) REFERENCES files(file_id) ON DELETE CASCADE
-                );
+            # Target schema version
+            TARGET_VERSION = 1
 
-                CREATE TABLE IF NOT EXISTS edges (
-                    edge_id TEXT PRIMARY KEY,
-                    source_symbol TEXT,
-                    target_symbol TEXT,
-                    edge_type TEXT,
-                    FOREIGN KEY(source_symbol) REFERENCES symbols(symbol_id) ON DELETE CASCADE,
-                    FOREIGN KEY(target_symbol) REFERENCES symbols(symbol_id) ON DELETE CASCADE
-                );
+            if current_version == 0:
+                # Check if files table exists to see if it's an existing un-versioned database
+                table_exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='files'"
+                ).fetchone()
+                if table_exists:
+                    current_version = 1
+                    conn.execute("PRAGMA user_version = 1")
 
-                CREATE TABLE IF NOT EXISTS embeddings (
-                    embedding_id TEXT PRIMARY KEY,
-                    symbol_id TEXT,
-                    model_name TEXT,
-                    model_version TEXT,
-                    prompt_version TEXT,
-                    vector BLOB,
-                    content_hash TEXT,
-                    FOREIGN KEY(symbol_id) REFERENCES symbols(symbol_id) ON DELETE CASCADE
-                );
+            if current_version < 1:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS files (
+                        file_id TEXT PRIMARY KEY,
+                        path TEXT UNIQUE,
+                        git_oid TEXT,
+                        content_hash TEXT,
+                        language TEXT,
+                        updated_at TEXT NOT NULL
+                    );
 
-                CREATE TABLE IF NOT EXISTS active_state (
-                    branch TEXT PRIMARY KEY,
-                    git_commit_hash TEXT,
-                    updated_at TEXT NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS symbols (
+                        symbol_id TEXT PRIMARY KEY,
+                        file_id TEXT,
+                        name TEXT,
+                        kind TEXT,
+                        start_line INTEGER,
+                        end_line INTEGER,
+                        ast_hash TEXT,
+                        metadata_json TEXT,
+                        FOREIGN KEY(file_id) REFERENCES files(file_id) ON DELETE CASCADE
+                    );
 
-                CREATE TABLE IF NOT EXISTS decisions (
-                    decision_id TEXT PRIMARY KEY,
-                    branch TEXT NOT NULL,
-                    commit_hash TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    context TEXT,
-                    agent_id TEXT,
-                    created_at INTEGER NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS edges (
+                        edge_id TEXT PRIMARY KEY,
+                        source_symbol TEXT,
+                        target_symbol TEXT,
+                        edge_type TEXT,
+                        FOREIGN KEY(source_symbol) REFERENCES symbols(symbol_id) ON DELETE CASCADE,
+                        FOREIGN KEY(target_symbol) REFERENCES symbols(symbol_id) ON DELETE CASCADE
+                    );
 
-                CREATE TABLE IF NOT EXISTS checkpoints (
-                    checkpoint_id TEXT PRIMARY KEY,
-                    branch TEXT NOT NULL,
-                    commit_hash TEXT NOT NULL,
-                    doing TEXT NOT NULL,
-                    changed_files TEXT NOT NULL,
-                    next_step TEXT,
-                    decisions TEXT,
-                    blockers TEXT,
-                    token_count INTEGER,
-                    created_at INTEGER NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS embeddings (
+                        embedding_id TEXT PRIMARY KEY,
+                        symbol_id TEXT,
+                        model_name TEXT,
+                        model_version TEXT,
+                        prompt_version TEXT,
+                        vector BLOB,
+                        content_hash TEXT,
+                        FOREIGN KEY(symbol_id) REFERENCES symbols(symbol_id) ON DELETE CASCADE
+                    );
 
-                CREATE TABLE IF NOT EXISTS lessons (
-                    lesson_id TEXT PRIMARY KEY,
-                    branch TEXT NOT NULL,
-                    revert_commit TEXT NOT NULL,
-                    reverted_from TEXT NOT NULL,
-                    what_failed TEXT NOT NULL,
-                    why_failed TEXT NOT NULL,
-                    files_affected TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    created_at INTEGER NOT NULL,
-                    approved_at INTEGER,
-                    expires_at INTEGER NOT NULL,
-                    approval_actor TEXT
-                );
+                    CREATE TABLE IF NOT EXISTS active_state (
+                        branch TEXT PRIMARY KEY,
+                        git_commit_hash TEXT,
+                        updated_at TEXT NOT NULL
+                    );
 
-                CREATE TABLE IF NOT EXISTS activity (
-                    activity_id TEXT PRIMARY KEY,
-                    branch TEXT NOT NULL,
-                    commit_hash TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    files TEXT,
-                    created_at INTEGER NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS decisions (
+                        decision_id TEXT PRIMARY KEY,
+                        branch TEXT NOT NULL,
+                        commit_hash TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        context TEXT,
+                        agent_id TEXT,
+                        created_at INTEGER NOT NULL
+                    );
 
-                CREATE TABLE IF NOT EXISTS llm_calls (
-                    call_id TEXT PRIMARY KEY,
-                    provider TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    input_tokens INTEGER NOT NULL,
-                    output_tokens INTEGER NOT NULL,
-                    cost_usd REAL NOT NULL,
-                    purpose TEXT NOT NULL,
-                    file_path TEXT,
-                    created_at INTEGER NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        checkpoint_id TEXT PRIMARY KEY,
+                        branch TEXT NOT NULL,
+                        commit_hash TEXT NOT NULL,
+                        doing TEXT NOT NULL,
+                        changed_files TEXT NOT NULL,
+                        next_step TEXT,
+                        decisions TEXT,
+                        blockers TEXT,
+                        token_count INTEGER,
+                        created_at INTEGER NOT NULL
+                    );
 
-                CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_id);
-                CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
-                CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_symbol);
-                CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_symbol);
-                CREATE INDEX IF NOT EXISTS idx_embeddings_symbol ON embeddings(symbol_id);
-                CREATE INDEX IF NOT EXISTS idx_lessons_status ON lessons(status);
-                CREATE INDEX IF NOT EXISTS idx_checkpoints_branch ON checkpoints(branch);
-                CREATE INDEX IF NOT EXISTS idx_activity_branch ON activity(branch);
-            """)
+                    CREATE TABLE IF NOT EXISTS lessons (
+                        lesson_id TEXT PRIMARY KEY,
+                        branch TEXT NOT NULL,
+                        revert_commit TEXT NOT NULL,
+                        reverted_from TEXT NOT NULL,
+                        what_failed TEXT NOT NULL,
+                        why_failed TEXT NOT NULL,
+                        files_affected TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        created_at INTEGER NOT NULL,
+                        approved_at INTEGER,
+                        expires_at INTEGER NOT NULL,
+                        approval_actor TEXT
+                    );
+
+                    CREATE TABLE IF NOT EXISTS activity (
+                        activity_id TEXT PRIMARY KEY,
+                        branch TEXT NOT NULL,
+                        commit_hash TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        files TEXT,
+                        created_at INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS llm_calls (
+                        call_id TEXT PRIMARY KEY,
+                        provider TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        input_tokens INTEGER NOT NULL,
+                        output_tokens INTEGER NOT NULL,
+                        cost_usd REAL NOT NULL,
+                        purpose TEXT NOT NULL,
+                        file_path TEXT,
+                        created_at INTEGER NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_id);
+                    CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+                    CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_symbol);
+                    CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_symbol);
+                    CREATE INDEX IF NOT EXISTS idx_embeddings_symbol ON embeddings(symbol_id);
+                    CREATE INDEX IF NOT EXISTS idx_lessons_status ON lessons(status);
+                    CREATE INDEX IF NOT EXISTS idx_checkpoints_branch ON checkpoints(branch);
+                    CREATE INDEX IF NOT EXISTS idx_activity_branch ON activity(branch);
+                """)
+                conn.execute(f"PRAGMA user_version = {TARGET_VERSION}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

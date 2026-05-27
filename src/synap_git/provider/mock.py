@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 
 from synap_git.provider.base import LLMProvider, LLMResponse
 
@@ -43,6 +44,20 @@ class MockLLMProvider(LLMProvider):
             prompt_tokens=20,
             completion_tokens=30,
         )
+
+    def generate_stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> Iterator[str]:
+        res = self.generate(
+            system_prompt, user_prompt, model=model, max_tokens=max_tokens, temperature=temperature
+        )
+        yield res.content
 
     def embed(
         self,

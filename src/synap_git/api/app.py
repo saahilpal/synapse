@@ -36,17 +36,20 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def get_index() -> str:
         index_file = static_dir / "index.html"
-        if index_file.exists():
-            return index_file.read_text(encoding="utf-8")
+        exists = await asyncio.to_thread(index_file.exists)
+        if exists:
+            return await asyncio.to_thread(index_file.read_text, encoding="utf-8")
         return "<h1>Synap Diagnostic UI is ready.</h1>"
 
     @app.get("/api/v1/status")
     async def get_status() -> dict[str, Any]:
         try:
-            status = runtime.status()
+            status = await asyncio.to_thread(runtime.status)
             from synap_git.cli.main import _read_daemon_heartbeat
 
-            daemon_info = _read_daemon_heartbeat(Path(status.repository_path))
+            daemon_info = await asyncio.to_thread(
+                _read_daemon_heartbeat, Path(status.repository_path)
+            )
             return {
                 "repository_path": status.repository_path,
                 "branch": status.branch,
@@ -63,7 +66,9 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
     @app.get("/api/v1/trace/latest")
     async def get_latest_trace() -> dict[str, Any]:
         try:
-            return runtime.trace_store.get_latest()
+            if runtime.trace_store:
+                return await asyncio.to_thread(runtime.trace_store.get_latest)
+            return {}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
@@ -73,7 +78,7 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
 
         async def event_generator() -> AsyncGenerator[str, None]:
             while True:
-                status = runtime.status()
+                status = await asyncio.to_thread(runtime.status)
                 yield f"data: {json.dumps(status.__dict__)}\n\n"
                 await asyncio.sleep(2)
 
@@ -82,30 +87,38 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
     @app.get("/wiki/{filepath:path}")
     async def get_wiki_page(filepath: str) -> dict[str, Any]:
         wiki_path = runtime.wiki.wiki_dir / f"{filepath}.md"
-        if wiki_path.exists():
-            return {"status": "ok", "content": wiki_path.read_text(encoding="utf-8")}
+        exists = await asyncio.to_thread(wiki_path.exists)
+        if exists:
+            content = await asyncio.to_thread(wiki_path.read_text, encoding="utf-8")
+            return {"status": "ok", "content": content}
         return {"status": "error", "message": "Wiki not found"}
 
     @app.get("/api/v1/memory")
     async def get_memory_page() -> dict[str, Any]:
-        approved = runtime.store.get_lessons("approved")
-        pending = runtime.store.get_lessons("pending")
+        approved = await asyncio.to_thread(runtime.store.get_lessons, "approved")
+        pending = await asyncio.to_thread(runtime.store.get_lessons, "pending")
         return {"status": "ok", "approved": approved, "pending": pending}
+
+    def _fetch_calls() -> list[dict[str, Any]]:
+        with runtime.store.connect() as conn:
+            rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
+            return [dict(r) for r in rows]
 
     @app.get("/api/v1/cost")
     async def get_cost_page() -> dict[str, Any]:
-        with runtime.store.connect() as conn:
-            rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
-            calls = [dict(r) for r in rows]
+        calls = await asyncio.to_thread(_fetch_calls)
         return {"status": "ok", "calls": calls}
 
-    @app.get("/api/v1/checkpoints")
-    async def get_checkpoints_page() -> dict[str, Any]:
+    def _fetch_checkpoints() -> list[dict[str, Any]]:
         with runtime.store.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT 20"
             ).fetchall()
-            cps = [dict(r) for r in rows]
+            return [dict(r) for r in rows]
+
+    @app.get("/api/v1/checkpoints")
+    async def get_checkpoints_page() -> dict[str, Any]:
+        cps = await asyncio.to_thread(_fetch_checkpoints)
         return {"status": "ok", "checkpoints": cps}
 
     return app
