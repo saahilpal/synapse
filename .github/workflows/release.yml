@@ -87,7 +87,7 @@ jobs:
     needs: build-and-test
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/synapse-runtime
+      url: https://test.pypi.org/p/synapse
     steps:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -107,7 +107,7 @@ jobs:
     needs: publish-test-pypi
     environment:
       name: pypi
-      url: https://pypi.org/p/synapse-runtime
+      url: https://pypi.org/p/synapse
     steps:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -150,7 +150,7 @@ jobs:
           ## Installation
 
           ```bash
-          pip install synapse-runtime
+          pip install synapse
           ```
 
           ## Verification

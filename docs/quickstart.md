@@ -7,7 +7,7 @@ This guide will help you get Synapse up and running in your repository in under 
 Synapse is distributed as a Python package. We recommend using `uv` for a fast, isolated installation.
 
 ```bash
-uv tool install synapse-runtime
+uv tool install synapse
 ```
 
 ## 2. Global Setup

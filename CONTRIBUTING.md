@@ -79,6 +79,31 @@ Synapse’s strength lies in its AST extraction. If you are adding support for a
 - Only extract bounded structure: functions, classes, imports, packages. Do *not* extract block-level logic or variable assignments.
 - You must add a corresponding test file validating the parser against standard structural boundaries.
 
+## 6. Packaging & Release Workflow
+
+### Local Packaging Build
+We use `hatchling` as our build backend. To build the wheels and source distributions locally:
+```bash
+uv build
+```
+This compiles the output to the `dist/` directory. You can verify it by installing it in a clean virtual environment:
+```bash
+python -m venv test_env
+source test_env/bin/activate
+pip install dist/*.whl
+synapse --help
+```
+
+### Semantic Versioning & Release Strategy
+We follow semantic versioning (`major.minor.patch`). When releasing:
+1. Increment the version in `pyproject.toml` and in `src/synapse/__init__.py`'s `__version__`.
+2. Commit the changes and tag it with `v<version>`, for example `v0.2.0`:
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+3. GitHub Actions will trigger `.github/workflows/release.yml` on tag creation, run tests, and automatically build and upload the package to PyPI using OIDC trusted publishing.
+
 ---
 
 Thank you for helping us build the foundational context layer for the next generation of AI coding agents!

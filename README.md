@@ -131,9 +131,11 @@ sequenceDiagram
 ## 🚀 Quick Start
 
 ### 1. Installation
-Install the Synapse CLI via `uv`:
+Install the Synapse CLI via `pip` or `uv`:
 ```bash
-uv tool install synapse-runtime
+pip install synapse
+# or using uv:
+uv tool install synapse
 ```
 
 ### 2. Setup & Initialize

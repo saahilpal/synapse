@@ -1100,7 +1100,7 @@ wheels = [
 ]
 
 [[package]]
-name = "synapse-runtime"
+name = "synapse"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
