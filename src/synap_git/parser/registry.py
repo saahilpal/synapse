@@ -102,7 +102,44 @@ class CodeParserRegistry:
                 elif kind == "import_from_statement":
                     mod_name = extract_text(node.child_by_field_name("module_name"))
                     if mod_name:
-                        imports.append(mod_name)
+                        imported_names = []
+                        import_found = False
+                        for child in node.children:
+                            if child.type == "import":
+                                import_found = True
+                                continue
+                            if not import_found:
+                                continue
+                            if child.type == "dotted_name":
+                                t_val = extract_text(child)
+                                if t_val:
+                                    imported_names.append(t_val)
+                            elif child.type == "aliased_import":
+                                name_node = child.child_by_field_name("name")
+                                t_val = extract_text(name_node)
+                                if t_val:
+                                    imported_names.append(t_val)
+                            elif child.type == "import_list":
+
+                                def find_names(n: Node) -> None:
+                                    if n.type == "dotted_name":
+                                        t_val = extract_text(n)
+                                        if t_val:
+                                            imported_names.append(t_val)
+                                    elif n.type == "aliased_import":
+                                        name_node = n.child_by_field_name("name")
+                                        t_val = extract_text(name_node)
+                                        if t_val:
+                                            imported_names.append(t_val)
+                                    for c in n.children:
+                                        find_names(c)
+
+                                find_names(child)
+                        if imported_names:
+                            for name in imported_names:
+                                imports.append(f"{mod_name}:{name}")
+                        else:
+                            imports.append(mod_name)
                 elif kind == "import_statement":
                     for child in node.children:
                         if child.type == "dotted_name":

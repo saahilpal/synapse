@@ -235,10 +235,15 @@ class SynapRuntime:
             for imp in parse_result.imports:
                 target_file_id = None
 
+                if ":" in imp:
+                    module_part, target_name = imp.split(":", 1)
+                else:
+                    module_part, target_name = imp, imp.split(".")[-1]
+
                 # Check for relative import (e.g. .utils)
-                if imp.startswith("."):
-                    parts = imp.lstrip(".").split(".")
-                    dot_count = len(imp) - len(imp.lstrip("."))
+                if module_part.startswith("."):
+                    parts = module_part.lstrip(".").split(".")
+                    dot_count = len(module_part) - len(module_part.lstrip("."))
                     try:
                         # Move up directories based on dots
                         target_dir = current_path.parents[dot_count - 1]
@@ -253,7 +258,7 @@ class SynapRuntime:
                         pass
                 else:
                     # Absolute import (e.g. synap_git.storage.sqlite)
-                    parts = imp.split(".")
+                    parts = module_part.split(".")
                     for i in range(len(parts)):
                         suffix_path = "/".join(parts[i:])
                         for ext in [".py", ".ts", ".go", ".rs"]:
@@ -268,8 +273,6 @@ class SynapRuntime:
                                     break
                         if target_file_id:
                             break
-
-                target_name = imp.split(".")[-1]
 
                 if target_file_id:
                     # Narrow down targets to the resolved module/file

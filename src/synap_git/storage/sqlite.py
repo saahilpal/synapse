@@ -40,15 +40,6 @@ class SynapStore:
             # Target schema version
             TARGET_VERSION = 1
 
-            if current_version == 0:
-                # Check if files table exists to see if it's an existing un-versioned database
-                table_exists = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='files'"
-                ).fetchone()
-                if table_exists:
-                    current_version = 1
-                    conn.execute("PRAGMA user_version = 1")
-
             if current_version < 1:
                 conn.executescript("""
                     CREATE TABLE IF NOT EXISTS files (
