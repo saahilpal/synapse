@@ -206,6 +206,7 @@ class SynapStore:
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
             conn.commit()
         except Exception:
