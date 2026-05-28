@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-05-28
+
+### Added
+- **Architecture Documentation Consolidation:** Merged duplicate `docs/architecture.md` into the root-level `ARCHITECTURE.md` to ensure a single, consistent source of architectural truth.
+
+### Fixed
+- **Release Version Sync:** Bumped package version in `src/synap_git/__init__.py` to `1.2.3` and updated configuration metadata to align with the release tag validation check in the pipeline.
+
 ## [1.1.2] - 2026-05-28
 
 ### Added
