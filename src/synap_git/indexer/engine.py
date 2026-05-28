@@ -601,7 +601,7 @@ class SynapRuntime:
                     chunk = paths_list[i : i + 900]
                     placeholders = ",".join("?" for _ in chunk)
                     rows = conn.execute(
-                        f"SELECT file_id, path FROM files WHERE path IN ({placeholders})",  # noqa: S608
+                        f"SELECT file_id, path FROM files WHERE path IN ({placeholders})",  # noqa: S608  # nosec B608
                         tuple(chunk),
                     ).fetchall()
                     for row in rows:
@@ -669,7 +669,7 @@ class SynapRuntime:
                     chunk = fts_list[i : i + 900]
                     placeholders = ",".join("?" for _ in chunk)
                     rows = conn.execute(  # nosec B608
-                        f"SELECT symbol_id, name FROM symbols WHERE name IN ({placeholders})",  # noqa: S608
+                        f"SELECT symbol_id, name FROM symbols WHERE name IN ({placeholders})",  # noqa: S608  # nosec B608
                         tuple(chunk),
                     ).fetchall()
                     for row in rows:
