@@ -150,3 +150,42 @@ def test_explain_query_plan(settings: SynapSettings) -> None:
                     assert "SCAN TABLE symbols" not in line, (
                         f"Full table scan found on symbols: {line}"
                     )
+
+
+def test_resolve_and_insert_edges_batching(settings: SynapSettings, test_repo: Path) -> None:
+    # 100 files, 10 imports each
+    for i in range(100):
+        content = "\n".join([f"import mod{j}" for j in range(10)])
+        content += f"\nclass Mod{i}:\n    pass\n"
+        (test_repo / f"mod{i}.py").write_text(content, encoding="utf-8")
+
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "add", "."], cwd=test_repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "add 100 files"], cwd=test_repo, check=True)
+
+    runtime = SynapRuntime(settings)
+
+    query_count = 0
+
+    def trace_callback(statement: str) -> None:
+        nonlocal query_count
+        if statement.strip().upper().startswith("SELECT"):
+            query_count += 1
+
+    import sqlite3
+    from typing import Any
+
+    original_connect = sqlite3.connect
+
+    def mock_connect(*args: Any, **kwargs: Any) -> Any:
+        conn = original_connect(*args, **kwargs)
+        conn.set_trace_callback(trace_callback)
+        return conn
+
+    sqlite3.connect = mock_connect
+    try:
+        runtime.bootstrap(force=True)
+    finally:
+        sqlite3.connect = original_connect
+
+    assert query_count < 300, f"Too many queries during edge resolution: {query_count}"

@@ -60,6 +60,12 @@ class WikiEngine:
         if not self.provider:
             # Create a simple structural placeholder if no LLM configured
             if not wiki_path.exists():
+                # For non-project wikis, ensure source exists
+                if not is_project_wiki:
+                    source_full = self.settings.repository_path / source_path
+                    if not source_full.exists() or not source_full.is_file():
+                        return
+
                 wiki_path.parent.mkdir(parents=True, exist_ok=True)
                 wiki_path.write_text(
                     f"# {wiki_filepath}\nStructural mode only. No LLM configured.", encoding="utf-8"
@@ -130,6 +136,7 @@ class WikiEngine:
                 pass
         except Exception as e:
             logger.error("wiki_generation_failed", path=file_path, error=str(e))
+            raise
 
     def generate_project_wiki_page_sync(self, page_name: str) -> None:
         """Generate project level wikis (overview, architecture, schema) synchronously."""

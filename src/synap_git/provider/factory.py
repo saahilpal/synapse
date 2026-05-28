@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from synap_git.config import RuntimeProfile, SynapSettings
+from synap_git.config import SynapSettings
 from synap_git.provider.anthropic import AnthropicProvider
 from synap_git.provider.base import LLMProvider
 from synap_git.provider.gemini import GeminiProvider
-from synap_git.provider.mock import MockLLMProvider
 from synap_git.provider.ollama import OllamaProvider
 from synap_git.provider.openai import OpenAIProvider
 
@@ -13,13 +12,10 @@ def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an LLM provider based on runtime settings.
 
     Strictly enforces provider configuration. Returns None for explicit Mode A
-    (structural only). Mock provider is ONLY allowed during TEST profile.
+    (structural only).
     """
     if not settings.llm_provider:
         return None
-
-    if settings.profile == RuntimeProfile.TEST:
-        return MockLLMProvider()
 
     provider_name = str(settings.llm_provider).lower().strip()
 
@@ -82,9 +78,6 @@ def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an embedding provider based on runtime settings."""
     if not settings.llm_provider:
         return None
-
-    if settings.profile == RuntimeProfile.TEST:
-        return MockLLMProvider()
 
     provider_name = str(settings.llm_provider).lower().strip()
     model = settings.llm_model or ""

@@ -34,6 +34,7 @@ class RuntimeDaemon:
         self._port = 9876
         self._last_metrics_time: float = 0.0
         self._last_cpu_time: float = 0.0
+        self._last_prune_time: float = 0.0
 
     async def start(self) -> None:
         self.runtime.initialize_storage()
@@ -75,6 +76,15 @@ class RuntimeDaemon:
 
         # Initial bootstrap
         await asyncio.to_thread(self.runtime.bootstrap)
+
+        with self.runtime.store.connect() as conn:
+            failed_count = conn.execute(
+                "SELECT COUNT(*) FROM wiki_queue WHERE status = 'failed'"
+            ).fetchone()[0]
+            if failed_count > 0:
+                print(
+                    f"\n[Synapse] ⚠ Found {failed_count} permanently failed wiki pages. They will not be retried automatically."
+                )
 
         self._running = True
         self._write_heartbeat(status="healthy")
@@ -252,6 +262,15 @@ class RuntimeDaemon:
     async def _poll_git_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
+                # Periodic pruning (once per hour)
+                now = time.time()
+                if now - self._last_prune_time > 3600:
+                    self._last_prune_time = now
+                    count = await asyncio.to_thread(self.runtime.store.prune_expired_lessons)
+                    if count > 0:
+                        self.logger.info("lessons_pruned", count=count)
+                        print(f"\n[Synapse] Pruned {count} expired lessons.")
+
                 state = self.git.state()
                 change = self.git.classify(self._last_git_state, state)
                 self._last_git_state = state
@@ -316,6 +335,9 @@ class RuntimeDaemon:
 
                     self.logger.info("wiki_worker_processing_task", path=file_path)
 
+                    if attempts > 0:
+                        await asyncio.sleep(2**attempts)
+
                     try:
                         await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
                         await asyncio.to_thread(
@@ -327,12 +349,24 @@ class RuntimeDaemon:
                         self.logger.info("wiki_worker_completed_task", path=file_path)
                     except Exception as ex:
                         self.logger.error("wiki_worker_task_failed", path=file_path, error=str(ex))
-                        await asyncio.to_thread(
-                            self.runtime.store.update_wiki_queue_status,
-                            task_id,
-                            "pending",
-                            attempts + 1,
-                        )
+                        if attempts + 1 >= 3:
+                            await asyncio.to_thread(
+                                self.runtime.store.update_wiki_queue_status,
+                                task_id,
+                                "failed",
+                                attempts + 1,
+                            )
+                            # Log visibly for daemon output
+                            print(
+                                f"\n[Synapse] ⚠ Wiki generation permanently failed for '{file_path}' after 3 attempts."
+                            )
+                        else:
+                            await asyncio.to_thread(
+                                self.runtime.store.update_wiki_queue_status,
+                                task_id,
+                                "pending",
+                                attempts + 1,
+                            )
                 else:
                     await asyncio.sleep(5.0)
             except asyncio.CancelledError:

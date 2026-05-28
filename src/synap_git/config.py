@@ -58,6 +58,9 @@ class SynapSettings(BaseSettings):
 
     max_file_bytes: int = Field(default=1_000_000, ge=1_024)
 
+    checkpoint_threshold: float = 0.60
+    lesson_expiry_days: int = 7
+
     llm_provider: str | None = Field(
         default=None,
         description="LLM provider (openai, gemini, ollama). Leave empty for Mode A (structural only).",
@@ -75,6 +78,16 @@ class SynapSettings(BaseSettings):
         try:
             cred_file = Path.home() / ".synap" / "credentials"
             if cred_file.exists():
+                import sys
+
+                # Enforce chmod 600 on Unix-like systems
+                if sys.platform != "win32":
+                    import stat
+
+                    mode = cred_file.stat().st_mode
+                    if bool(mode & stat.S_IRGRP) or bool(mode & stat.S_IROTH):
+                        return None
+
                 for line in cred_file.read_text().splitlines():
                     if line.strip().startswith(f"{key}="):
                         return line.split("=", 1)[1].strip().strip("\"'")
