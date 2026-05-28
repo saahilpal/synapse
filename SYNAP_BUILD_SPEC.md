@@ -1968,5 +1968,31 @@ Synapse indexes are designed as projections of Git commit history. Change detect
 
 ---
 
-*End of Synap Build Specification v1.1.0*
+*Every component defined. Every edge case covered. Build from top to bottom.*
+
+---
+
+## 19. HARDENING & AUDIT FIXES (v1.1.1 UPDATE)
+
+### Operational Robustness
+- **N+1 Query Elimination:** All structural edge resolution logic migrated from row-by-row `SELECT` loops to bulk `WHERE IN (...)` fetches. This reduces database interaction during Pass 2 from $O(N \times M)$ queries to $O(1)$ batch fetches.
+- **Memory Bounded Indexing:** First-run indexing now processes file parsing and edge resolution in fixed-size batches (default 500). This guarantees a flat memory profile regardless of repository scale.
+- **Wiki Resiliency:** Background wiki generation now implements exponential backoff retries ($2^n$ seconds) for transient LLM failures. Tasks that fail three times are marked as permanently failed, with a startup diagnostic alert to the user.
+- **Single Read Principle:** Files are read exactly once during the entire indexing lifecycle. Content is cached during the scanning/hashing phase and passed through the pipeline in-memory, halving local I/O overhead.
+
+### Security & Integrity
+- **Content-Scoped File IDs:** \`file_id\` hashing now uses \`sha256(path + content_hash)\` as specified. This ensures that different versions of the same file are strictly isolated in the temporal graph.
+- **Path Traversal Protection:** All Wiki diagnostic endpoints and API routes strictly enforce \`is_relative_to\` checks against the local state directory.
+- **Credential Safety:** Local credential fallback (\`~/.synap/credentials\`) now requires strict owner-only permissions (chmod 600).
+- **SQLite Pragma Enforcement:** Every database connection explicitly enforces \`PRAGMA synchronous=NORMAL\` to maintain high-throughput writes while preserving WAL integrity.
+
+### User Experience & Compliance
+- **Interactive Review Flow:** Implemented \`synap lessons review\` as the primary interactive mechanism for approving agent-proposed behavioral memory.
+- **Onboarding Next-Steps:** \`synap init\` now provides actionable commands for daemon startup and MCP configuration.
+- **Spec Adherence:** \`MockLLMProvider\` has been removed entirely from the production codebase to maintain the "No Mock Mode" vision.
+- **Context Monitoring:** Implemented \`signal_low_context\` MCP tool, allowing agents to proactively notify Synapse when approaching token limits, utilizing configurable thresholds (\`checkpoint_threshold\`).
+
+---
+
+*End of Synap Build Specification v1.1.1*
 *Every component defined. Every edge case covered. Build from top to bottom.*

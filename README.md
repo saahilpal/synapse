@@ -188,6 +188,7 @@ Synap uses a powerful, strict CLI interface. Every destructive action prompts fo
 - `synap memory status .` : View counts of approved, pending, and expired lessons.
 - `synap memory prune .` : Prune expired rules and cleanup memory.
 - `synap memory verify .` : Detect dangling file references in active memory.
+- `synap lessons review .` : Interactively review and Approve/Edit/Reject pending lessons.
 - `synap lessons approve <id> .` : Approve a pending revert lesson to activate it.
 - `synap lessons reject <id> .` : Reject and discard a pending lesson.
 - `synap checkpoint create . --doing "..."` : Save the current context state.

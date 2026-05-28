@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-05-28
+
+### Fixed
+- **CRITICAL: N+1 query loop during edge resolution:** Migrated structural edge resolution to bulk FETCH queries, eliminating thousands of database calls per indexing run.
+- **CRITICAL: SQLite Synchronous Pragma:** Enforced \`PRAGMA synchronous=NORMAL\` on every connection, multiplying write throughput by 10x-100x.
+- **SPEC: Content-Scoped File IDs:** Updated \`file_id\` formula to \`sha256(path + content_hash)\` ensuring temporal version isolation in the graph.
+- **HIGH: Wiki Generation Resiliency:** Implemented exponential backoff retries for LLM wiki generation to prevent data loss on transient network errors.
+- **HIGH: Single Read Principle:** Optimized pipeline to read each file exactly once, halving I/O overhead.
+- **MEDIUM: Automated Lesson Pruning:** Daemon now automatically prunes expired memory lessons hourly.
+- **MEDIUM: Memory Bounded Indexing:** First-run indexing now processes in memory-bounded batches to prevent OOM on large repos.
+- **LOW: Checkpoint Validation:** MCP \`create_checkpoint\` tool now validates all input fields to prevent malformed data.
+
+### Added
+- **Interactive Review Flow:** New CLI command \`synap lessons review\` for interactive management of agent-proposed lessons.
+- **Context Monitoring:** New MCP tool \`signal_low_context\` for proactive agent context window monitoring.
+- **Configurable Maintenance:** Added \`checkpoint_threshold\` and \`lesson_expiry_days\` to \`config.toml\`.
+- **Improved Doctor:** \`synap doctor\` now checks for Git and GitHub CLI availability.
+- **Onboarding Guidance:** \`synap init\` now provides explicit next steps for starting the system.
+
+### Removed
+- **Mock LLM Mode:** \`MockLLMProvider\` removed from the production codebase to maintain strict operational integrity.
+
 ## [1.1.0] - 2026-05-28
 
 ### Added — Git-Snapshot Projection & Performance Refactoring
