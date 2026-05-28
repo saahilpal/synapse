@@ -397,7 +397,7 @@ class RuntimeDaemon:
                         )
 
                         if self.settings.logging_mode == LoggingMode.HUMAN:
-                            console.print(
+                            print(
                                 f"[bold green]✓[/bold green] Wiki generated: [white]{file_path}[/white] [dim]({elapsed:.1f}s)[/dim]"
                             )
                     except Exception as ex:
@@ -410,7 +410,7 @@ class RuntimeDaemon:
                                 attempts + 1,
                             )
                             if self.settings.logging_mode == LoggingMode.HUMAN:
-                                console.print(
+                                print(
                                     f"[bold red]✗[/bold red] Wiki failed: [white]{file_path}[/white] [dim]({str(ex)})[/dim]"
                                 )
                         else:

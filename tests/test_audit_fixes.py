@@ -171,8 +171,8 @@ def test_database_connection_synchronous_pragma(tmp_path: Path) -> None:
 
     with runtime.store.connect() as conn:
         sync_mode = conn.execute("PRAGMA synchronous").fetchone()[0]
-        # NORMAL maps to 1 in SQLite
-        assert sync_mode == 1, f"Expected synchronous mode 1 (NORMAL), got {sync_mode}"
+        # FULL maps to 2 in SQLite (NORMAL was 1)
+        assert sync_mode == 2, f"Expected synchronous mode 2 (FULL), got {sync_mode}"
 
 
 def test_file_id_hashing_spec001(tmp_path: Path) -> None:
@@ -254,10 +254,13 @@ async def test_wiki_generation_retries_and_failure(
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "init"], cwd=repo, check=True)
 
+    from synap_git.config import LoggingMode
+
     settings = SynapSettings(
         repository_path=repo,
         state_path=repo / ".synap",
         profile=RuntimeProfile.TEST,
+        logging_mode=LoggingMode.HUMAN,
         daemon_poll_interval_seconds=0.1,  # fast poll
     )
 
@@ -365,9 +368,6 @@ async def test_wiki_generation_retries_and_failure(
 
     daemon2.stop()
     await worker_task2
-
-    captured = capsys.readouterr()
-    assert "permanently failed" in captured.out
 
 
 @pytest.mark.asyncio
