@@ -78,6 +78,16 @@ class SynapSettings(BaseSettings):
         try:
             cred_file = Path.home() / ".synap" / "credentials"
             if cred_file.exists():
+                import sys
+
+                # Enforce chmod 600 on Unix-like systems
+                if sys.platform != "win32":
+                    import stat
+
+                    mode = cred_file.stat().st_mode
+                    if bool(mode & stat.S_IRGRP) or bool(mode & stat.S_IROTH):
+                        return None
+
                 for line in cred_file.read_text().splitlines():
                     if line.strip().startswith(f"{key}="):
                         return line.split("=", 1)[1].strip().strip("\"'")

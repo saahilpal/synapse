@@ -87,6 +87,15 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
 
     @app.get("/wiki/{filepath:path}")
     async def get_wiki_page(filepath: str) -> dict[str, Any]:
+        base_dir = runtime.wiki.wiki_dir.resolve()
+        try:
+            target_path = (base_dir / filepath).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+        if not target_path.is_relative_to(base_dir):
+            raise HTTPException(status_code=403, detail="Path traversal detected")
+
         target = filepath
         if target.endswith(".md"):
             target = target[:-3]

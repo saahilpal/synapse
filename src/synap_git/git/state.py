@@ -109,7 +109,7 @@ class GitRepository:
             return GitChange(kind=GitChangeKind.BRANCH, previous=previous, current=current)
         if previous.head_commit != current.head_commit:
             message = current.commit_message or ""
-            if message.startswith("Revert "):
+            if message.startswith("Revert ") and not message.startswith('Revert "Revert "'):
                 return GitChange(kind=GitChangeKind.REVERT, previous=previous, current=current)
 
             try:
