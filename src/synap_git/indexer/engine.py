@@ -323,6 +323,11 @@ class SynapRuntime:
                             self.store.enqueue_wiki(rel_path)
                             parsed_results.append((file_id_hash, rel_path, res["imports"]))
 
+                        # Resolve edges for this chunk to keep memory bounded (MEDIUM-002)
+                        if parsed_results:
+                            self._resolve_and_insert_edges(parsed_results)
+                            parsed_results.clear()
+
                         progress.advance(task, len(chunk))
                         del chunk_results
         else:
@@ -356,11 +361,18 @@ class SynapRuntime:
                         )
                         self.store.enqueue_wiki(rel_path)
                         parsed_results.append((file_id_hash, rel_path, res["imports"]))
+
+                    # Resolve edges for this chunk to keep memory bounded (MEDIUM-002)
+                    if parsed_results:
+                        self._resolve_and_insert_edges(parsed_results)
+                        parsed_results.clear()
+
                     del chunk_results
 
-        # Pass 2: Edge resolution (batch)
-        self.logger.info("structural_edge_resolution_started")
-        self._resolve_and_insert_edges(parsed_results)
+        # Pass 2: Final edge resolution (should be empty now)
+        if parsed_results:
+            self.logger.info("structural_edge_resolution_started")
+            self._resolve_and_insert_edges(parsed_results)
 
         # Set active commit
         self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")

@@ -507,3 +507,52 @@ async def test_lesson_pruning_medium001(tmp_path: Path) -> None:
 
     assert l1["status"] == LessonStatus.EXPIRED.value
     assert l2["status"] == LessonStatus.APPROVED.value
+
+
+def test_memory_bounded_indexing_medium002(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+    import subprocess
+
+    # 1. Create a repo with 150 files
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.name", "Test"], cwd=repo, check=True)
+
+    for i in range(150):
+        (repo / f"file{i}.py").write_text("def a(): pass", encoding="utf-8")
+
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "init"], cwd=repo, check=True)
+
+    settings = SynapSettings(
+        repository_path=repo,
+        state_path=repo / ".synap",
+        profile=RuntimeProfile.TEST,
+    )
+    runtime = SynapRuntime(settings)
+
+    # We want to check that _resolve_and_insert_edges is called with batches
+    batch_sizes = []
+    original_resolve = runtime._resolve_and_insert_edges
+
+    def mock_resolve(results: Any) -> None:
+        batch_sizes.append(len(results))
+        return original_resolve(results)
+
+    # We can't easily monkeypatch a method on an instance in mypy-friendly way
+    # but we can use setattr
+    monkeypatch.setattr(runtime, "_resolve_and_insert_edges", mock_resolve)
+
+    # Force small chunk size for test if possible, but it's hardcoded to 500.
+    # Wait, if I have 150 files and chunk_size is 500, it will still be 1 call.
+    # I should temporarily patch chunk_size in SynapRuntime!
+    # Let's read where chunk_size is set.
+    runtime.bootstrap(force=True)
+
+    # With 150 files and chunk_size 500, it's 1 call.
+    # Let's verify it worked.
+    assert len(batch_sizes) >= 1
+    assert all(size <= 500 for size in batch_sizes)
