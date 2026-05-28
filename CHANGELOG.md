@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-05-28
+
+### Added
+- **Technical Documentation (`docs/`):** Added detailed manuals for architecture, CLI reference, configuration fields, MCP tools schemas, two-path indexing, wiki queues, and memory lifecycles.
+- **Main README:** Completely rewrote the `README.md` from scratch to align strictly with the implemented features, CLI commands, configuration options, and integration paths.
+
+### Removed
+- **Obsolete Docs:** Purged stale `quickstart.md`, `retrieval.md`, `roadmap.md`, `diagnostics.md`, `performance.md`, `benchmarks.md`, and `security.md` documents.
+- **Draft Files:** Removed unreferenced root files `SYNAPSE_AUDIT_REPORT.md` and `SYNAPSE_AGENT_PROMPT.md  `.
+
 ## [1.1.1] - 2026-05-28
 
 ### Fixed
