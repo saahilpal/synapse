@@ -29,6 +29,11 @@ class SynapMCPFacade:
     def create_checkpoint(
         self, doing: str, changed_files: list[str], next_step: str, blockers: str
     ) -> dict[str, Any]:
+        if not doing.strip():
+            raise ValueError("The 'doing' field cannot be empty.")
+        if not changed_files:
+            raise ValueError("The 'changed_files' list cannot be empty.")
+
         status = self.runtime.status()
         checkpoint_id = str(uuid.uuid4())
         branch = status.branch
