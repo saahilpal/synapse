@@ -87,7 +87,15 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
 
     @app.get("/wiki/{filepath:path}")
     async def get_wiki_page(filepath: str) -> dict[str, Any]:
-        wiki_path = runtime.wiki.wiki_dir / f"{filepath}.md"
+        target = filepath
+        if target.endswith(".md"):
+            target = target[:-3]
+        try:
+            await asyncio.to_thread(runtime.wiki.ensure_wiki_page, target)
+        except Exception:
+            pass
+
+        wiki_path = runtime.wiki.wiki_dir / f"{target}.md"
         exists = await asyncio.to_thread(wiki_path.exists)
         if exists:
             content = await asyncio.to_thread(wiki_path.read_text, encoding="utf-8")
@@ -105,8 +113,8 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
             rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
             return [dict(r) for r in rows]
 
-    @app.get("/api/v1/cost")
-    async def get_cost_page() -> dict[str, Any]:
+    @app.get("/api/v1/usage")
+    async def get_usage_page() -> dict[str, Any]:
         calls = await asyncio.to_thread(_fetch_calls)
         return {"status": "ok", "calls": calls}
 

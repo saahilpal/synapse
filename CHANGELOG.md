@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-28
+
+### Added — Git-Snapshot Projection & Performance Refactoring
+- **Split Two-Path Indexing:** Separated initialization and incremental indexing into `_first_run_index` (full scan, CPU-parallelized) and `_incremental_index` (Git delta change detector).
+- **Asynchronous Wiki Generation Queue:** Decoupled slow, non-deterministic LLM wiki generation from structural indexing using a persistent database queue (`wiki_queue`) processed asynchronously by a daemon worker.
+- **Lazy Wiki Caching:** Added synchronous wiki generation fallback to CLI (`wiki show`), Web API, and MCP tools to dynamically build missing or stale pages on-demand.
+- **Process Pool Parallel Parsing:** Parallelized Tree-sitter parsing on first run across all CPU cores utilizing process-based concurrency with independent parser instances.
+- **SQLite Performance Hardening:**
+  - WAL mode and NORMAL synchronous configuration enabled during writes.
+  - Multi-row symbol and edge inserts batched into a single transaction via `executemany`.
+  - Dot-separated `module_key` pre-computation and indexing for $O(1)$ module resolution.
+  - SQLite FTS5 index integration for fast sub-millisecond symbol searches, avoiding full-table scans.
+- **Web API Lazy Refreshes:** Updated the `/wiki/{filepath}` GET endpoint to perform lazy refreshes on stale or missing pages before returning content.
+
+### Fixed
+- **FTS5 Cascade Delete:** Added database trigger `tgr_symbols_delete` to automatically clean up virtual `symbols_fts` entries when parent symbols are deleted.
+- **Duplicate File ID Collision:** Handled unique, path-scoped file identifier generation ensuring files with identical content (like empty `__init__.py`) do not conflict.
+
 ## [0.2.1] - 2026-05-27
 
 ### Added — Final Production Hardening & Release Execution
@@ -27,11 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-05-26
 
 ### Added — Final Polish & Release Readiness
-- CLI cost management: `synap cost show` (displays Rich aggregated pricing table and summary panel) and `synap cost clear`.
+- CLI usage management: `synap usage show` (displays Rich aggregated usage table and summary panel) and `synap usage clear`.
 - CLI wiki management: `synap wiki list` and `synap wiki show <filepath>` (renders page in terminal via Rich Markdown).
-- LLM call database logging: records `prompt_tokens`, `completion_tokens`, and calculates `cost_usd` dynamically for retrieval and wiki generation passes.
+- LLM call database logging: records `prompt_tokens`, `completion_tokens` for retrieval and wiki generation passes.
 - Real-time daemon state: heartbeats integrated into `synap status`, `synap doctor`, and the Web UI status endpoints.
-- Premium Web UI dashboard polish: dual L3 memory (Approved vs Pending) view, real-time LLM cost analytics, and active daemon PID badge.
+- Premium Web UI dashboard polish: dual L3 memory (Approved vs Pending) view, real-time LLM usage analytics, and active daemon PID badge.
 - Defensive GHA release pipeline: `.github/workflows/release.yml` automates TestPyPI and PyPI publishing, tag alignment checking, and draft release generation.
 - Clean Typer execution wrapper: intercepts configuration and credential exceptions to output actionable suggestions (e.g. `synap setup`) instead of tracebacks.
 

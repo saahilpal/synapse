@@ -135,8 +135,8 @@ app.add_typer(checkpoint_app, name="checkpoint")
 wiki_app = typer.Typer(help="Manage L2 Wiki Documentation.")
 app.add_typer(wiki_app, name="wiki")
 
-cost_app = typer.Typer(help="View AI Cost Tracking.")
-app.add_typer(cost_app, name="cost")
+usage_app = typer.Typer(help="View AI Usage Tracking.")
+app.add_typer(usage_app, name="usage")
 
 
 @app.command()
@@ -1785,11 +1785,11 @@ def checkpoint_restore(
     )
 
 
-@cost_app.command("show")
-def cost_show(
+@usage_app.command("show")
+def usage_show(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Show detailed LLM call and cost tracking metrics."""
+    """Show detailed LLM call and token usage metrics."""
     runtime = SynapRuntime(_settings(path))
     calls = runtime.store.get_llm_calls()
 
@@ -1801,7 +1801,6 @@ def cost_show(
     agg: dict[tuple[str, str, str], dict[str, Any]] = {}
     total_input = 0
     total_output = 0
-    total_cost = 0.0
 
     for c in calls:
         key = (c["provider"], c["model"], c["purpose"])
@@ -1810,26 +1809,22 @@ def cost_show(
                 "calls": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
-                "cost": 0.0,
             }
         agg[key]["calls"] += 1
         agg[key]["input_tokens"] += c["input_tokens"]
         agg[key]["output_tokens"] += c["output_tokens"]
-        agg[key]["cost"] += c["cost_usd"]
 
         total_input += c["input_tokens"]
         total_output += c["output_tokens"]
-        total_cost += c["cost_usd"]
 
     # Render summary table
-    table = Table(title="LLM Call Aggregated Costs", show_header=True, header_style="bold cyan")
+    table = Table(title="LLM Call Aggregated Usage", show_header=True, header_style="bold cyan")
     table.add_column("Provider")
     table.add_column("Model")
     table.add_column("Purpose")
     table.add_column("Calls", justify="right")
     table.add_column("Input Tokens", justify="right")
     table.add_column("Output Tokens", justify="right")
-    table.add_column("Cost (USD)", justify="right")
 
     for (prov, model, purpose), data in sorted(agg.items()):
         table.add_row(
@@ -1839,7 +1834,6 @@ def cost_show(
             str(data["calls"]),
             f"{data['input_tokens']:,}",
             f"{data['output_tokens']:,}",
-            f"${data['cost']:.6f}",
         )
 
     console.print(table)
@@ -1850,20 +1844,19 @@ def cost_show(
     grand_total_text = (
         f"[bold]Total Calls:[/bold] {len(calls)}\n"
         f"[bold]Total Input Tokens:[/bold] {total_input:,}\n"
-        f"[bold]Total Output Tokens:[/bold] {total_output:,}\n"
-        f"[bold]Total Cost (USD):[/bold] [green]${total_cost:.6f}[/green]"
+        f"[bold]Total Output Tokens:[/bold] {total_output:,}"
     )
-    console.print(Panel(grand_total_text, title="Operational Cost Summary", expand=False))
+    console.print(Panel(grand_total_text, title="Operational Usage Summary", expand=False))
 
 
-@cost_app.command("clear")
-def cost_clear(
+@usage_app.command("clear")
+def usage_clear(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Clear all LLM call cost history."""
+    """Clear all LLM call usage history."""
     runtime = SynapRuntime(_settings(path))
     runtime.store.clear_llm_calls()
-    console.print("[green]✓ LLM cost history cleared successfully.[/green]")
+    console.print("[green]✓ LLM usage history cleared successfully.[/green]")
 
 
 @wiki_app.command("list")
@@ -1918,6 +1911,13 @@ def wiki_show(
     target = filepath
     if not target.endswith(".md"):
         target += ".md"
+
+    # Enforce lazy loading and refresh stale/missing pages on request
+    with console.status(f"[yellow]Loading and refreshing '{target}'...[/yellow]"):
+        try:
+            runtime.wiki.ensure_wiki_page(target)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not refresh wiki page: {e}[/yellow]")
 
     wiki_path = wiki_dir / target
     if not wiki_path.exists():

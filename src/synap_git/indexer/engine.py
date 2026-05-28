@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from synap_git.config import SynapSettings
@@ -12,6 +13,32 @@ from synap_git.provider.factory import get_llm_provider
 from synap_git.retrieval.engine import HybridRetrievalEngine
 from synap_git.storage.sqlite import SynapStore
 from synap_git.utils.serialization import stable_hash
+
+
+def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
+    from synap_git.parser.registry import CodeParserRegistry
+
+    path, rel_path = args
+    registry = CodeParserRegistry()
+    res = registry.parse(path, relative_path=rel_path)
+    return {
+        "path": res.path,
+        "language": res.language,
+        "symbols": [
+            {
+                "symbol_id": sym.stable_id,
+                "name": sym.name,
+                "kind": sym.kind,
+                "start_line": sym.start_line,
+                "end_line": sym.end_line,
+                "ast_hash": sym.ast_hash,
+                "metadata": sym.metadata,
+            }
+            for sym in res.symbols
+        ],
+        "imports": list(res.imports),
+        "syntax_error": res.syntax_error,
+    }
 
 
 @dataclass(frozen=True)
@@ -108,7 +135,7 @@ class SynapRuntime:
             except Exception:
                 pass
 
-        return self.index_repository(git_state=git_state)
+        return self.index_repository(git_state=git_state, force=force)
 
     def wipe_index(self) -> None:
         """Completely purge the index to allow a fresh deterministic rebuild."""
@@ -118,7 +145,6 @@ class SynapRuntime:
 
     def handle_commit(self, git_state: GitState) -> None:
         self.index_repository(git_state=git_state)
-        # Pass 2 happens inside index_repository eventually
 
     def handle_branch_switch(self, git_state: GitState) -> None:
         self.initialize_storage()
@@ -171,152 +197,28 @@ class SynapRuntime:
         self.logger.info("lesson_pending", revert_commit=revert_commit, reverted_from=reverted_from)
         self.index_repository(git_state=current_state)
 
-    def index_repository(self, *, git_state: GitState | None = None) -> str | None:
+    def index_repository(
+        self, *, git_state: GitState | None = None, force: bool = False
+    ) -> str | None:
         self.initialize_storage()
         git_state = git_state or self.git.state()
-        scanner = RepositoryScanner(
-            repository_path=self.settings.repository_path,
-            max_file_bytes=self.settings.max_file_bytes,
-        )
-        scan = scanner.scan()
+        branch = git_state.effective_branch
 
-        all_parse_results = []
+        # Check active commit
+        existing_commit = self.store.get_active_commit(branch)
 
-        # Pass 1: Index all symbols
-        for file_info in scan.files:
-            rel_path = file_info.relative_path
-            existing = self.store.get_file_by_path(rel_path)
+        # Determine if we should run first-run or incremental
+        if (
+            existing_commit is None
+            or force
+            or existing_commit == "unknown"
+            or not git_state.is_repository
+        ):
+            commit = self._first_run_index(git_state)
+        else:
+            commit = self._incremental_index(existing_commit, git_state)
 
-            if existing and existing["content_hash"] == file_info.content_hash:
-                # Still need the parse result for Pass 2 if we want to update edges
-                # For now, let's just reparse changed files
-                continue
-
-            self.logger.info("indexing_file", path=rel_path)
-
-            import hashlib
-
-            file_id_input = rel_path
-            file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
-
-            parse_result = self.parser_registry.parse(file_info.path, relative_path=rel_path)
-            all_parse_results.append((file_id_hash, parse_result))
-
-            symbols_list = []
-            for sym in parse_result.symbols:
-                symbols_list.append(
-                    {
-                        "symbol_id": sym.stable_id,
-                        "name": sym.name,
-                        "kind": sym.kind,
-                        "start_line": sym.start_line,
-                        "end_line": sym.end_line,
-                        "ast_hash": sym.ast_hash,
-                        "metadata": sym.metadata,
-                    }
-                )
-
-            file_id = self.store.upsert_file_and_symbols(
-                file_id=file_id_hash,
-                path=rel_path,
-                git_oid=file_info.git_oid or "",
-                content_hash=file_info.content_hash,
-                language=file_info.language or "unknown",
-                symbols=symbols_list,
-            )
-
-        # Pass 2: Create structural edges (Namespace/Module aware)
-        from pathlib import Path
-
-        for file_id, parse_result in all_parse_results:
-            file_symbols = self.store.get_symbols_by_file(file_id)
-            current_path = Path(parse_result.path)
-
-            for imp in parse_result.imports:
-                target_file_id = None
-
-                if ":" in imp:
-                    module_part, target_name = imp.split(":", 1)
-                else:
-                    module_part, target_name = imp, imp.split(".")[-1]
-
-                # Check for relative import (e.g. .utils)
-                if module_part.startswith("."):
-                    parts = module_part.lstrip(".").split(".")
-                    dot_count = len(module_part) - len(module_part.lstrip("."))
-                    try:
-                        # Move up directories based on dots
-                        target_dir = current_path.parents[dot_count - 1]
-                        candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                        for ext in [".py", ".ts", ".go", ".rs"]:
-                            cand_path = f"{candidate_rel}{ext}"
-                            target_file = self.store.get_file_by_path(cand_path)
-                            if target_file:
-                                target_file_id = target_file["file_id"]
-                                break
-                    except Exception:
-                        pass
-                else:
-                    # Absolute import (e.g. synap_git.storage.sqlite)
-                    parts = module_part.split(".")
-                    for i in range(len(parts)):
-                        suffix_path = "/".join(parts[i:])
-                        for ext in [".py", ".ts", ".go", ".rs"]:
-                            cand_path = f"{suffix_path}{ext}"
-                            with self.store.connect() as conn:
-                                row = conn.execute(
-                                    "SELECT file_id FROM files WHERE path LIKE ?",
-                                    (f"%{cand_path}",),
-                                ).fetchone()
-                                if row:
-                                    target_file_id = row["file_id"]
-                                    break
-                        if target_file_id:
-                            break
-
-                if target_file_id:
-                    # Narrow down targets to the resolved module/file
-                    target_symbols = self.store.get_symbols_by_file(target_file_id)
-                    target_symbols = [ts for ts in target_symbols if ts["name"] == target_name]
-                else:
-                    # Fallback to global matching if module resolution fails
-                    target_symbols = self.store.get_symbols_by_name(target_name)
-
-                for ts in target_symbols:
-                    for fs in file_symbols:
-                        if fs["symbol_id"] == ts["symbol_id"]:
-                            continue
-                        edge_id = stable_hash(
-                            {
-                                "source": fs["symbol_id"],
-                                "target": ts["symbol_id"],
-                                "type": "depends_on",
-                            }
-                        )
-                        with self.store.connect() as conn:
-                            conn.execute(
-                                """
-                                INSERT OR IGNORE INTO edges (edge_id, source_symbol, target_symbol, edge_type)
-                                VALUES (?, ?, ?, 'depends_on')
-                            """,
-                                (edge_id, fs["symbol_id"], ts["symbol_id"]),
-                            )
-
-        # Pass 3: Wiki Generation
-        for file_info in scan.files:
-            rel_path = file_info.relative_path
-            content = (self.settings.repository_path / rel_path).read_text(errors="ignore")
-
-            import hashlib
-
-            file_id_input = rel_path
-            file_id_hash = hashlib.sha256(file_id_input.encode()).hexdigest()
-            self.wiki.generate_file_wiki(file_id_hash, rel_path, content)
-
-        self.wiki.generate_project_wiki()
-
-        self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
-
+        # Automatic periodic checkpointing (unrelated to indexing itself, but keeps spec compatibility)
         self.commit_count += 1
         if self.commit_count % 10 == 0:
             import uuid
@@ -332,7 +234,404 @@ class SynapRuntime:
             )
             self.logger.info("auto_checkpoint_created", commit=git_state.head_commit)
 
+        return commit
+
+    def _first_run_index(self, git_state: GitState) -> str | None:
+        self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)
+        import time
+
+        t_start = time.perf_counter()
+
+        scanner = RepositoryScanner(
+            repository_path=self.settings.repository_path,
+            max_file_bytes=self.settings.max_file_bytes,
+        )
+        scan = scanner.scan()
+
+        files_to_parse = []
+        for file_info in scan.files:
+            files_to_parse.append((file_info.path, file_info.relative_path))
+
+        num_files = len(files_to_parse)
+        chunk_size = 500
+        parsed_results = []
+
+        # Parallel parsing using ProcessPoolExecutor
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+
+        num_workers = max(1, multiprocessing.cpu_count())
+        self.logger.info("parallel_parsing_started", files=num_files, workers=num_workers)
+
+        from rich.console import Console
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+        console = Console()
+        show_progress = self.settings.logging_mode.name == "HUMAN" and num_files > 5
+
+        if show_progress:
+            console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+            console.print(
+                f"[bold cyan]  Building Structural Index: [white]{git_state.effective_branch}[/white][/bold cyan]"
+            )
+            console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+
+        # Enqueue special project wikis
+        self.store.enqueue_wiki("overview.md")
+        self.store.enqueue_wiki("architecture.md")
+        self.store.enqueue_wiki("schema.md")
+
+        if show_progress:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("[yellow]Parsing codebase...[/yellow]", total=num_files)
+
+                with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                    for chunk_idx in range(0, num_files, chunk_size):
+                        chunk = files_to_parse[chunk_idx : chunk_idx + chunk_size]
+                        futures = [executor.submit(_parse_worker, item) for item in chunk]
+                        chunk_results = [f.result() for f in futures]
+
+                        for res in chunk_results:
+                            rel_path = res["path"]
+                            matching_info = next(
+                                (f for f in scan.files if f.relative_path == rel_path), None
+                            )
+                            git_oid = matching_info.git_oid if matching_info else ""
+                            content_hash = matching_info.content_hash if matching_info else ""
+
+                            import hashlib
+
+                            file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+
+                            self.store.upsert_file_and_symbols(
+                                file_id=file_id_hash,
+                                path=rel_path,
+                                git_oid=git_oid or "",
+                                content_hash=content_hash,
+                                language=res["language"],
+                                symbols=res["symbols"],
+                            )
+                            self.store.enqueue_wiki(rel_path)
+                            parsed_results.append((file_id_hash, rel_path, res["imports"]))
+
+                        progress.advance(task, len(chunk))
+                        del chunk_results
+        else:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                for chunk_idx in range(0, num_files, chunk_size):
+                    chunk = files_to_parse[chunk_idx : chunk_idx + chunk_size]
+                    futures = [executor.submit(_parse_worker, item) for item in chunk]
+                    chunk_results = [f.result() for f in futures]
+
+                    for res in chunk_results:
+                        rel_path = res["path"]
+                        matching_info = next(
+                            (f for f in scan.files if f.relative_path == rel_path), None
+                        )
+                        git_oid = matching_info.git_oid if matching_info else ""
+                        content_hash = matching_info.content_hash if matching_info else ""
+
+                        import hashlib
+
+                        file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+
+                        self.store.upsert_file_and_symbols(
+                            file_id=file_id_hash,
+                            path=rel_path,
+                            git_oid=git_oid or "",
+                            content_hash=content_hash,
+                            language=res["language"],
+                            symbols=res["symbols"],
+                        )
+                        self.store.enqueue_wiki(rel_path)
+                        parsed_results.append((file_id_hash, rel_path, res["imports"]))
+                    del chunk_results
+
+        # Pass 2: Edge resolution (batch)
+        self.logger.info("structural_edge_resolution_started")
+        self._resolve_and_insert_edges(parsed_results)
+
+        # Set active commit
+        self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
+
+        self.logger.info("first_run_indexing_completed", elapsed_sec=time.perf_counter() - t_start)
         return git_state.head_commit
+
+    def _incremental_index(self, previous_commit: str, git_state: GitState) -> str | None:
+        self.logger.info(
+            "incremental_indexing_started",
+            previous_commit=previous_commit,
+            current_commit=git_state.head_commit,
+        )
+        import time
+
+        t_start = time.perf_counter()
+
+        if not git_state.is_repository or not git_state.head_commit or previous_commit == "unknown":
+            self.logger.warning("fallback_to_first_run_no_git_commit")
+            return self._first_run_index(git_state)
+
+        import subprocess
+
+        try:
+            res = subprocess.run(
+                [
+                    "git",
+                    "diff-tree",
+                    "-r",
+                    "--no-commit-id",
+                    "--name-status",
+                    previous_commit,
+                    git_state.head_commit,
+                ],
+                cwd=self.settings.repository_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception as e:
+            self.logger.error("git_diff_tree_failed", error=str(e))
+            return self._first_run_index(git_state)
+
+        added_or_modified = []
+        deleted = []
+        for line in res.stdout.splitlines():
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                status = parts[0]
+                if status.startswith("R"):
+                    deleted.append(parts[1])
+                    added_or_modified.append(parts[2])
+                elif status == "D":
+                    deleted.append(parts[1])
+                else:
+                    added_or_modified.append(parts[1])
+
+        # Filter added/modified files
+        scanner = RepositoryScanner(
+            repository_path=self.settings.repository_path,
+            max_file_bytes=self.settings.max_file_bytes,
+        )
+
+        filtered_added_or_modified = []
+        for rel_path in added_or_modified:
+            p = self.settings.repository_path / rel_path
+            if not p.exists() or not p.is_file():
+                continue
+            if scanner._excluded(p):
+                continue
+            try:
+                if p.stat().st_size > self.settings.max_file_bytes:
+                    continue
+            except OSError:
+                continue
+            from synap_git.indexer.scanner import _is_binary_file
+
+            if _is_binary_file(p):
+                continue
+            filtered_added_or_modified.append(rel_path)
+
+        self.logger.info(
+            "git_delta_parsed",
+            added_or_modified=len(filtered_added_or_modified),
+            deleted=len(deleted),
+        )
+
+        # Handle deletions
+        with self.store.connect() as conn:
+            for rel_path in deleted:
+                self.logger.info("deleting_file_index", path=rel_path)
+                file_row = conn.execute(
+                    "SELECT file_id FROM files WHERE path = ?", (rel_path,)
+                ).fetchone()
+                if file_row:
+                    file_id = file_row["file_id"]
+                    conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+                self.store.set_wiki_status(rel_path, None, "stale")
+
+        # Get blob OIDs for changed files
+        git_oids = {}
+        if filtered_added_or_modified:
+            try:
+                cmd = ["git", "ls-tree", "HEAD"] + filtered_added_or_modified
+                res_tree = subprocess.run(
+                    cmd,
+                    cwd=self.settings.repository_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                for line in res_tree.stdout.splitlines():
+                    if not line.strip():
+                        continue
+                    line_parts = line.split("\t", 1)
+                    if len(line_parts) == 2:
+                        meta = line_parts[0].split()
+                        if len(meta) >= 3:
+                            oid = meta[2]
+                            path = line_parts[1]
+                            git_oids[path] = oid
+            except Exception as e:
+                self.logger.warning("git_ls_tree_failed", error=str(e))
+
+        # Process additions and modifications
+        registry = CodeParserRegistry()
+        parsed_results = []
+        for rel_path in filtered_added_or_modified:
+            self.logger.info("reindexing_file", path=rel_path)
+            p = self.settings.repository_path / rel_path
+
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
+                continue
+
+            import hashlib
+
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+
+            parse_result = registry.parse(p, relative_path=rel_path)
+            symbols_list = [
+                {
+                    "symbol_id": sym.stable_id,
+                    "name": sym.name,
+                    "kind": sym.kind,
+                    "start_line": sym.start_line,
+                    "end_line": sym.end_line,
+                    "ast_hash": sym.ast_hash,
+                    "metadata": sym.metadata,
+                }
+                for sym in parse_result.symbols
+            ]
+
+            self.store.upsert_file_and_symbols(
+                file_id=file_id_hash,
+                path=rel_path,
+                git_oid=git_oids.get(rel_path, ""),
+                content_hash=content_hash,
+                language=parse_result.language,
+                symbols=symbols_list,
+            )
+
+            self.store.set_wiki_status(rel_path, None, "stale")
+            self.store.enqueue_wiki(rel_path)
+
+            with self.store.connect() as conn:
+                conn.execute(
+                    "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                    (file_id_hash,),
+                )
+
+            parsed_results.append((file_id_hash, rel_path, list(parse_result.imports)))
+
+        # Re-resolve edges for changed files
+        if parsed_results:
+            self.logger.info("re_resolving_edges")
+            self._resolve_and_insert_edges(parsed_results)
+
+        # Set active commit
+        self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
+
+        self.logger.info(
+            "incremental_indexing_completed", elapsed_sec=time.perf_counter() - t_start
+        )
+        return git_state.head_commit
+
+    def _resolve_and_insert_edges(self, parsed_results: list[tuple[str, str, list[str]]]) -> None:
+        from pathlib import Path
+
+        edges_to_insert = []
+
+        with self.store.connect() as conn:
+            for file_id, rel_path, imports in parsed_results:
+                file_symbols = self.store.get_symbols_by_file(file_id)
+                current_path = Path(rel_path)
+
+                for imp in imports:
+                    target_file_id = None
+
+                    if ":" in imp:
+                        module_part, target_name = imp.split(":", 1)
+                    else:
+                        module_part, target_name = imp, imp.split(".")[-1]
+
+                    # Relative import
+                    if module_part.startswith("."):
+                        parts = module_part.lstrip(".").split(".")
+                        dot_count = len(module_part) - len(module_part.lstrip("."))
+                        try:
+                            target_dir = current_path.parents[dot_count - 1]
+                            candidate_rel = (target_dir / "/".join(parts)).as_posix()
+                            for ext in [".py", ".ts", ".go", ".rs"]:
+                                cand_path = f"{candidate_rel}{ext}"
+                                row = conn.execute(
+                                    "SELECT file_id FROM files WHERE path = ?", (cand_path,)
+                                ).fetchone()
+                                if row:
+                                    target_file_id = row["file_id"]
+                                    break
+                        except Exception:
+                            pass
+                    else:
+                        # Absolute import
+                        row = conn.execute(
+                            "SELECT file_id FROM files WHERE module_key = ?",
+                            (module_part,),
+                        ).fetchone()
+                        if row:
+                            target_file_id = row["file_id"]
+
+                    if target_file_id:
+                        target_rows = conn.execute(
+                            "SELECT symbol_id, name FROM symbols WHERE file_id = ?",
+                            (target_file_id,),
+                        ).fetchall()
+                        target_symbols = [dict(r) for r in target_rows if r["name"] == target_name]
+                    else:
+                        clean_name = target_name.replace('"', '""')
+                        target_rows = conn.execute(
+                            """
+                            SELECT s.symbol_id, s.name
+                            FROM symbols_fts fts
+                            JOIN symbols s ON fts.symbol_id = s.symbol_id
+                            WHERE symbols_fts MATCH ?
+                            """,
+                            (f'"{clean_name}"',),
+                        ).fetchall()
+                        target_symbols = [dict(r) for r in target_rows]
+
+                    for ts in target_symbols:
+                        for fs in file_symbols:
+                            if fs["symbol_id"] == ts["symbol_id"]:
+                                continue
+                            edge_id = stable_hash(
+                                {
+                                    "source": fs["symbol_id"],
+                                    "target": ts["symbol_id"],
+                                    "type": "depends_on",
+                                }
+                            )
+                            edges_to_insert.append((edge_id, fs["symbol_id"], ts["symbol_id"]))
+
+            if edges_to_insert:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO edges (edge_id, source_symbol, target_symbol, edge_type)
+                    VALUES (?, ?, ?, 'depends_on')
+                    """,
+                    edges_to_insert,
+                )
 
     def status(self) -> RuntimeStatus:
         self.initialize_storage()

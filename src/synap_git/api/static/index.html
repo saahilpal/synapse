@@ -202,15 +202,11 @@
             </div>
         </div>
 
-        <!-- LLM Cost & Usage -->
+        <!-- LLM Usage -->
         <div class="card" style="grid-column: span 2;">
-            <h2>LLM Call Cost & Usage</h2>
+            <h2>LLM Call Usage</h2>
             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem;">
                 <div class="stats-grid" style="grid-template-columns: 1fr; gap: 0.75rem;">
-                    <div class="stat-box">
-                        <div class="stat-value" id="cost-total-usd">$0.000000</div>
-                        <div class="stat-label">Total Cost (USD)</div>
-                    </div>
                     <div class="stat-box">
                         <div class="stat-value" id="cost-total-calls">0</div>
                         <div class="stat-label">Total LLM Calls</div>
@@ -231,11 +227,10 @@
                                     <th>Model</th>
                                     <th>Purpose</th>
                                     <th>Tokens</th>
-                                    <th>Cost</th>
                                 </tr>
                             </thead>
                             <tbody id="cost-calls-body">
-                                <tr><td colspan="6" class="empty-state">No calls recorded.</td></tr>
+                                <tr><td colspan="5" class="empty-state">No calls recorded.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -443,44 +438,59 @@
                     pendingBody.innerHTML = `<tr><td colspan="3" class="empty-state">No pending lessons needing approval.</td></tr>`;
                 }
 
-                // Fetch Cost & Usage
-                const costRes = await fetch('/api/v1/cost');
-                const costData = await costRes.json();
+                // Fetch Usage
+                const usageRes = await fetch('/api/v1/usage');
+                const usageData = await usageRes.json();
                 const costBody = document.getElementById('cost-calls-body');
 
-                let totalCost = 0;
                 let totalCalls = 0;
                 let totalTokens = 0;
 
-                if (costData.calls && costData.calls.length > 0) {
-                    totalCalls = costData.calls.length;
-                    costBody.innerHTML = costData.calls.slice(0, 15).map(c => {
-                        totalCost += c.cost_usd;
+                if (usageData.calls && usageData.calls.length > 0) {
+                    totalCalls = usageData.calls.length;
+                    usageData.calls.slice(0, 15).map(c => {
                         const tokens = c.input_tokens + c.output_tokens;
                         totalTokens += tokens;
 
                         const timeStr = new Date(c.created_at * 1000).toLocaleTimeString();
-                        return `
+                        const row = `
                         <tr class="row-hover">
                             <td>${timeStr}</td>
                             <td>${c.provider}</td>
                             <td><code>${c.model}</code></td>
                             <td>${c.purpose}</td>
                             <td>${tokens.toLocaleString()}</td>
-                            <td style="color:var(--success); font-family:var(--font-mono); font-size:11px;">$${c.cost_usd.toFixed(6)}</td>
                         </tr>
                         `;
-                    }).join('');
+                        costBody.insertAdjacentHTML('beforeend', row);
+                    });
 
-                    costData.calls.slice(15).forEach(c => {
-                        totalCost += c.cost_usd;
+                    // Clear the loading message if it exists
+                    if (usageData.calls.length > 0 && costBody.querySelector('.empty-state')) {
+                        costBody.innerHTML = '';
+                        // Re-render the 15 calls because we just cleared it
+                         costBody.innerHTML = usageData.calls.slice(0, 15).map(c => {
+                            const tokens = c.input_tokens + c.output_tokens;
+                            const timeStr = new Date(c.created_at * 1000).toLocaleTimeString();
+                            return `
+                            <tr class="row-hover">
+                                <td>${timeStr}</td>
+                                <td>${c.provider}</td>
+                                <td><code>${c.model}</code></td>
+                                <td>${c.purpose}</td>
+                                <td>${tokens.toLocaleString()}</td>
+                            </tr>
+                            `;
+                        }).join('');
+                    }
+
+                    usageData.calls.slice(15).forEach(c => {
                         totalTokens += (c.input_tokens + c.output_tokens);
                     });
                 } else {
-                    costBody.innerHTML = `<tr><td colspan="6" class="empty-state">No LLM calls recorded yet.</td></tr>`;
+                    costBody.innerHTML = `<tr><td colspan="5" class="empty-state">No LLM calls recorded yet.</td></tr>`;
                 }
 
-                document.getElementById('cost-total-usd').textContent = `$${totalCost.toFixed(6)}`;
                 document.getElementById('cost-total-calls').textContent = totalCalls.toLocaleString();
                 document.getElementById('cost-total-tokens').textContent = totalTokens.toLocaleString();
 

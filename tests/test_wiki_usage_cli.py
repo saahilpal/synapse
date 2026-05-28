@@ -29,17 +29,17 @@ def temp_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_wiki_and_cost_cli(temp_repo: Path) -> None:
+def test_wiki_and_usage_cli(temp_repo: Path) -> None:
     runner = CliRunner()
 
     # 1. Initialize synapse
     init_res = runner.invoke(app, ["init", temp_repo.as_posix(), "--skip-llm", "--quiet"])
     assert init_res.exit_code == 0, init_res.output
 
-    # 2. Check cost show initially (should be empty/no calls)
-    cost_res = runner.invoke(app, ["cost", "show", temp_repo.as_posix()])
-    assert cost_res.exit_code == 0
-    assert "No LLM calls recorded yet" in cost_res.output
+    # 2. Check usage show initially (should be empty/no calls)
+    usage_res = runner.invoke(app, ["usage", "show", temp_repo.as_posix()])
+    assert usage_res.exit_code == 0
+    assert "No LLM calls recorded yet" in usage_res.output
 
     # 3. Manually add an LLM call to database
     settings = SynapSettings(repository_path=temp_repo, profile=RuntimeProfile.TEST)
@@ -53,20 +53,20 @@ def test_wiki_and_cost_cli(temp_repo: Path) -> None:
         purpose="retrieval",
     )
 
-    # 4. Check cost show again with standard terminal columns to avoid truncation
-    cost_res2 = runner.invoke(app, ["cost", "show", temp_repo.as_posix()], env={"COLUMNS": "120"})
-    assert cost_res2.exit_code == 0
-    assert "openai" in cost_res2.output
-    assert "gpt-4o-mini" in cost_res2.output
-    assert "retrieval" in cost_res2.output
+    # 4. Check usage show again with standard terminal columns to avoid truncation
+    usage_res2 = runner.invoke(app, ["usage", "show", temp_repo.as_posix()], env={"COLUMNS": "120"})
+    assert usage_res2.exit_code == 0
+    assert "openai" in usage_res2.output
+    assert "gpt-4o-mini" in usage_res2.output
+    assert "retrieval" in usage_res2.output
 
-    # 5. Clear cost
-    clear_res = runner.invoke(app, ["cost", "clear", temp_repo.as_posix()])
+    # 5. Clear usage
+    clear_res = runner.invoke(app, ["usage", "clear", temp_repo.as_posix()])
     assert clear_res.exit_code == 0
     assert "cleared" in clear_res.output
 
-    cost_res3 = runner.invoke(app, ["cost", "show", temp_repo.as_posix()])
-    assert "No LLM calls recorded" in cost_res3.output
+    usage_res3 = runner.invoke(app, ["usage", "show", temp_repo.as_posix()])
+    assert "No LLM calls recorded" in usage_res3.output
 
     # 6. Check wiki list initially (should be empty or none)
     wiki_res = runner.invoke(app, ["wiki", "list", temp_repo.as_posix()])

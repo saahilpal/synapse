@@ -80,8 +80,9 @@ class RuntimeDaemon:
         self._write_heartbeat(status="healthy")
         self._install_signal_handlers()
 
-        # Launch Uvicorn in background
+        # Launch Uvicorn and Wiki Worker in background
         server_task = asyncio.create_task(self._ui_server.serve())
+        wiki_worker_task = asyncio.create_task(self._wiki_worker_loop())
 
         try:
             await self._poll_git_loop()
@@ -108,6 +109,13 @@ class RuntimeDaemon:
                 server_task.cancel()
                 try:
                     await server_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            if not wiki_worker_task.done():
+                wiki_worker_task.cancel()
+                try:
+                    await wiki_worker_task
                 except (asyncio.CancelledError, Exception):
                     pass
 
@@ -295,3 +303,41 @@ class RuntimeDaemon:
                 loop.add_signal_handler(sig, self.stop)
             except NotImplementedError:
                 continue
+
+    async def _wiki_worker_loop(self) -> None:
+        self.logger.info("wiki_worker_started")
+        while not self._stop_event.is_set():
+            try:
+                task = await asyncio.to_thread(self.runtime.store.dequeue_wiki)
+                if task:
+                    task_id = task["task_id"]
+                    file_path = task["file_path"]
+                    attempts = task["attempts"]
+
+                    self.logger.info("wiki_worker_processing_task", path=file_path)
+
+                    try:
+                        await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
+                        await asyncio.to_thread(
+                            self.runtime.store.update_wiki_queue_status,
+                            task_id,
+                            "completed",
+                            attempts + 1,
+                        )
+                        self.logger.info("wiki_worker_completed_task", path=file_path)
+                    except Exception as ex:
+                        self.logger.error("wiki_worker_task_failed", path=file_path, error=str(ex))
+                        await asyncio.to_thread(
+                            self.runtime.store.update_wiki_queue_status,
+                            task_id,
+                            "pending",
+                            attempts + 1,
+                        )
+                else:
+                    await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("wiki_worker_loop_error", error=str(e))
+                await asyncio.sleep(5.0)
+        self.logger.info("wiki_worker_stopped")

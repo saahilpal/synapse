@@ -38,7 +38,7 @@ class SynapStore:
             current_version = conn.execute("PRAGMA user_version").fetchone()[0]
 
             # Target schema version
-            TARGET_VERSION = 1
+            TARGET_VERSION = 2
 
             if current_version < 1:
                 conn.executescript("""
@@ -142,7 +142,6 @@ class SynapStore:
                         model TEXT NOT NULL,
                         input_tokens INTEGER NOT NULL,
                         output_tokens INTEGER NOT NULL,
-                        cost_usd REAL NOT NULL,
                         purpose TEXT NOT NULL,
                         file_path TEXT,
                         created_at INTEGER NOT NULL
@@ -157,7 +156,49 @@ class SynapStore:
                     CREATE INDEX IF NOT EXISTS idx_checkpoints_branch ON checkpoints(branch);
                     CREATE INDEX IF NOT EXISTS idx_activity_branch ON activity(branch);
                 """)
-                conn.execute(f"PRAGMA user_version = {TARGET_VERSION}")
+                conn.execute("PRAGMA user_version = 1")
+                current_version = 1
+
+            if current_version < 2:
+                conn.executescript("""
+                    -- Add module_key to files
+                    ALTER TABLE files ADD COLUMN module_key TEXT;
+                    CREATE INDEX IF NOT EXISTS idx_files_module_key ON files(module_key);
+
+                    -- Create symbol search virtual table using FTS5
+                    CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
+                        symbol_id UNINDEXED,
+                        name,
+                        kind UNINDEXED
+                    );
+
+                    -- Populate symbols_fts with existing symbols if any
+                    INSERT INTO symbols_fts (symbol_id, name, kind)
+                    SELECT symbol_id, name, kind FROM symbols;
+
+                    -- Trigger to delete from FTS when symbols is deleted
+                    CREATE TRIGGER IF NOT EXISTS tgr_symbols_delete AFTER DELETE ON symbols BEGIN
+                        DELETE FROM symbols_fts WHERE symbol_id = old.symbol_id;
+                    END;
+
+                    -- Create wiki_status and wiki_queue tables
+                    CREATE TABLE IF NOT EXISTS wiki_status (
+                        path TEXT PRIMARY KEY,
+                        git_oid TEXT,
+                        status TEXT NOT NULL DEFAULT 'stale',
+                        updated_at INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS wiki_queue (
+                        task_id TEXT PRIMARY KEY,
+                        file_path TEXT UNIQUE,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        attempts INTEGER DEFAULT 0,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    );
+                """)
+                conn.execute("PRAGMA user_version = 2")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -184,37 +225,61 @@ class SynapStore:
     ) -> str:
         now = datetime.now(UTC).isoformat()
         with self.connect() as conn:
+            # Compute module_key
+            p = Path(path)
+            stem_path = p.with_suffix("")
+            parts = list(stem_path.parts)
+            if parts and parts[0] in ("src", "lib", "app", "cmd", "pkg"):
+                parts = parts[1:]
+            if parts and parts[-1] == "__init__":
+                parts = parts[:-1]
+            module_key = ".".join(parts)
+
             conn.execute(
                 """
-                INSERT INTO files (file_id, path, git_oid, content_hash, language, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO files (file_id, path, git_oid, content_hash, language, module_key, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(path) DO UPDATE SET
                     file_id = excluded.file_id,
                     git_oid = excluded.git_oid,
                     content_hash = excluded.content_hash,
                     language = excluded.language,
+                    module_key = excluded.module_key,
                     updated_at = excluded.updated_at
                 """,
-                (file_id, path, git_oid, content_hash, language, now),
+                (file_id, path, git_oid, content_hash, language, module_key, now),
             )
+            # Delete old symbols (trigger triggers delete from symbols_fts automatically)
             conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
-            for sym in symbols:
-                conn.execute(
-                    """
-                    INSERT INTO symbols (symbol_id, file_id, name, kind, start_line, end_line, ast_hash, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        sym["symbol_id"],
-                        file_id,
-                        sym["name"],
-                        sym["kind"],
-                        sym["start_line"],
-                        sym["end_line"],
-                        sym["ast_hash"],
-                        json.dumps(sym.get("metadata") or {}),
-                    ),
+
+            # Batch insert symbols
+            symbols_data = [
+                (
+                    sym["symbol_id"],
+                    file_id,
+                    sym["name"],
+                    sym["kind"],
+                    sym["start_line"],
+                    sym["end_line"],
+                    sym["ast_hash"],
+                    json.dumps(sym.get("metadata") or {}),
                 )
+                for sym in symbols
+            ]
+            conn.executemany(
+                """
+                INSERT INTO symbols (symbol_id, file_id, name, kind, start_line, end_line, ast_hash, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                symbols_data,
+            )
+
+            # Batch insert into FTS5
+            fts_data = [(sym["symbol_id"], sym["name"], sym["kind"]) for sym in symbols]
+            conn.executemany(
+                "INSERT INTO symbols_fts (symbol_id, name, kind) VALUES (?, ?, ?)",
+                fts_data,
+            )
         return file_id
 
     def get_file_by_path(self, path: str) -> dict[str, Any] | None:
@@ -258,14 +323,16 @@ class SynapStore:
 
     def get_symbols_by_name(self, name: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
+            clean_name = name.replace('"', '""')
             rows = conn.execute(
                 """
                 SELECT s.*, f.path as source_path
-                FROM symbols s
+                FROM symbols_fts fts
+                JOIN symbols s ON fts.symbol_id = s.symbol_id
                 JOIN files f ON s.file_id = f.file_id
-                WHERE s.name LIKE ?
+                WHERE symbols_fts MATCH ?
                 """,
-                (f"%{name}%",),
+                (f'"{clean_name}"*',),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -515,35 +582,13 @@ class SynapStore:
         import uuid
         from datetime import UTC
 
-        cost = 0.0
-        p_lower = provider.lower() if provider else ""
-        m_lower = model.lower() if model else ""
-
-        if "openai" in p_lower:
-            if "mini" in m_lower:
-                cost = (input_tokens * 0.150 + output_tokens * 0.600) / 1_000_000
-            else:
-                cost = (input_tokens * 5.00 + output_tokens * 15.00) / 1_000_000
-        elif "gemini" in p_lower:
-            if "pro" in m_lower:
-                cost = (input_tokens * 3.50 + output_tokens * 10.50) / 1_000_000
-            else:
-                cost = (input_tokens * 0.075 + output_tokens * 0.300) / 1_000_000
-        elif "anthropic" in p_lower:
-            if "sonnet" in m_lower:
-                cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
-            elif "haiku" in m_lower:
-                cost = (input_tokens * 0.25 + output_tokens * 1.25) / 1_000_000
-            else:
-                cost = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
-
         call_id = str(uuid.uuid4())
         now = int(datetime.now(UTC).timestamp())
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, cost_usd, purpose, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, purpose, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     call_id,
@@ -551,12 +596,87 @@ class SynapStore:
                     model or "unknown",
                     input_tokens,
                     output_tokens,
-                    cost,
                     purpose,
                     file_path,
                     now,
                 ),
             )
+
+    def get_wiki_status(self, path: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM wiki_status WHERE path = ?", (path,)).fetchone()
+        return dict(row) if row else None
+
+    def set_wiki_status(self, path: str, git_oid: str | None, status: str) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO wiki_status (path, git_oid, status, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                    git_oid = excluded.git_oid,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+                """,
+                (path, git_oid, status, now),
+            )
+
+    def enqueue_wiki(self, file_path: str) -> None:
+        import uuid
+
+        now = int(datetime.now(UTC).timestamp())
+        task_id = str(uuid.uuid4())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO wiki_queue (task_id, file_path, status, attempts, created_at, updated_at)
+                VALUES (?, ?, 'pending', 0, ?, ?)
+                """,
+                (task_id, file_path, now, now),
+            )
+
+    def dequeue_wiki(self) -> dict[str, Any] | None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM wiki_queue
+                WHERE status = 'pending' AND attempts < 5
+                ORDER BY created_at ASC LIMIT 1
+                """
+            ).fetchone()
+            if row:
+                task_id = row["task_id"]
+                conn.execute(
+                    """
+                    UPDATE wiki_queue
+                    SET status = 'processing', updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (now, task_id),
+                )
+                return dict(row)
+        return None
+
+    def update_wiki_queue_status(self, task_id: str, status: str, attempts: int) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            if status == "completed":
+                conn.execute("DELETE FROM wiki_queue WHERE task_id = ?", (task_id,))
+            else:
+                conn.execute(
+                    """
+                    UPDATE wiki_queue
+                    SET status = ?, attempts = ?, updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (status, attempts, now, task_id),
+                )
+
+    def clear_wiki_queue(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM wiki_queue")
 
     def get_llm_calls(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -579,6 +699,9 @@ class SynapStore:
             conn.execute("DELETE FROM lessons")
             conn.execute("DELETE FROM activity")
             conn.execute("DELETE FROM llm_calls")
+            conn.execute("DELETE FROM wiki_status")
+            conn.execute("DELETE FROM wiki_queue")
+            conn.execute("DELETE FROM symbols_fts")
 
         # Run VACUUM outside the transaction context
         conn = sqlite3.connect(self.path, isolation_level=None, timeout=30.0)

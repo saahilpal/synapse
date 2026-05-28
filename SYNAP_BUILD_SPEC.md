@@ -97,7 +97,7 @@ The agent never needs to ask "what does this project do." Synap already told it.
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        CLI (Typer)                               │
-│   init · start · stop · status · wiki · memory · cost · doctor  │
+│   init · start · stop · status · wiki · memory · usage · doctor  │
 └───────────────────────────┬──────────────────────────────────────┘
                             │ orchestrates
                ┌────────────▼────────────┐
@@ -1142,7 +1142,7 @@ Daemon mode:
 
 [1/4] Scanning repository
       ✓ 487 files · TypeScript (234) · Python (156) · Go (97)
-      Tokens: 0 · Cost: $0.00
+      Tokens: 0
 
 [2/4] Building structural index
       Parsing TypeScript    [████████████] 234/234 files
@@ -1150,17 +1150,17 @@ Daemon mode:
       Parsing Go            [████████████]  97/97  files
       Extracting symbols    ✓ 12,400 symbols · 3,200 edges
       Generating embeddings [████████░░░░] 8,200/12,400
-      Tokens: 0 · Cost: $0.00
+      Tokens: 0
 
 [3/4] Generating knowledge wiki
-      src/indexer/          ✓ analyzed  (1,240 tokens · $0.002)
-      src/retrieval/        ✓ analyzed  (980  tokens · $0.002)
+      src/indexer/          ✓ analyzed  (1,240 tokens)
+      src/retrieval/        ✓ analyzed  (980  tokens)
       src/mcp/              ⟳ analyzing...
       src/api/              ░ queued
       ...
       Writing overview.md...
       Writing architecture.md...
-      Tokens used: 187,420 · Cost: $0.31
+      Tokens used: 187,420
 
 [4/4] Finalizing
       ✓ Project memory initialized
@@ -1175,8 +1175,6 @@ Daemon mode:
 
   Time taken          2m 14s
   Tokens used         187,420
-  Total cost          $0.31
-  Ongoing per commit  ~$0.001 estimated
 
   Next: Connect your AI agent
   Run: synap mcp config
@@ -1524,9 +1522,9 @@ def should_regenerate_wiki(module: str, changed_files: list) -> bool:
 
 ---
 
-## 13. COST TRACKING
+## 13. USAGE TRACKING
 
-### Every LLM call records cost:
+### Every LLM call records usage:
 
 ```python
 @dataclass
@@ -1535,13 +1533,12 @@ class LLMCall:
     model:         str
     input_tokens:  int
     output_tokens: int
-    cost_usd:      float
     purpose:       str  # "wiki_file" | "wiki_module" | "wiki_project" | "lesson"
     file_path:     str | None
     created_at:    int
 ```
 
-### Cost stored in synap.db:
+### Usage stored in synap.db:
 
 ```sql
 CREATE TABLE llm_calls (
@@ -1550,19 +1547,18 @@ CREATE TABLE llm_calls (
     model         TEXT NOT NULL,
     input_tokens  INTEGER NOT NULL,
     output_tokens INTEGER NOT NULL,
-    cost_usd      REAL NOT NULL,
     purpose       TEXT NOT NULL,
     file_path     TEXT,
     created_at    INTEGER NOT NULL
 );
 ```
 
-### Real-Time Cost in Init Progress
+### Real-Time Usage in Init Progress
 
 ```
 [3/4] Generating knowledge wiki
-      src/auth/         ✓ analyzed  (1,240 tokens · $0.002)
-      src/indexer/      ⟳ analyzing... (Tokens used: 187,420 · Cost so far: $0.29)
+      src/auth/         ✓ analyzed  (1,240 tokens)
+      src/indexer/      ⟳ analyzing... (Tokens used: 187,420)
 ```
 
 ---
@@ -1698,7 +1694,7 @@ localhost:7823/memory        → project memory dashboard
 localhost:7823/memory/lessons → lesson management (approve/reject)
 localhost:7823/memory/decisions → all decisions
 localhost:7823/memory/checkpoints → checkpoint history
-localhost:7823/cost          → token usage and cost breakdown
+localhost:7823/usage         → token usage breakdown
 localhost:7823/status        → live system status (replaces old diagnostic UI)
 localhost:7823/index         → raw index explorer (symbols, edges, files)
 ```
@@ -1944,4 +1940,33 @@ REMOVE: retrieval_traces table from SQLite
 ---
 
 *End of Synap Build Specification v1.0*
+*Every component defined. Every edge case covered. Build from top to bottom.*
+
+---
+
+## 18. PERFORMANCE ARCHITECTURE (v1.1.0 UPDATE)
+
+### Git-Snapshot Paradigm
+Synapse indexes are designed as projections of Git commit history. Change detection avoids expensive filesystem directory traversing or hashing of files. Instead, Synapse queries the active Git tree:
+- **Change detection:** Incremental runs compare the last-indexed commit hash against `HEAD` using `git diff-tree`. Only modified, added, or deleted files are touched.
+- **Git OID verification:** Git's own blob object IDs (OIDs) from `git ls-tree` are used as the unique integrity token. If the Git index OID matches the stored OID, the file has not changed (mathematically guaranteed).
+
+### Split Two-Path Architecture
+- **Path A: First Run (`_first_run_index`):** A full scan and rebuild. Treesitter parsing is parallelized across all available CPU cores using process-based concurrency (`ProcessPoolExecutor`) with one parser instance per process. Parse results are written to the database in chunks to prevent memory accumulation. Wiki generation tasks are enqueued to a background queue, bypassing the critical path.
+- **Path B: Incremental (`_incremental_index`):** Runs only when a prior commit hash is indexed. Bypasses file scans/hashing. Operates in $O(\Delta)$ time by fetching changed files from Git.
+
+### Decoupled Lazy & Asynchronous Wiki Generation
+- **Asynchronous Queue:** LLM wiki generation is decoupled from structural indexing. Work is written to `wiki_queue` and consumed by an asynchronous daemon worker loop (`_wiki_worker_loop`).
+- **Lazy Caching:** Wiki pages are generated on request and cached. Stale/missing pages are refreshed synchronously when requested via CLI (`wiki show`), API `/wiki`, or MCP.
+
+### SQLite Performance Architecture
+- **WAL & Synchronous Mode:** Database operates with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` to optimize concurrent reads and quick writes.
+- **Single Transaction Commits:** All symbols, files, and structural edges from an indexing pass are batched and committed within a single transaction, reducing Disk Sync overhead.
+- **Batch Insertion:** Uses `executemany` for multi-row symbol and edge inserts.
+- **O(1) Module Resolution:** Pre-computes and indexes a dot-separated `module_key` (e.g. `synap_git.storage.sqlite`) during structural parsing, replacing slow `LIKE "%path"` scans.
+- **FTS5 Search:** Fast symbol name lookup matches patterns utilizing the SQLite `FTS5` virtual table (`symbols_fts`), completely eliminating leading wildcard `LIKE "%name%"` table scans.
+
+---
+
+*End of Synap Build Specification v1.1.0*
 *Every component defined. Every edge case covered. Build from top to bottom.*

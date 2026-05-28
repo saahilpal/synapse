@@ -24,6 +24,16 @@ Synap is **NOT a RAG system.** It is a strict, deterministic background daemon t
 
 ---
 
+## ⚡ Performance Architecture (v1.1.0)
+
+Synap is built on the **Git-Snapshot Paradigm** to guarantee sub-100ms response times for everyday agent workflows:
+- **Two separate code paths:** First-run indexing uses process-pool parallel parsing (`ProcessPoolExecutor`) to build the initial codebase structure, while subsequent indexing uses a Git delta change detector (`git diff-tree`) to process only changed files. (Reason: Avoids full filesystem scans on every run).
+- **No filesystem scan / file hashing on incremental runs:** Synap uses Git blob OIDs to detect changed files. (Reason: Git already hashes everything, making filesystem reads redundant).
+- **Decoupled non-deterministic LLM pipeline:** Structural parsing (deterministic, fast) completes immediately and enqueues wiki generation (non-deterministic, slow) to a background worker, while lazy caching fallback handles CLI/API wiki requests. (Reason: Never block structural indexing or CLI commands on LLM API response latency).
+- **SQLite optimizations:** SQLite writes are grouped into a single transaction per batch (Reason: Avoids disk sync overhead per row). SQLite FTS5 index matches symbols in sub-milliseconds (Reason: Eliminates slow wildcard `LIKE` table scans). Pre-computed dot-separated `module_key` columns allow O(1) module resolution (Reason: Prevents suffix-matching scans).
+
+---
+
 ## 🏗️ High-Level Architecture (HLD)
 
 Synap bridges the gap between your local file system, Git history, and the LLM via a 3-layer indexing strategy.
@@ -187,8 +197,8 @@ Synap uses a powerful, strict CLI interface. Every destructive action prompts fo
 ### Developer Tools
 - `synap wiki list .` : List all generated wiki documentation files.
 - `synap wiki show <filepath> .` : Render a specific wiki markdown page to the console.
-- `synap cost show .` : Display detailed aggregated LLM token usage and estimated costs.
-- `synap cost clear .` : Purge all LLM call cost history.
+- `synap usage show .` : Display detailed aggregated LLM token usage.
+- `synap usage clear .` : Purge all LLM call history.
 - `synap doctor .` : Validate SQLite integrity, Tree-sitter, tokenizers, LLM providers, and daemon heartbeat.
 - `synap mcp verify .` : Verify MCP protocol, tool schemas, and contract stability.
 
@@ -202,3 +212,4 @@ Synap is built on the philosophy that AI tools must be transparent and controlla
 - Ensure all states are stored exclusively in `synap.db` or `.synap/wiki/`.
 
 License: [Apache 2.0](LICENSE.md)
+](LICENSE.md)

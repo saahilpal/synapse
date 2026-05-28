@@ -65,8 +65,8 @@ synap mcp verify .
 synap checkpoint create . --doing "Verifying release wheel" --files "test.py" --next-step "done" --blockers "None"
 synap checkpoint list .
 synap checkpoint restore latest .
-synap cost show .
-synap cost clear .
+synap usage show .
+synap usage clear .
 synap wiki list .
 
 # Cleanup
