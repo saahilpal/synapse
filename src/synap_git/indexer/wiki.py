@@ -130,6 +130,7 @@ class WikiEngine:
                 pass
         except Exception as e:
             logger.error("wiki_generation_failed", path=file_path, error=str(e))
+            raise
 
     def generate_project_wiki_page_sync(self, page_name: str) -> None:
         """Generate project level wikis (overview, architecture, schema) synchronously."""
