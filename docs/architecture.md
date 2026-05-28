@@ -1,73 +1,55 @@
-# Synap Architecture
+# Synapse Architecture
 
-Synap is built as a deterministic indexing engine and retrieval runtime. It is designed to be the "infrastructure of record" for AI coding agents, providing a stable, verifiable substrate of repository knowledge.
+Synap is a deterministic, Git-aware structural context engine. It functions as a background context daemon that indexes the repository structure and injects grounded developer memory into AI coding agents via the Model Context Protocol (MCP).
 
-## Core Philosophies
+## The Git-Snapshot Model
 
-1.  **Deterministic Projection:** The system state is a pure function of the Git repository state and the parsing rules. There is no independent internal evolution of "truth."
-2.  **Parser-First Grounding:** Retrieval is only as good as the underlying symbols. We use **Tree-sitter** to ensure absolute structural accuracy.
-3.  **SQL-Centric Storage:** We leverage SQLite's WAL mode and Recursive CTEs for high-performance, low-latency graph traversals without the overhead of a dedicated graph database.
+Unlike standard indexers that run generic file watchers or compute arbitrary hashes, Synap uses Git commits as the absolute source of truth. Every repository state is defined as a projection of the active Git commit.
 
-## System Components
+* **Deterministic Projections:** The codebase index is a pure function of your Git history and active tree. Switch branch or checkout an older commit, and the context shifts instantly.
+* **Blob OID Change Detection:** Synap does not perform full filesystem scans or read all files on incremental updates. It uses `git diff-tree` to identify changed paths, reading only modified files.
+* **Preservation Through Rollbacks:** While the structural code index swaps with the active Git commit, L3 behavioral memories (lessons) are preserved and carry forward.
 
-### 1. Git Source of Truth
-Synap monitors the Git working tree. Every index operation begins by resolving the current `HEAD` and identifying changed files via content hashes.
+## The 3-Layer Context Model
 
-### 2. Tree-sitter Parser Registry
-Files are parsed into Concrete Syntax Trees (CST) using Tree-sitter. We currently support:
-- **Python**
-- **JavaScript / JSX**
-- **TypeScript / TSX**
+Synap provides context across three decoupled layers to ground the coding agent:
 
-The parser extracts symbols (classes, functions, etc.) and relationships (imports, call edges).
-
-### 3. SQLite Storage Engine
-Storage is divided into:
-- **Files:** Path, Git OID, and content hash.
-- **Symbols:** Deterministic IDs based on path and name.
-- **Edges:** Structural relationships (e.g., `depends_on`).
-- **Embeddings:** Content-addressed vector cache.
-- **Retrieval Traces:** Diagnostic logs of retrieval operations.
-
-### 4. Hybrid Retrieval Engine
-Retrieval follows a strict 4-stage pipeline:
-1.  **Temporal:** Filter by active branch and recent commits.
-2.  **Structural:** Expand search from keywords to neighbors using SQL CTEs.
-3.  **Lexical:** Match exact identifiers and keywords.
-4.  **Semantic:** conceptually related matches (fallback).
-
-### 5. Model Context Protocol (MCP)
-Synap exposes its capabilities via the standard MCP. This allows any MCP-compatible agent (Cursor, Claude, Roo) to consume grounded context via standard tools.
-
----
-
-## Symbol Extraction Pipeline
-
-The extraction process transforms raw text into high-fidelity structural data.
-
-```mermaid
-flowchart LR
-    A[Source File] --> B[Tree-sitter Parser]
-    B --> C[Concrete Syntax Tree]
-    C --> D[Symbol Normalizer]
-    D --> E[Relationship Extractor]
-    E --> F[SQLite Persist]
+```
+┌─────────────────────────────────────────────────────────┐
+│              L3: Behavioral Memory                      │
+│      (Checkpoints, Decisions, Revert Lessons)           │
+└───────────────────────────┬─────────────────────────────┘
+                            │ (Injected into)
+┌───────────────────────────▼─────────────────────────────┐
+│              L2: Semantic Documentation                 │
+│         (File/Module Wikis, Project Overview)           │
+└───────────────────────────┬─────────────────────────────┘
+                            │ (Linked to)
+┌───────────────────────────▼─────────────────────────────┐
+│              L1: Structural Symbol Graph                │
+│       (Tree-sitter parsed classes, functions, edges)    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## High-Level Flow
+### Layer 1: Structural Index (L1)
 
-```mermaid
-graph LR
-    subgraph "Ingestion"
-      G[Git Repo] --> S[Scanner]
-      S --> P[Tree-sitter]
-      P --> DB[(SQLite Index)]
-    end
+L1 is a deterministic mapping of codebase architecture. It extracts programming language symbols (classes, functions, methods) and parses imports to determine call and dependency edges.
 
-    subgraph "Retrieval"
-      Q[User Query] --> R[Retrieval Engine]
-      DB --> R
-      R --> T[Diagnostic Trace]
-      R --> M[MCP Tool Output]
-    end
-```
+* **Tree-sitter Parsing:** Extracts code nodes with high AST fidelity.
+* **Unique Identification:** Every symbol is mapped by a primary key of `sha256(path + content_hash)` to eliminate duplication and collision.
+* **SQLite Graph Traversal:** Relations and call dependencies are stored in an SQL schema, traversed dynamically using SQLite Recursive Common Table Expressions (CTEs).
+
+### Layer 2: Semantic Documentation (L2)
+
+L2 provides human-readable context in the form of markdown summaries. It represents file, module, and project descriptions stored under `.synap/wiki/`.
+
+* **Asynchronous LLM Worker:** Slow, non-deterministic LLM wiki generation is decoupled from the indexing pipeline. The daemon enqueues tasks to a persistent queue (`wiki_queue`) and processes them in the background.
+* **Lazy Cache Fallback:** If the CLI, Web API, or MCP tools request an ungenerated or stale wiki page, Synap triggers a synchronous generation pass to update the cache on the fly.
+
+### Layer 3: Behavioral Memory (L3)
+
+L3 represents developer-in-the-loop memory that captures current tasks, design patterns, and past failures.
+
+* **Checkpoints:** A state snapshot containing the active task description (`doing`), files affected, next steps, and blockers.
+* **Decisions:** Structured technical and architectural decisions logged by the agent.
+* **Lessons:** Stored rules generated automatically when a commit is reverted (detected via the Git commit ancestor graph). Active, approved lessons are prepended as system instructions during agent context packaging.
