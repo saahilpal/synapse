@@ -190,7 +190,7 @@ class SynapRuntime:
                     "Awaiting analysis from LLM or User",
                     json.dumps(affected),
                     now,
-                    now + (86400 * 7),  # 7 days
+                    now + (86400 * self.settings.lesson_expiry_days),
                 ),
             )
 

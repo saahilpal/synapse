@@ -69,6 +69,21 @@ class SynapMCPFacade:
         lessons = self.runtime.store.get_lessons("pending")
         return {"status": "success", "lessons": lessons}
 
+    def signal_low_context(self, token_count: int, capacity: int) -> dict[str, Any]:
+        percentage = token_count / capacity if capacity > 0 else 0
+        threshold = self.runtime.settings.checkpoint_threshold
+        should_checkpoint = percentage >= threshold
+
+        message = f"Context usage is at {percentage:.1%}. "
+        if should_checkpoint:
+            message += f"Threshold ({threshold:.1%}) reached. Checkpoint recommended."
+            # Emit CLI notification
+            print(f"\n[Synapse] ⚠ Agent at {percentage:.0%} context — checkpoint recommended.")
+        else:
+            message += f"Context is within limits (threshold {threshold:.1%})."
+
+        return {"should_checkpoint": should_checkpoint, "message": message}
+
 
 class SynapMCPServer:
     """Exposes Synap tools to AI agents via MCP Stdio."""
@@ -227,6 +242,12 @@ class SynapMCPServer:
         def get_pending_memory() -> dict[str, Any]:
             """Retrieve PENDING memory lessons currently awaiting human review."""
             return self.facade.get_pending_memory()
+
+        @self.mcp.tool()
+        @_wrap
+        def signal_low_context(token_count: int, capacity: int) -> dict[str, Any]:
+            """Signal that the agent is approaching context limits. Triggers a recommended checkpoint if over threshold."""
+            return self.facade.signal_low_context(token_count, capacity)
 
     async def run(self) -> None:
         await self.mcp.run_stdio_async()

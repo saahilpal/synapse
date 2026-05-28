@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import pathlib
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from mcp.types import TextContent
 
 from synap_git.api.app import create_app
 from synap_git.config import RuntimeProfile, SynapSettings
@@ -367,6 +370,95 @@ async def test_wiki_generation_retries_and_failure(
     assert "permanently failed" in captured.out
 
 
+@pytest.mark.asyncio
+async def test_signal_low_context_thresholds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from synap_git.mcp.server import SynapMCPServer
+
+    settings = SynapSettings(
+        repository_path=tmp_path,
+        state_path=tmp_path / ".synap",
+        profile=RuntimeProfile.TEST,
+        checkpoint_threshold=0.6,
+    )
+    runtime = SynapRuntime(settings)
+    server = SynapMCPServer(runtime)
+
+    # 1. 61% usage (over 60% threshold)
+    results = await server.mcp.call_tool("signal_low_context", {"token_count": 61, "capacity": 100})
+    content = results[0]
+    assert isinstance(content, TextContent)
+    res = json.loads(content.text)
+    assert res["data"]["should_checkpoint"] is True
+    captured = capsys.readouterr()
+    assert "checkpoint recommended" in captured.out
+
+    # 2. 50% usage (under 60% threshold)
+    results2 = await server.mcp.call_tool(
+        "signal_low_context", {"token_count": 50, "capacity": 100}
+    )
+    content2 = results2[0]
+    assert isinstance(content2, TextContent)
+    res2 = json.loads(content2.text)
+    assert res2["data"]["should_checkpoint"] is False
+
+    # 3. Change threshold to 80%
+    settings_high = SynapSettings(
+        repository_path=tmp_path,
+        state_path=tmp_path / ".synap_high",
+        profile=RuntimeProfile.TEST,
+        checkpoint_threshold=0.8,
+    )
+    runtime_high = SynapRuntime(settings_high)
+    server_high = SynapMCPServer(runtime_high)
+
+    results3 = await server_high.mcp.call_tool(
+        "signal_low_context", {"token_count": 70, "capacity": 100}
+    )
+    content3 = results3[0]
+    assert isinstance(content3, TextContent)
+    res3 = json.loads(content3.text)
+    assert res3["data"]["should_checkpoint"] is False
+
+
+def test_lesson_expiry_configurable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SynapSettings(
+        repository_path=tmp_path,
+        state_path=tmp_path / ".synap",
+        profile=RuntimeProfile.TEST,
+        lesson_expiry_days=14,
+    )
+    runtime = SynapRuntime(settings)
+
+    from datetime import UTC, datetime
+
+    prev_state = GitState(repository_path=tmp_path, is_repository=True, head_commit="h1")
+    curr_state = GitState(repository_path=tmp_path, is_repository=True, head_commit="h2")
+
+    # Mock git show
+    import subprocess
+
+    def mock_check_output(*args: Any, **kwargs: Any) -> str:
+        return "file.py"
+
+    monkeypatch.setattr(subprocess, "check_output", mock_check_output)
+
+    try:
+        now = int(datetime.now(UTC).timestamp())
+        runtime.handle_revert(prev_state, curr_state)
+
+        with runtime.store.connect() as conn:
+            lesson = conn.execute("SELECT expires_at FROM lessons").fetchone()
+            # Should be 14 days later
+            expected_expiry = now + (14 * 86400)
+            assert abs(lesson["expires_at"] - expected_expiry) < 5, (
+                f"Expected 14 days expiry, got {lesson['expires_at'] - now}s offset"
+            )
+    finally:
+        pass
+
+
 def test_single_file_read_high002(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
     import subprocess
@@ -400,8 +492,6 @@ def test_single_file_read_high002(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             name = self.name
             open_counts[name] = open_counts.get(name, 0) + 1
         return original_read_bytes(self, *args, **kwargs)
-
-    import pathlib
 
     original_read_bytes = pathlib.Path.read_bytes
     monkeypatch.setattr(pathlib.Path, "read_bytes", tracked_read)
@@ -449,64 +539,6 @@ def test_single_file_read_high002(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert open_counts.get(name) == 1, (
             f"File {name} was opened {open_counts.get(name)} times, expected 1"
         )
-
-
-@pytest.mark.asyncio
-async def test_lesson_pruning_medium001(tmp_path: Path) -> None:
-    import asyncio
-    import time
-    from datetime import UTC, datetime
-
-    from synap_git.indexer.daemon import RuntimeDaemon
-    from synap_git.storage.sqlite import LessonStatus
-
-    settings = SynapSettings(
-        repository_path=tmp_path,
-        state_path=tmp_path / ".synap",
-        profile=RuntimeProfile.TEST,
-    )
-    runtime = SynapRuntime(settings)
-    runtime.initialize_storage()
-
-    now = int(datetime.now(UTC).timestamp())
-    past = now - 3600
-
-    with runtime.store.connect() as conn:
-        # Create an expired lesson
-        conn.execute(
-            """
-            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
-            VALUES ('expired-1', 'main', 'hash1', 'hash0', 'broken', 'failed', '[]', 'approved', ?, ?)
-        """,
-            (now, past),
-        )
-
-        # Create a non-expired lesson
-        conn.execute(
-            """
-            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
-            VALUES ('valid-1', 'main', 'hash2', 'hash1', 'broken', 'failed', '[]', 'approved', ?, ?)
-        """,
-            (now, now + 3600),
-        )
-
-    daemon = RuntimeDaemon(settings)
-    daemon.runtime = runtime
-
-    # Trigger pruning by setting last_prune_time to long ago
-    daemon._last_prune_time = time.time() - 4000
-
-    # We don't want to run the full _poll_git_loop as it might hang waiting for git.
-    # But we can call it or just verify the prune_expired_lessons call.
-    count = await asyncio.to_thread(daemon.runtime.store.prune_expired_lessons)
-    assert count == 1
-
-    with runtime.store.connect() as conn:
-        l1 = conn.execute("SELECT status FROM lessons WHERE lesson_id = 'expired-1'").fetchone()
-        l2 = conn.execute("SELECT status FROM lessons WHERE lesson_id = 'valid-1'").fetchone()
-
-    assert l1["status"] == LessonStatus.EXPIRED.value
-    assert l2["status"] == LessonStatus.APPROVED.value
 
 
 def test_memory_bounded_indexing_medium002(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

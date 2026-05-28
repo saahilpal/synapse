@@ -58,6 +58,9 @@ class SynapSettings(BaseSettings):
 
     max_file_bytes: int = Field(default=1_000_000, ge=1_024)
 
+    checkpoint_threshold: float = 0.60
+    lesson_expiry_days: int = 7
+
     llm_provider: str | None = Field(
         default=None,
         description="LLM provider (openai, gemini, ollama). Leave empty for Mode A (structural only).",
