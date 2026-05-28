@@ -552,21 +552,84 @@ class SynapRuntime:
         from pathlib import Path
 
         edges_to_insert = []
+        source_file_ids = set()
+        candidate_paths = set()
+        module_keys = set()
+        fts_names = set()
+
+        for file_id, rel_path, imports in parsed_results:
+            source_file_ids.add(file_id)
+            current_path = Path(rel_path)
+            for imp in imports:
+                if ":" in imp:
+                    module_part, target_name = imp.split(":", 1)
+                else:
+                    module_part, target_name = imp, imp.split(".")[-1]
+
+                if module_part.startswith("."):
+                    parts = module_part.lstrip(".").split(".")
+                    dot_count = len(module_part) - len(module_part.lstrip("."))
+                    try:
+                        target_dir = current_path.parents[dot_count - 1]
+                        candidate_rel = (target_dir / "/".join(parts)).as_posix()
+                        for ext in [".py", ".ts", ".go", ".rs"]:
+                            candidate_paths.add(f"{candidate_rel}{ext}")
+                    except Exception:
+                        pass
+                else:
+                    module_keys.add(module_part)
+                fts_names.add(target_name)
 
         with self.store.connect() as conn:
+            file_symbols_map: dict[str, list[dict[str, Any]]] = {}
+            if source_file_ids:
+                sf_list = list(source_file_ids)
+                for i in range(0, len(sf_list), 900):
+                    chunk = sf_list[i : i + 900]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT file_id, symbol_id, name FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
+                        tuple(chunk),
+                    ).fetchall()
+                    for row in rows:
+                        file_symbols_map.setdefault(row["file_id"], []).append(dict(row))
+
+            path_to_file_id = {}
+            if candidate_paths:
+                paths_list = list(candidate_paths)
+                for i in range(0, len(paths_list), 900):
+                    chunk = paths_list[i : i + 900]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT file_id, path FROM files WHERE path IN ({placeholders})",  # noqa: S608
+                        tuple(chunk),
+                    ).fetchall()
+                    for row in rows:
+                        path_to_file_id[row["path"]] = row["file_id"]
+
+            module_key_to_file_id = {}
+            if module_keys:
+                mk_list = list(module_keys)
+                for i in range(0, len(mk_list), 900):
+                    chunk = mk_list[i : i + 900]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT file_id, module_key FROM files WHERE module_key IN ({placeholders})",  # noqa: S608  # nosec B608
+                        tuple(chunk),
+                    ).fetchall()
+                    for row in rows:
+                        module_key_to_file_id[row["module_key"]] = row["file_id"]
+
+            target_file_ids = set()
             for file_id, rel_path, imports in parsed_results:
-                file_symbols = self.store.get_symbols_by_file(file_id)
                 current_path = Path(rel_path)
-
                 for imp in imports:
-                    target_file_id = None
-
                     if ":" in imp:
                         module_part, target_name = imp.split(":", 1)
                     else:
                         module_part, target_name = imp, imp.split(".")[-1]
 
-                    # Relative import
+                    target_file_id = None
                     if module_part.startswith("."):
                         parts = module_part.lstrip(".").split(".")
                         dot_count = len(module_part) - len(module_part.lstrip("."))
@@ -575,41 +638,76 @@ class SynapRuntime:
                             candidate_rel = (target_dir / "/".join(parts)).as_posix()
                             for ext in [".py", ".ts", ".go", ".rs"]:
                                 cand_path = f"{candidate_rel}{ext}"
-                                row = conn.execute(
-                                    "SELECT file_id FROM files WHERE path = ?", (cand_path,)
-                                ).fetchone()
-                                if row:
-                                    target_file_id = row["file_id"]
+                                if cand_path in path_to_file_id:
+                                    target_file_id = path_to_file_id[cand_path]
                                     break
                         except Exception:
                             pass
                     else:
-                        # Absolute import
-                        row = conn.execute(
-                            "SELECT file_id FROM files WHERE module_key = ?",
-                            (module_part,),
-                        ).fetchone()
-                        if row:
-                            target_file_id = row["file_id"]
+                        target_file_id = module_key_to_file_id.get(module_part)
 
                     if target_file_id:
-                        target_rows = conn.execute(
-                            "SELECT symbol_id, name FROM symbols WHERE file_id = ?",
-                            (target_file_id,),
-                        ).fetchall()
-                        target_symbols = [dict(r) for r in target_rows if r["name"] == target_name]
+                        target_file_ids.add(target_file_id)
+
+            target_symbols_by_file: dict[str, list[dict[str, Any]]] = {}
+            if target_file_ids:
+                tf_list = list(target_file_ids)
+                for i in range(0, len(tf_list), 900):
+                    chunk = tf_list[i : i + 900]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(
+                        f"SELECT file_id, symbol_id, name FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
+                        tuple(chunk),
+                    ).fetchall()
+                    for row in rows:
+                        target_symbols_by_file.setdefault(row["file_id"], []).append(dict(row))
+
+            fts_symbols_by_name: dict[str, list[dict[str, Any]]] = {}
+            if fts_names:
+                fts_list = list(fts_names)
+                for i in range(0, len(fts_list), 900):
+                    chunk = fts_list[i : i + 900]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = conn.execute(  # nosec B608
+                        f"SELECT symbol_id, name FROM symbols WHERE name IN ({placeholders})",  # noqa: S608
+                        tuple(chunk),
+                    ).fetchall()
+                    for row in rows:
+                        fts_symbols_by_name.setdefault(row["name"], []).append(dict(row))
+
+            for file_id, rel_path, imports in parsed_results:
+                file_symbols = file_symbols_map.get(file_id, [])
+                current_path = Path(rel_path)
+
+                for imp in imports:
+                    target_file_id = None
+                    if ":" in imp:
+                        module_part, target_name = imp.split(":", 1)
                     else:
-                        clean_name = target_name.replace('"', '""')
-                        target_rows = conn.execute(
-                            """
-                            SELECT s.symbol_id, s.name
-                            FROM symbols_fts fts
-                            JOIN symbols s ON fts.symbol_id = s.symbol_id
-                            WHERE symbols_fts MATCH ?
-                            """,
-                            (f'"{clean_name}"',),
-                        ).fetchall()
-                        target_symbols = [dict(r) for r in target_rows]
+                        module_part, target_name = imp, imp.split(".")[-1]
+
+                    if module_part.startswith("."):
+                        parts = module_part.lstrip(".").split(".")
+                        dot_count = len(module_part) - len(module_part.lstrip("."))
+                        try:
+                            target_dir = current_path.parents[dot_count - 1]
+                            candidate_rel = (target_dir / "/".join(parts)).as_posix()
+                            for ext in [".py", ".ts", ".go", ".rs"]:
+                                cand_path = f"{candidate_rel}{ext}"
+                                if cand_path in path_to_file_id:
+                                    target_file_id = path_to_file_id[cand_path]
+                                    break
+                        except Exception:
+                            pass
+                    else:
+                        target_file_id = module_key_to_file_id.get(module_part)
+
+                    target_symbols = []
+                    if target_file_id:
+                        all_target_syms = target_symbols_by_file.get(target_file_id, [])
+                        target_symbols = [ts for ts in all_target_syms if ts["name"] == target_name]
+                    else:
+                        target_symbols = fts_symbols_by_name.get(target_name, [])
 
                     for ts in target_symbols:
                         for fs in file_symbols:
