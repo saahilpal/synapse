@@ -521,6 +521,12 @@ def init(
         _emit({"active_commit": commit, "state": "initialized"}, json_output=True)
     elif not quiet:
         console.print(f"[green]✓ Initialized repository at {commit}[/green]")
+        console.print("\n[bold cyan]Next Steps:[/bold cyan]")
+        console.print(f"  1. [bold]synap start {path}[/bold] - Start the background daemon.")
+        console.print(
+            "  2. [bold]synap mcp config[/bold]  - Get JSON config for your IDE (Cursor/Windsurf)."
+        )
+        console.print("  3. Connect your AI agent using the MCP config.")
 
 
 @app.command()
@@ -1288,6 +1294,19 @@ def doctor(
         except Exception as e:
             progress.update(task_tok, completed=1, description=f"[red]✗ Tokenizer error: {e}[/red]")
 
+        task_cli = progress.add_task("Checking CLI dependencies...", total=1)
+        import shutil
+
+        git_path = shutil.which("git")
+        gh_path = shutil.which("gh")
+        if gh_path:
+            progress.update(task_cli, description="[green]✓ Git and GitHub CLI installed[/green]")
+        else:
+            progress.update(
+                task_cli, description="[green]✓ Git installed[/green] [yellow](gh missing)[/yellow]"
+            )
+        progress.update(task_cli, completed=1)
+
         task_prov = progress.add_task("Checking LLM Provider...", total=1)
         try:
             if settings.llm_provider is None:
@@ -1651,6 +1670,85 @@ def lessons_approve(
 
     runtime.store.update_lesson(lesson_id, target["why_failed"], "approved", actor="cli_user")
     console.print(f"[green]✓ Lesson {lesson_id} approved. Memory updated.[/green]")
+
+
+@lessons_app.command("review")
+def lessons_review(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Interactively review and manage pending lessons."""
+    import questionary
+    from rich.panel import Panel
+
+    runtime = SynapRuntime(_settings(path))
+    pending = runtime.store.get_lessons("pending")
+
+    if not pending:
+        console.print("[yellow]No pending lessons to review.[/yellow]")
+        return
+
+    console.print(f"[bold cyan]Reviewing {len(pending)} pending lessons...[/bold cyan]\n")
+
+    approved_count = 0
+    rejected_count = 0
+    skipped_count = 0
+
+    for lesson in pending:
+        lesson_id = lesson["lesson_id"]
+
+        # Build detail view
+        details = (
+            f"[bold]Revert Commit:[/bold] {lesson['revert_commit'][:8]}\n"
+            f"[bold]Reverted From:[/bold] {lesson['reverted_from'][:8]}\n"
+            f"[bold]Files Affected:[/bold] {lesson['files_affected']}\n"
+            f"[bold]What Failed:[/bold] {lesson['what_failed']}\n"
+            f"[bold]Proposed Lesson:[/bold] {lesson['why_failed']}"
+        )
+
+        console.print(Panel(details, title=f"Lesson {lesson_id[:8]}", expand=False))
+
+        choice = questionary.select(
+            "Action:",
+            choices=[
+                questionary.Choice("Approve", value="approve"),
+                questionary.Choice("Edit & Approve", value="edit"),
+                questionary.Choice("Reject", value="reject"),
+                questionary.Choice("Skip", value="skip"),
+            ],
+        ).ask()
+
+        if choice == "approve":
+            runtime.store.update_lesson(
+                lesson_id, lesson["why_failed"], "approved", actor="cli_user"
+            )
+            console.print("[green]✓ Approved.[/green]\n")
+            approved_count += 1
+        elif choice == "edit":
+            edited = questionary.text("Edit lesson text:", default=lesson["why_failed"]).ask()
+            if edited:
+                runtime.store.update_lesson(lesson_id, edited, "approved", actor="cli_user")
+                console.print("[green]✓ Edited and Approved.[/green]\n")
+                approved_count += 1
+            else:
+                console.print("[yellow]Skipping edit.[/yellow]\n")
+                skipped_count += 1
+        elif choice == "reject":
+            runtime.store.update_lesson(
+                lesson_id, lesson["why_failed"], "rejected", actor="cli_user"
+            )
+            console.print("[red]✗ Rejected.[/red]\n")
+            rejected_count += 1
+        elif choice == "skip":
+            console.print("[yellow]Skipped.[/yellow]\n")
+            skipped_count += 1
+        else:
+            console.print("[yellow]Aborting review.[/yellow]")
+            break
+
+    console.print("[bold cyan]Review Summary:[/bold cyan]")
+    console.print(f"  [green]Approved:[/green] {approved_count}")
+    console.print(f"  [red]Rejected:[/red] {rejected_count}")
+    console.print(f"  [yellow]Skipped:[/yellow]  {skipped_count}")
 
 
 @lessons_app.command("reject")

@@ -144,7 +144,7 @@ def test_doctor_git_and_gh_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(shutil, "which", mock_which_installed)
     res_installed = runner.invoke(app, ["doctor", repo.as_posix()])
     assert res_installed.exit_code == 0, res_installed.output
-    assert "GitHub CLI (gh) installed" in res_installed.output
+    assert "Git and GitHub CLI installed" in res_installed.output
 
     # 2. Test when gh is missing (optional warning)
     def mock_which_missing(cmd: str) -> str | None:
@@ -157,7 +157,7 @@ def test_doctor_git_and_gh_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(shutil, "which", mock_which_missing)
     res_missing = runner.invoke(app, ["doctor", repo.as_posix()])
     assert res_missing.exit_code == 0, res_missing.output
-    assert "gh missing (optional)" in res_missing.output
+    assert "gh missing" in res_missing.output
 
 
 def test_database_connection_synchronous_pragma(tmp_path: Path) -> None:
