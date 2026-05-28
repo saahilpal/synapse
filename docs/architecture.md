@@ -36,20 +36,20 @@ Synap provides context across three decoupled layers to ground the coding agent:
 L1 is a deterministic mapping of codebase architecture. It extracts programming language symbols (classes, functions, methods) and parses imports to determine call and dependency edges.
 
 * **Tree-sitter Parsing:** Extracts code nodes with high AST fidelity.
-* **Unique Identification:** Every symbol is mapped by a primary key of `sha256(path + content_hash)` to eliminate duplication and collision.
-* **SQLite Graph Traversal:** Relations and call dependencies are stored in an SQL schema, traversed dynamically using SQLite Recursive Common Table Expressions (CTEs).
+* **Unique Identification:** Maps every symbol by a primary key of `sha256(path + content_hash)` to eliminate duplication and collision.
+* **SQLite Graph Traversal:** Stores relations and call dependencies in an SQL schema, traversed dynamically using SQLite Recursive Common Table Expressions (CTEs).
 
 ### Layer 2: Semantic Documentation (L2)
 
 L2 provides human-readable context in the form of markdown summaries. It represents file, module, and project descriptions stored under `.synap/wiki/`.
 
-* **Asynchronous LLM Worker:** Slow, non-deterministic LLM wiki generation is decoupled from the indexing pipeline. The daemon enqueues tasks to a persistent queue (`wiki_queue`) and processes them in the background.
-* **Lazy Cache Fallback:** If the CLI, Web API, or MCP tools request an ungenerated or stale wiki page, Synap triggers a synchronous generation pass to update the cache on the fly.
+* **Asynchronous LLM Worker:** Decouples slow, non-deterministic LLM wiki generation from the indexing pipeline. The daemon enqueues tasks to a persistent queue (`wiki_queue`) and processes them in the background.
+* **Lazy Cache Fallback:** Triggers a synchronous generation pass to update the cache on the fly if the CLI, Web API, or MCP tools request an ungenerated or stale wiki page.
 
 ### Layer 3: Behavioral Memory (L3)
 
 L3 represents developer-in-the-loop memory that captures current tasks, design patterns, and past failures.
 
-* **Checkpoints:** A state snapshot containing the active task description (`doing`), files affected, next steps, and blockers.
-* **Decisions:** Structured technical and architectural decisions logged by the agent.
-* **Lessons:** Stored rules generated automatically when a commit is reverted (detected via the Git commit ancestor graph). Active, approved lessons are prepended as system instructions during agent context packaging.
+* **Checkpoints:** Captures the state snapshot containing the active task description (`doing`), files affected, next steps, and blockers.
+* **Decisions:** Logs technical and architectural decisions made by the agent.
+* **Lessons:** Evaluates and stores rules generated automatically when a commit is reverted (detected via the Git commit ancestor graph). Active, approved lessons are prepended as system instructions during agent context packaging.

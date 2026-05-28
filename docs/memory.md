@@ -6,7 +6,7 @@ The L3 layer represents stateful memory that allows AI coding agents to preserve
 
 ## 1. Context Checkpoints
 
-Checkpoints store the state of active agent tasks to resume context seamlessly.
+Checkpoints store the state of active agent tasks to resume context without losing progress.
 
 * **Checkpoints Fields:**
   * `checkpoint_id` (UUID string) — Primary key.
