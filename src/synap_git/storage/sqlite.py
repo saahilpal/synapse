@@ -261,21 +261,19 @@ class SynapStore:
                 parts = parts[:-1]
             module_key = ".".join(parts)
 
+            # Handle file_id change due to content change (SPEC-001)
+            # We delete the old file and its symbols to avoid FK constraint violations
+            # when the file_id changes.
+            conn.execute("DELETE FROM files WHERE path = ?", (path,))
+
             conn.execute(
                 """
                 INSERT INTO files (file_id, path, git_oid, content_hash, language, module_key, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(path) DO UPDATE SET
-                    file_id = excluded.file_id,
-                    git_oid = excluded.git_oid,
-                    content_hash = excluded.content_hash,
-                    language = excluded.language,
-                    module_key = excluded.module_key,
-                    updated_at = excluded.updated_at
                 """,
                 (file_id, path, git_oid, content_hash, language, module_key, now),
             )
-            # Delete old symbols (trigger triggers delete from symbols_fts automatically)
+            # Delete any symbols for the NEW file_id just in case of a collision or prior partial run
             conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
 
             # Batch insert symbols
