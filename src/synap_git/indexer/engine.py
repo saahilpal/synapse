@@ -15,12 +15,12 @@ from synap_git.storage.sqlite import SynapStore
 from synap_git.utils.serialization import stable_hash
 
 
-def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
+def _parse_worker(args: tuple[Path, str, str | None]) -> dict[str, Any]:
     from synap_git.parser.registry import CodeParserRegistry
 
-    path, rel_path = args
+    path, rel_path, content = args
     registry = CodeParserRegistry()
-    res = registry.parse(path, relative_path=rel_path)
+    res = registry.parse(path, relative_path=rel_path, text=content)
     return {
         "path": res.path,
         "language": res.language,
@@ -250,7 +250,7 @@ class SynapRuntime:
 
         files_to_parse = []
         for file_info in scan.files:
-            files_to_parse.append((file_info.path, file_info.relative_path))
+            files_to_parse.append((file_info.path, file_info.relative_path, file_info.content))
 
         num_files = len(files_to_parse)
         chunk_size = 500
@@ -505,7 +505,7 @@ class SynapRuntime:
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
 
-            parse_result = registry.parse(p, relative_path=rel_path)
+            parse_result = registry.parse(p, relative_path=rel_path, text=content)
             symbols_list = [
                 {
                     "symbol_id": sym.stable_id,

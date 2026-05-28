@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -231,7 +232,6 @@ async def test_wiki_generation_retries_and_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import asyncio
-    from typing import Any
 
     from synap_git.indexer.daemon import RuntimeDaemon
     from synap_git.provider.base import LLMResponse
@@ -365,3 +365,87 @@ async def test_wiki_generation_retries_and_failure(
 
     captured = capsys.readouterr()
     assert "permanently failed" in captured.out
+
+
+def test_single_file_read_high002(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil
+    import subprocess
+
+    # Create a repo with 10 files
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.name", "Test"], cwd=repo, check=True)
+
+    for i in range(10):
+        (repo / f"file{i}.py").write_text(f"def func{i}(): pass", encoding="utf-8")
+
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "init"], cwd=repo, check=True)
+
+    settings = SynapSettings(
+        repository_path=repo,
+        state_path=repo / ".synap",
+        profile=RuntimeProfile.TEST,
+    )
+    runtime = SynapRuntime(settings)
+
+    open_counts: dict[str, int] = {}
+
+    def tracked_read(self: pathlib.Path, *args: Any, **kwargs: Any) -> bytes:
+        path_str = str(self)
+        if path_str.endswith(".py") and "repo" in path_str:
+            name = self.name
+            open_counts[name] = open_counts.get(name, 0) + 1
+        return original_read_bytes(self, *args, **kwargs)
+
+    import pathlib
+
+    original_read_bytes = pathlib.Path.read_bytes
+    monkeypatch.setattr(pathlib.Path, "read_bytes", tracked_read)
+
+    def tracked_read_text(self: pathlib.Path, *args: Any, **kwargs: Any) -> str:
+        path_str = str(self)
+        if path_str.endswith(".py") and "repo" in path_str:
+            name = self.name
+            open_counts[name] = open_counts.get(name, 0) + 1
+        return original_read_text(self, *args, **kwargs)
+
+    original_read_text = pathlib.Path.read_text
+    monkeypatch.setattr(pathlib.Path, "read_text", tracked_read_text)
+
+    # Use single worker to avoid issues with monkeypatching in subprocesses
+    # Wait, ProcessPoolExecutor workers won't see the monkeypatch!
+    # I should temporarily patch SynapRuntime to use 0 workers (sync) or just verify scanner vs parser.
+    # Actually, if I run with num_workers=0 (or 1 but it might still fork).
+    # Let's patch ProcessPoolExecutor to run synchronously for this test.
+    from concurrent.futures import Executor, Future
+
+    class SyncExecutor(Executor):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
+            f: Future[Any] = Future()
+            f.set_result(fn(*args))
+            return f
+
+        def __enter__(self) -> SyncExecutor:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    import concurrent.futures
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", SyncExecutor)
+
+    runtime.bootstrap(force=True)
+
+    for i in range(10):
+        name = f"file{i}.py"
+        assert open_counts.get(name) == 1, (
+            f"File {name} was opened {open_counts.get(name)} times, expected 1"
+        )

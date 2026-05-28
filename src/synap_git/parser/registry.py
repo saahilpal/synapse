@@ -54,9 +54,10 @@ class CodeParserRegistry:
             self._parsers[lang_name] = parser
         return self._parsers[lang_name]
 
-    def parse(self, path: Path, *, relative_path: str) -> CodeParseResult:
+    def parse(self, path: Path, *, relative_path: str, text: str | None = None) -> CodeParseResult:
         suffix = path.suffix.lower()
-        text = path.read_text(encoding="utf-8", errors="replace")
+        if text is None:
+            text = path.read_text(encoding="utf-8", errors="replace")
 
         if suffix in PYTHON_SUFFIXES:
             return self._parse_tree_sitter(text, "python", relative_path)

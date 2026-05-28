@@ -65,6 +65,7 @@ class FileObservation:
     content_hash: str
     language: str | None
     folder_role: FolderRole
+    content: str | None = None
     is_manifest: bool = False
     git_oid: str | None = None
 
@@ -249,7 +250,7 @@ class RepositoryScanner:
                 path.resolve().relative_to(self.repository_path)
             except (ValueError, OSError):
                 continue
-            content_hash = _hash_file(path)
+            content_hash, content_text = _read_and_hash_file(path)
             language = LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
             folder_role = self._classify_folder(relative_path)
             is_manifest = path.name in MANIFEST_NAMES
@@ -260,6 +261,7 @@ class RepositoryScanner:
                 content_hash=content_hash,
                 language=language,
                 folder_role=folder_role,
+                content=content_text,
                 is_manifest=is_manifest,
             )
             files.append(observation)
@@ -397,6 +399,17 @@ def _is_binary_file(path: Path) -> bool:
     except Exception:
         return True
     return False
+
+
+def _read_and_hash_file(path: Path) -> tuple[str, str]:
+    digest = hashlib.sha256()
+    content_bytes = path.read_bytes()
+    digest.update(content_bytes)
+    try:
+        content_text = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        content_text = content_bytes.decode("utf-8", errors="replace")
+    return digest.hexdigest(), content_text
 
 
 def _hash_file(path: Path) -> str:
