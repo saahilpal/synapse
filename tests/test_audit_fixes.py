@@ -449,3 +449,61 @@ def test_single_file_read_high002(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert open_counts.get(name) == 1, (
             f"File {name} was opened {open_counts.get(name)} times, expected 1"
         )
+
+
+@pytest.mark.asyncio
+async def test_lesson_pruning_medium001(tmp_path: Path) -> None:
+    import asyncio
+    import time
+    from datetime import UTC, datetime
+
+    from synap_git.indexer.daemon import RuntimeDaemon
+    from synap_git.storage.sqlite import LessonStatus
+
+    settings = SynapSettings(
+        repository_path=tmp_path,
+        state_path=tmp_path / ".synap",
+        profile=RuntimeProfile.TEST,
+    )
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    now = int(datetime.now(UTC).timestamp())
+    past = now - 3600
+
+    with runtime.store.connect() as conn:
+        # Create an expired lesson
+        conn.execute(
+            """
+            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
+            VALUES ('expired-1', 'main', 'hash1', 'hash0', 'broken', 'failed', '[]', 'approved', ?, ?)
+        """,
+            (now, past),
+        )
+
+        # Create a non-expired lesson
+        conn.execute(
+            """
+            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
+            VALUES ('valid-1', 'main', 'hash2', 'hash1', 'broken', 'failed', '[]', 'approved', ?, ?)
+        """,
+            (now, now + 3600),
+        )
+
+    daemon = RuntimeDaemon(settings)
+    daemon.runtime = runtime
+
+    # Trigger pruning by setting last_prune_time to long ago
+    daemon._last_prune_time = time.time() - 4000
+
+    # We don't want to run the full _poll_git_loop as it might hang waiting for git.
+    # But we can call it or just verify the prune_expired_lessons call.
+    count = await asyncio.to_thread(daemon.runtime.store.prune_expired_lessons)
+    assert count == 1
+
+    with runtime.store.connect() as conn:
+        l1 = conn.execute("SELECT status FROM lessons WHERE lesson_id = 'expired-1'").fetchone()
+        l2 = conn.execute("SELECT status FROM lessons WHERE lesson_id = 'valid-1'").fetchone()
+
+    assert l1["status"] == LessonStatus.EXPIRED.value
+    assert l2["status"] == LessonStatus.APPROVED.value

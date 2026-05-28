@@ -34,6 +34,7 @@ class RuntimeDaemon:
         self._port = 9876
         self._last_metrics_time: float = 0.0
         self._last_cpu_time: float = 0.0
+        self._last_prune_time: float = 0.0
 
     async def start(self) -> None:
         self.runtime.initialize_storage()
@@ -261,6 +262,15 @@ class RuntimeDaemon:
     async def _poll_git_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
+                # Periodic pruning (once per hour)
+                now = time.time()
+                if now - self._last_prune_time > 3600:
+                    self._last_prune_time = now
+                    count = await asyncio.to_thread(self.runtime.store.prune_expired_lessons)
+                    if count > 0:
+                        self.logger.info("lessons_pruned", count=count)
+                        print(f"\n[Synapse] Pruned {count} expired lessons.")
+
                 state = self.git.state()
                 change = self.git.classify(self._last_git_state, state)
                 self._last_git_state = state
