@@ -970,7 +970,24 @@ def update() -> None:
 
     console.print(f"Latest version on PyPI: [bold]{latest_version}[/bold]")
 
-    if current_version == latest_version and install_method != "editable":
+    def is_newer(v_remote: str, v_local: str) -> bool:
+        try:
+            # Attempt to use packaging if available
+            from packaging.version import Version
+
+            return Version(v_remote) > Version(v_local)
+        except (ImportError, Exception):
+            # Fallback to simple semver tuple comparison
+            try:
+
+                def _to_tuple(v: str) -> tuple[int, ...]:
+                    return tuple(int(x) for x in v.split(".") if x.isdigit())
+
+                return _to_tuple(v_remote) > _to_tuple(v_local)
+            except Exception:
+                return v_remote != v_local
+
+    if not is_newer(latest_version, current_version) and install_method != "editable":
         console.print("[green]✓ Synap is already up to date.[/green]")
         return
 
@@ -978,7 +995,11 @@ def update() -> None:
         console.print("\n[yellow]Editable installation detected. Updating via git pull...[/yellow]")
         try:
             subprocess.run(["git", "pull", "origin", "main"], check=True)
-            subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+            # Try pip, then uv
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+            except Exception:
+                subprocess.run(["uv", "pip", "install", "-e", "."], check=True)
             console.print(
                 "[green]✓ Update successful (Git repository pulled and re-installed)[/green]"
             )
@@ -1003,7 +1024,17 @@ def update() -> None:
         f"\n[yellow]Upgrading Synap to {latest_version} using: {' '.join(cmd)}...[/yellow]"
     )
     try:
-        subprocess.run(cmd, check=True)
+        try:
+            subprocess.run(cmd, check=True)
+        except Exception as e:
+            if install_method == "venv" or install_method == "pip":
+                # Fallback to uv if pip fails/is missing
+                console.print(
+                    "[yellow]Pip failed or missing. Attempting upgrade via uv...[/yellow]"
+                )
+                subprocess.run(["uv", "pip", "install", "--upgrade", "synap-git"], check=True)
+            else:
+                raise e
         console.print("[green]✓ Update successful[/green]")
     except Exception as e:
         console.print(f"[bold red]✗ Upgrade failed:[/bold red] {e}")
