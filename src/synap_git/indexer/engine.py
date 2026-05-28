@@ -308,7 +308,9 @@ class SynapRuntime:
 
                             import hashlib
 
-                            file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+                            file_id_hash = hashlib.sha256(
+                                (rel_path + content_hash).encode("utf-8")
+                            ).hexdigest()
 
                             self.store.upsert_file_and_symbols(
                                 file_id=file_id_hash,
@@ -340,7 +342,9 @@ class SynapRuntime:
 
                         import hashlib
 
-                        file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+                        file_id_hash = hashlib.sha256(
+                            (rel_path + content_hash).encode("utf-8")
+                        ).hexdigest()
 
                         self.store.upsert_file_and_symbols(
                             file_id=file_id_hash,
@@ -499,7 +503,7 @@ class SynapRuntime:
             import hashlib
 
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-            file_id_hash = hashlib.sha256(rel_path.encode()).hexdigest()
+            file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
 
             parse_result = registry.parse(p, relative_path=rel_path)
             symbols_list = [

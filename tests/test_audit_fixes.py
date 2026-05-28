@@ -169,3 +169,199 @@ def test_database_connection_synchronous_pragma(tmp_path: Path) -> None:
         sync_mode = conn.execute("PRAGMA synchronous").fetchone()[0]
         # NORMAL maps to 1 in SQLite
         assert sync_mode == 1, f"Expected synchronous mode 1 (NORMAL), got {sync_mode}"
+
+
+def test_file_id_hashing_spec001(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    # 1. Create two empty files at different paths, verify they get different file_ids
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.name", "Test"], cwd=repo, check=True)
+
+    (repo / "fileA.py").write_text("", encoding="utf-8")
+    (repo / "fileB.py").write_text("", encoding="utf-8")
+
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "init"], cwd=repo, check=True)
+
+    settings = SynapSettings(
+        repository_path=repo,
+        state_path=repo / ".synap",
+        profile=RuntimeProfile.TEST,
+    )
+    runtime = SynapRuntime(settings)
+    runtime.bootstrap(force=True)
+
+    with runtime.store.connect() as conn:
+        file_a = conn.execute(
+            "SELECT file_id, content_hash FROM files WHERE path = 'fileA.py'"
+        ).fetchone()
+        file_b = conn.execute(
+            "SELECT file_id, content_hash FROM files WHERE path = 'fileB.py'"
+        ).fetchone()
+
+    assert file_a["file_id"] != file_b["file_id"], (
+        "Different files with same content must have different IDs"
+    )
+    assert file_a["content_hash"] == file_b["content_hash"]
+
+    # 2. Change a file's content, verify the file_id changes
+    old_id = file_a["file_id"]
+    (repo / "fileA.py").write_text("def a(): pass", encoding="utf-8")
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "update fileA"], cwd=repo, check=True)
+
+    runtime.index_repository()
+
+    with runtime.store.connect() as conn:
+        file_a_updated = conn.execute(
+            "SELECT file_id FROM files WHERE path = 'fileA.py'"
+        ).fetchone()
+
+    assert file_a_updated["file_id"] != old_id, "file_id must change when content changes"
+
+
+@pytest.mark.asyncio
+async def test_wiki_generation_retries_and_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+    from typing import Any
+
+    from synap_git.indexer.daemon import RuntimeDaemon
+    from synap_git.provider.base import LLMResponse
+
+    # Create a repo
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    import shutil
+    import subprocess
+
+    git_bin = shutil.which("git") or "git"
+    subprocess.run([git_bin, "init", "-b", "main"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run([git_bin, "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "fileA.py").write_text("def a(): pass", encoding="utf-8")
+    (repo / "fileB.py").write_text("def b(): pass", encoding="utf-8")
+    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
+    subprocess.run([git_bin, "commit", "-m", "init"], cwd=repo, check=True)
+
+    settings = SynapSettings(
+        repository_path=repo,
+        state_path=repo / ".synap",
+        profile=RuntimeProfile.TEST,
+        daemon_poll_interval_seconds=0.1,  # fast poll
+    )
+
+    runtime = SynapRuntime(settings)
+    runtime.bootstrap(force=True)
+
+    # Mock provider
+    class MockFailingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.default_model = "test"
+
+        def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> LLMResponse:
+            self.calls += 1
+            if self.calls <= 2:
+                raise TimeoutError("Simulated network timeout")
+            # Succeed on the 3rd attempt if asked
+            if self.calls == 3:
+                return LLMResponse("Success content", 10, 10, 0)
+            raise RuntimeError("Unexpected call")
+
+        def generate_embedding(self, text: str) -> list[float]:
+            return [0.1]
+
+        def count_tokens(self, text: str) -> int:
+            return 10
+
+    provider: Any = MockFailingProvider()
+    runtime.wiki.provider = provider
+
+    # 1. Fail twice then succeed
+    daemon = RuntimeDaemon(settings)
+    daemon.runtime = runtime
+    daemon.git = runtime.git
+
+    # Ensure there's a task in queue for fileA.py
+    with runtime.store.connect() as conn:
+        conn.execute("DELETE FROM wiki_queue")
+        conn.execute(
+            "INSERT INTO wiki_queue (task_id, file_path, status, attempts, created_at, updated_at) VALUES ('test-task-' || hex(randomblob(4)), 'fileA.py', 'pending', 0, 0, 0)"
+        )
+
+    # We will run the worker loop briefly
+    worker_task = asyncio.create_task(daemon._wiki_worker_loop())
+
+    # wait enough for 3 attempts. Backoff sleeps: attempt 1 -> 2^1=2s, attempt 2 -> 4s.
+    for _ in range(100):
+        with runtime.store.connect() as conn:
+            row = conn.execute(
+                "SELECT status, attempts FROM wiki_queue WHERE file_path = 'fileA.py'"
+            ).fetchone()
+            if row is None or row["status"] in ("completed", "failed"):
+                break
+        await asyncio.sleep(0.1)
+
+    assert row is None or row["status"] == "completed"
+    assert provider.calls == 3  # Failed twice, succeeded on 3rd
+
+    daemon.stop()
+    await worker_task
+
+    # 2. Fail 3 times and check visible warning
+    class MockAlwaysFailingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.default_model = "test"
+
+        def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> LLMResponse:
+            self.calls += 1
+            raise TimeoutError("Simulated network timeout")
+
+        def generate_embedding(self, text: str) -> list[float]:
+            return [0.1]
+
+        def count_tokens(self, text: str) -> int:
+            return 10
+
+    provider2: Any = MockAlwaysFailingProvider()
+    runtime.wiki.provider = provider2
+
+    with runtime.store.connect() as conn:
+        conn.execute("DELETE FROM wiki_queue")
+        conn.execute(
+            "INSERT INTO wiki_queue (task_id, file_path, status, attempts, created_at, updated_at) VALUES ('test-task-' || hex(randomblob(4)), 'fileB.py', 'pending', 0, 0, 0)"
+        )
+
+    daemon2 = RuntimeDaemon(settings)
+    daemon2.runtime = runtime
+    daemon2.git = runtime.git
+
+    worker_task2 = asyncio.create_task(daemon2._wiki_worker_loop())
+
+    for _ in range(100):
+        with runtime.store.connect() as conn:
+            row2 = conn.execute(
+                "SELECT status, attempts FROM wiki_queue WHERE file_path = 'fileB.py'"
+            ).fetchone()
+            if row2 is None or row2["status"] in ("completed", "failed"):
+                break
+        await asyncio.sleep(0.1)
+
+    assert row2 is not None
+    assert row2["status"] == "failed"
+    assert provider2.calls == 3
+
+    daemon2.stop()
+    await worker_task2
+
+    captured = capsys.readouterr()
+    assert "permanently failed" in captured.out

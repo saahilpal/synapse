@@ -199,6 +199,31 @@ class SynapStore:
                     );
                 """)
                 conn.execute("PRAGMA user_version = 2")
+                current_version = 2
+
+            if current_version < 3:
+                # Migrate file_ids to include content_hash (SPEC-001)
+                import hashlib
+
+                conn.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    rows = conn.execute("SELECT file_id, path, content_hash FROM files").fetchall()
+                    for row in rows:
+                        old_id = row["file_id"]
+                        path = row["path"]
+                        content_hash = row["content_hash"] or ""
+                        new_id = hashlib.sha256((path + content_hash).encode("utf-8")).hexdigest()
+                        if old_id != new_id:
+                            conn.execute(
+                                "UPDATE files SET file_id = ? WHERE file_id = ?", (new_id, old_id)
+                            )
+                            conn.execute(
+                                "UPDATE symbols SET file_id = ? WHERE file_id = ?", (new_id, old_id)
+                            )
+                finally:
+                    conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA user_version = 3")
+                current_version = 3
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
