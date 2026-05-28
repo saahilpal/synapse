@@ -2,10 +2,10 @@
 
 Local Git-aware structural context engine for AI coding agents.
 
-[![CI Status](https://github.com/saahilpal/synap-git/actions/workflows/ci.yml/badge.svg)](https://github.com/saahilpal/synap-git/actions)
-[![Version](https://img.shields.io/pypi/v/synap-git?color=3b82f6)](https://img.shields.io/project/synap-git/)
-[![Python Version](https://img.shields.io/pypi/pyversions/synap-git)](https://img.shields.io/project/synap-git/)
-[![License](https://img.shields.io/github/license/saahilpal/synap-git?color=cbd5e1)](LICENSE.md)
+[![CI Status](https://github.com/saahilpal/synapse/actions/workflows/ci.yml/badge.svg)](https://github.com/saahilpal/synapse/actions)
+[![Version](https://img.shields.io/pypi/v/synap-git?color=3b82f6)](https://pypi.org/project/synap-git/)
+[![Python Version](https://img.shields.io/pypi/pyversions/synap-git)](https://pypi.org/project/synap-git/)
+[![License](https://img.shields.io/github/license/saahilpal/synapse?color=cbd5e1)](LICENSE.md)
 
 ## The Problem
 
