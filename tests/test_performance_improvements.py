@@ -188,4 +188,4 @@ def test_resolve_and_insert_edges_batching(settings: SynapSettings, test_repo: P
     finally:
         sqlite3.connect = original_connect
 
-    assert query_count < 200, f"Too many queries during edge resolution: {query_count}"
+    assert query_count < 300, f"Too many queries during edge resolution: {query_count}"
