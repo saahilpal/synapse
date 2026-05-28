@@ -120,22 +120,22 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-mcp_app = typer.Typer(help="Model Context Protocol (MCP) server commands.")
+mcp_app = typer.Typer(help="Model Context Protocol (MCP) server commands.", no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
 
-memory_app = typer.Typer(help="Manage L3 Agent Memory.")
+memory_app = typer.Typer(help="Manage L3 Agent Memory.", no_args_is_help=True)
 app.add_typer(memory_app, name="memory")
 
-lessons_app = typer.Typer(help="Manage Agent Lessons.")
+lessons_app = typer.Typer(help="Manage Agent Lessons.", no_args_is_help=True)
 app.add_typer(lessons_app, name="lessons")
 
-checkpoint_app = typer.Typer(help="Manage Context Checkpoints.")
+checkpoint_app = typer.Typer(help="Manage Context Checkpoints.", no_args_is_help=True)
 app.add_typer(checkpoint_app, name="checkpoint")
 
-wiki_app = typer.Typer(help="Manage L2 Wiki Documentation.")
+wiki_app = typer.Typer(help="Manage L2 Wiki Documentation.", no_args_is_help=True)
 app.add_typer(wiki_app, name="wiki")
 
-usage_app = typer.Typer(help="View AI Usage Tracking.")
+usage_app = typer.Typer(help="View AI Usage Tracking.", no_args_is_help=True)
 app.add_typer(usage_app, name="usage")
 
 
@@ -481,17 +481,26 @@ ollama_url = "{ollama_url}"
 
 def _auto_protect_synap(repository_path: Path) -> None:
     gitignore_path = repository_path / ".gitignore"
+    patterns = [".synap/", ".synapse/", ".synapse/*-wal", ".synapse/*-shm"]
+
     if not gitignore_path.exists():
-        gitignore_path.write_text(".synap/\n")
+        gitignore_path.write_text("\n".join(patterns) + "\n")
         return
 
     content = gitignore_path.read_text()
-    lines = content.splitlines()
-    if ".synap/" not in lines and ".synap" not in lines:
-        if content and not content.endswith("\n"):
-            content += "\n"
-        content += ".synap/\n"
-        gitignore_path.write_text(content)
+    lines = [line.strip() for line in content.splitlines()]
+
+    new_content = content
+    added = False
+    for p in patterns:
+        if p.strip() not in lines and p.strip().rstrip("/") not in lines:
+            if not new_content.endswith("\n"):
+                new_content += "\n"
+            new_content += p + "\n"
+            added = True
+
+    if added:
+        gitignore_path.write_text(new_content)
 
 
 @app.command()
@@ -889,6 +898,7 @@ def logs(
     tail: Annotated[
         bool, typer.Option("--tail", "-t", help="Stream new log entries in real-time.")
     ] = False,
+    lines: Annotated[int, typer.Option("--lines", "-n", help="Number of last lines to show.")] = 50,
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Show verbose debug and trace logs.")
     ] = False,
@@ -906,8 +916,8 @@ def logs(
     try:
         with open(log_file, encoding="utf-8") as f:
             if not tail:
-                lines = f.readlines()
-                for line in lines[-50:]:
+                all_lines = f.readlines()
+                for line in all_lines[-lines:]:
                     if not debug and '"level": "debug"' in line.lower():
                         continue
                     console.print(line.strip())
@@ -1445,54 +1455,62 @@ def mcp_verify(
     table.add_column("Latency (ms)")
     table.add_column("Details")
 
-    def _simulate_mcp_call(tool_name: str, *args: Any, **kwargs: Any) -> bool:
-        start = time.monotonic()
-        try:
-            import uuid
+    with console.status(
+        "[bold yellow]Verifying MCP transport and tools...[/bold yellow]"
+    ) as status:
 
-            status = facade.runtime.status()
-            dirty = status.is_dirty
-            warnings = ["Working tree is dirty. Index may be stale."] if dirty else []
+        def _simulate_mcp_call(tool_name: str, *args: Any, **kwargs: Any) -> bool:
+            status.update(
+                f"[bold yellow]Verifying stage: [white]{tool_name}[/white]...[/bold yellow]"
+            )
+            start = time.monotonic()
+            try:
+                import uuid
 
-            method = getattr(facade, tool_name)
-            data = method(*args, **kwargs)
+                status_info = facade.runtime.status()
+                dirty = status_info.is_dirty
+                warnings = ["Working tree is dirty. Index may be stale."] if dirty else []
 
-            response = {
-                "ok": True,
-                "data": data,
-                "warnings": warnings,
-                "trace_id": str(uuid.uuid4()),
-                "dirty_tree": dirty,
-            }
+                method = getattr(facade, tool_name)
+                data = method(*args, **kwargs)
 
-            # Verify strict schema
-            assert "ok" in response
-            assert "data" in response
-            assert "warnings" in response
-            assert "trace_id" in response
-            assert "dirty_tree" in response
+                response = {
+                    "ok": True,
+                    "data": data,
+                    "warnings": warnings,
+                    "trace_id": str(uuid.uuid4()),
+                    "dirty_tree": dirty,
+                }
 
-            latency = (time.monotonic() - start) * 1000
+                # Verify strict schema
+                assert "ok" in response
+                assert "data" in response
+                assert "warnings" in response
+                assert "trace_id" in response
+                assert "dirty_tree" in response
 
-            if tool_name == "search":
-                # Check trace payload exists
-                assert "trace" in data, "Trace payload missing in search data"
+                latency = (time.monotonic() - start) * 1000
 
-            details = f"keys: {list(data.keys())}"
-            table.add_row(tool_name, "[green]PASS[/green]", f"{latency:.1f}", details)
-            return True
-        except Exception as e:
-            latency = (time.monotonic() - start) * 1000
-            table.add_row(tool_name, "[red]FAIL[/red]", f"{latency:.1f}", str(e))
-            return False
+                if tool_name == "search":
+                    # Check trace payload exists
+                    assert "trace" in data, "Trace payload missing in search data"
 
-    results = [
-        _simulate_mcp_call("get_status"),
-        _simulate_mcp_call("verify_system"),
-        _simulate_mcp_call("search", "User"),
-        _simulate_mcp_call("create_checkpoint", "Testing MCP", ["test.py"], "Next", "None"),
-        _simulate_mcp_call("restore_checkpoint", "latest"),
-    ]
+                details = f"keys: {list(data.keys())}"
+                table.add_row(tool_name, "[green]PASS[/green]", f"{latency:.1f}", details)
+                time.sleep(0.1)  # Visual breathing room
+                return True
+            except Exception as e:
+                latency = (time.monotonic() - start) * 1000
+                table.add_row(tool_name, "[red]FAIL[/red]", f"{latency:.1f}", str(e))
+                return False
+
+        results = [
+            _simulate_mcp_call("get_status"),
+            _simulate_mcp_call("verify_system"),
+            _simulate_mcp_call("search", "User"),
+            _simulate_mcp_call("create_checkpoint", "Testing MCP", ["test.py"], "Next", "None"),
+            _simulate_mcp_call("restore_checkpoint", "latest"),
+        ]
 
     console.print(table)
 
@@ -1775,16 +1793,14 @@ def lessons_reject(
 @checkpoint_app.command("create")
 def checkpoint_create(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-    doing: Annotated[str, typer.Option(help="What the agent is currently doing.")] = "",
+    doing: Annotated[
+        str, typer.Option(help="What the agent is currently doing.")
+    ] = "Manual snapshot",
     files: Annotated[str, typer.Option(help="Comma-separated list of changed files.")] = "",
     next_step: Annotated[str, typer.Option(help="The next step to be taken.")] = "",
     blockers: Annotated[str, typer.Option(help="Current blockers or obstacles.")] = "",
 ) -> None:
     """Create a new context checkpoint."""
-    if not doing:
-        console.print("[red]✗ The --doing option is required.[/red]")
-        raise typer.Exit(1)
-
     runtime = SynapRuntime(_settings(path))
     import uuid
 

@@ -106,26 +106,20 @@ class RuntimeDaemon:
             if self.settings.profile == RuntimeProfile.TEST:
                 self._ui_server.force_exit = True
 
-            # Allow uvicorn to shut down gracefully if it's running
-            if self._ui_server.started:
-                try:
-                    await asyncio.wait_for(
-                        server_task, timeout=self.settings.shutdown_timeout_seconds
-                    )
-                except (TimeoutError, asyncio.CancelledError):
-                    self.logger.warning("daemon_uvicorn_graceful_shutdown_failed")
+            # Allow uvicorn and wiki worker to shut down gracefully
+            timeout = self.settings.shutdown_timeout_seconds
+            self.logger.info("daemon_waiting_for_tasks", timeout=timeout)
 
-            if not server_task.done():
-                server_task.cancel()
-                try:
-                    await server_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            tasks = [server_task, wiki_worker_task]
+            done, pending = await asyncio.wait(
+                tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
+            )
 
-            if not wiki_worker_task.done():
-                wiki_worker_task.cancel()
+            for task in pending:
+                self.logger.warning("daemon_force_cancelling_task", task=task.get_coro())
+                task.cancel()
                 try:
-                    await wiki_worker_task
+                    await task
                 except (asyncio.CancelledError, Exception):
                     pass
 
@@ -133,7 +127,9 @@ class RuntimeDaemon:
             self.logger.info("daemon_stopped")
 
     def stop(self) -> None:
-        self._stop_event.set()
+        if not self._stop_event.is_set():
+            self.logger.info("daemon_stop_requested")
+            self._stop_event.set()
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
@@ -325,8 +321,23 @@ class RuntimeDaemon:
 
     async def _wiki_worker_loop(self) -> None:
         self.logger.info("wiki_worker_started")
+        from rich.console import Console
+
+        from synap_git.config import LoggingMode
+
+        console = Console()
+
         while not self._stop_event.is_set():
             try:
+                # Check queue depth for progress context
+                try:
+                    with self.runtime.store.connect() as conn:
+                        total_pending = conn.execute(
+                            "SELECT COUNT(*) FROM wiki_queue WHERE status = 'pending'"
+                        ).fetchone()[0]
+                except Exception:
+                    total_pending = 0
+
                 task = await asyncio.to_thread(self.runtime.store.dequeue_wiki)
                 if task:
                     task_id = task["task_id"]
@@ -336,17 +347,59 @@ class RuntimeDaemon:
                     self.logger.info("wiki_worker_processing_task", path=file_path)
 
                     if attempts > 0:
-                        await asyncio.sleep(2**attempts)
+                        await asyncio.sleep(min(30, 2**attempts))
 
+                    start_time = time.time()
                     try:
-                        await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
+                        if self.settings.logging_mode == LoggingMode.HUMAN:
+                            with console.status(
+                                f"[bold cyan][Wiki][/bold cyan] Generating: [white]{file_path}[/white] (0.0s) ({total_pending} remaining)"
+                            ) as status:
+                                # Update status periodically with elapsed time
+                                async def _update_status(
+                                    st: float = start_time,
+                                    fp: str = file_path,
+                                    tp: int = total_pending,
+                                ) -> None:
+                                    try:
+                                        while True:
+                                            await asyncio.sleep(0.1)
+                                            elapsed = time.time() - st
+                                            status.update(
+                                                f"[bold cyan][Wiki][/bold cyan] Generating: [white]{fp}[/white] [dim]({elapsed:.1f}s)[/dim] ({tp} remaining)"
+                                            )
+                                    except asyncio.CancelledError:
+                                        pass
+
+                                status_task = asyncio.create_task(_update_status())
+                                try:
+                                    await asyncio.to_thread(
+                                        self.runtime.wiki.ensure_wiki_page, file_path
+                                    )
+                                finally:
+                                    status_task.cancel()
+                                    try:
+                                        await status_task
+                                    except asyncio.CancelledError:
+                                        pass
+                        else:
+                            await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
+
                         await asyncio.to_thread(
                             self.runtime.store.update_wiki_queue_status,
                             task_id,
                             "completed",
                             attempts + 1,
                         )
-                        self.logger.info("wiki_worker_completed_task", path=file_path)
+                        elapsed = time.time() - start_time
+                        self.logger.info(
+                            "wiki_worker_completed_task", path=file_path, elapsed=elapsed
+                        )
+
+                        if self.settings.logging_mode == LoggingMode.HUMAN:
+                            console.print(
+                                f"[bold green]✓[/bold green] Wiki generated: [white]{file_path}[/white] [dim]({elapsed:.1f}s)[/dim]"
+                            )
                     except Exception as ex:
                         self.logger.error("wiki_worker_task_failed", path=file_path, error=str(ex))
                         if attempts + 1 >= 3:
@@ -356,10 +409,10 @@ class RuntimeDaemon:
                                 "failed",
                                 attempts + 1,
                             )
-                            # Log visibly for daemon output
-                            print(
-                                f"\n[Synapse] ⚠ Wiki generation permanently failed for '{file_path}' after 3 attempts."
-                            )
+                            if self.settings.logging_mode == LoggingMode.HUMAN:
+                                console.print(
+                                    f"[bold red]✗[/bold red] Wiki failed: [white]{file_path}[/white] [dim]({str(ex)})[/dim]"
+                                )
                         else:
                             await asyncio.to_thread(
                                 self.runtime.store.update_wiki_queue_status,

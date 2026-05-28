@@ -22,3 +22,6 @@ build/
 .env
 .env.*
 .env.local
+.synapse/
+.synapse/*-wal
+.synapse/*-shm

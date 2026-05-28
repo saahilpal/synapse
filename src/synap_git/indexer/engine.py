@@ -88,18 +88,26 @@ class SynapRuntime:
 
     def _auto_protect_synap(self) -> None:
         gitignore_path = self.settings.repository_path / ".gitignore"
+        patterns = [".synap/", ".synapse/", ".synapse/*-wal", ".synapse/*-shm"]
         try:
             if not gitignore_path.exists():
-                gitignore_path.write_text(".synap/\n", encoding="utf-8")
+                gitignore_path.write_text("\n".join(patterns) + "\n", encoding="utf-8")
                 return
 
             content = gitignore_path.read_text(encoding="utf-8")
             lines = [line.strip() for line in content.splitlines()]
-            if ".synap/" not in lines and ".synap" not in lines:
-                if content and not content.endswith("\n"):
-                    content += "\n"
-                content += ".synap/\n"
-                gitignore_path.write_text(content, encoding="utf-8")
+
+            new_content = content
+            added = False
+            for p in patterns:
+                if p.strip() not in lines and p.strip().rstrip("/") not in lines:
+                    if not new_content.endswith("\n"):
+                        new_content += "\n"
+                    new_content += p + "\n"
+                    added = True
+
+            if added:
+                gitignore_path.write_text(new_content, encoding="utf-8")
         except Exception as e:
             self.logger.warning("failed_to_auto_protect_synap", error=str(e))
 
@@ -472,7 +480,9 @@ class SynapRuntime:
                 if file_row:
                     file_id = file_row["file_id"]
                     conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-                self.store.set_wiki_status(rel_path, None, "stale")
+
+        for rel_path in deleted:
+            self.store.set_wiki_status(rel_path, None, "stale")
 
         # Get blob OIDs for changed files
         git_oids = {}
