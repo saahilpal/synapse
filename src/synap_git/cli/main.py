@@ -642,8 +642,10 @@ def start(
                 return
             else:
                 pid_file.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
     # 2. Spawn detached daemon process
     cmd = [sys.executable, "-m", "synap_git.cli", "daemon-run", abs_path.as_posix()]
@@ -782,8 +784,10 @@ def stop(
                 os.waitpid(pid, os.WNOHANG)
             except (ChildProcessError, OSError):
                 pass
-        except Exception:
-            pass
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
         success = not _is_process_running(pid)
 
     # Clean up lockfiles
@@ -895,6 +899,7 @@ def status(
 
 @app.command()
 def logs(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     tail: Annotated[
         bool, typer.Option("--tail", "-t", help="Stream new log entries in real-time.")
     ] = False,
@@ -906,7 +911,9 @@ def logs(
     """View and tail Synap runtime logs."""
     import time
 
-    log_dir = Path("~/.config/synap/logs").expanduser()
+    settings = _settings(path)
+    log_dir = settings.log_path
+    assert log_dir is not None
     log_file = log_dir / "daemon.log"
 
     if not log_file.exists():
@@ -936,6 +943,32 @@ def logs(
         console.print("\n[yellow]Tail stopped.[/yellow]")
     except Exception as e:
         console.print(f"[red]Error reading logs: {e}[/red]")
+
+
+@app.command()
+def search(
+    query: Annotated[str, typer.Argument(help="Search query.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    max_tokens: Annotated[
+        int, typer.Option("--max-tokens", help="Maximum context window tokens.")
+    ] = 4000,
+) -> None:
+    """Execute a hybrid structural search across the repository."""
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        progress.add_task(description="Retrieving context...", total=None)
+        answer, context, _ = runtime.query_hybrid(query, max_tokens=max_tokens)
+
+    console.print("\n[bold cyan]Hybrid Retrieval Results[/bold cyan]")
+    console.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    console.print(answer)
+    console.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 
 @app.command()
@@ -1179,16 +1212,6 @@ def rollback(
         if not typer.confirm("\nProceed?", default=False):
             raise typer.Abort()
 
-    # Clear current checkpoint
-    try:
-        with runtime.store.connect() as conn:
-            conn.execute(
-                "DELETE FROM checkpoints WHERE branch = ?",
-                (runtime.git.state().effective_branch,),
-            )
-    except Exception:
-        pass
-
     # git checkout
     try:
         subprocess.check_call(  # noqa: S603
@@ -1198,6 +1221,18 @@ def rollback(
     except Exception as e:
         console.print(f"[red]✗ Git checkout failed: {e}[/red]")
         raise typer.Abort()
+
+    # Clear current checkpoint
+    try:
+        with runtime.store.connect() as conn:
+            conn.execute(
+                "DELETE FROM checkpoints WHERE branch = ?",
+                (runtime.git.state().effective_branch,),
+            )
+    except Exception as e:
+        import structlog
+
+        structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
     runtime.bootstrap(force=True)
     console.print(f"[green]✓ Rolled back successfully to {selected_commit}[/green]")
@@ -1264,8 +1299,10 @@ def repair(
     console.print("[3/3] Regenerating wiki from last known state")
     try:
         runtime.wiki.generate_project_wiki()
-    except Exception:
-        pass
+    except Exception as e:
+        import structlog
+
+        structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
     status_info = runtime.status()
     console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")

@@ -33,6 +33,7 @@ Every setting can be specified as a key in `config.toml` (within the top-level n
 | `lesson_expiry_days` | `integer` | `7` | Number of days a behavioral memory lesson remains active before moving to the `"expired"` status. |
 | `llm_provider` | `string` | `null` | Chosen generative AI service: `"openai"`, `"gemini"`, `"anthropic"`, `"ollama"`, `"openrouter"`. If null, runs in structural Mode A. |
 | `llm_model` | `string` | `null` | Model identifier used for generative wiki entries and hybrid retrieval answers. |
+| `embed_provider` | `string` | `null` | Provider for vector embeddings. Defaults to `llm_provider`. |
 | `ollama_url` | `string` | `"http://127.0.0.1:11434"` | Endpoint URL for connecting to local Ollama daemon services. |
 | `mcp_host` | `string` | `"127.0.0.1"` | Binding address for the MCP daemon service. |
 | `mcp_port` | `integer` | `9876` | Diagnostic API and web UI server listening port. |

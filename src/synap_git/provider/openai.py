@@ -5,7 +5,11 @@ import urllib.request
 from collections.abc import Iterator
 from typing import Any
 
+import structlog
+
 from synap_git.provider.base import LLMProvider, LLMResponse
+
+logger = structlog.get_logger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
@@ -101,7 +105,7 @@ class OpenAIProvider(LLMProvider):
                             if "content" in delta:
                                 yield delta["content"]
                         except Exception:
-                            pass
+                            logger.exception("openai_stream_chunk_parse_failed", data=data_part)
         except Exception as exc:
             raise RuntimeError(f"OpenAI generate stream failed: {exc}") from exc
 

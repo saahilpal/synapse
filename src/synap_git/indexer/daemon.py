@@ -244,16 +244,20 @@ class RuntimeDaemon:
         if heartbeat_file.exists():
             try:
                 heartbeat_file.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
         # Cleanup process PID lockfile as well
         pid_file = self.settings.repository_path / ".synap" / "daemon.pid"
         if pid_file.exists():
             try:
                 pid_file.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
     async def _poll_git_loop(self) -> None:
         while not self._stop_event.is_set():

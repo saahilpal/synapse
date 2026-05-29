@@ -92,7 +92,9 @@ class SynapSettings(BaseSettings):
                     if line.strip().startswith(f"{key}="):
                         return line.split("=", 1)[1].strip().strip("\"'")
         except Exception:
-            pass
+            import structlog
+
+            structlog.get_logger(__name__).exception("fallback_credential_lookup_failed", key=key)
         return None
 
     @property

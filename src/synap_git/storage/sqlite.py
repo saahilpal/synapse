@@ -156,6 +156,7 @@ class SynapStore:
                         model TEXT NOT NULL,
                         input_tokens INTEGER NOT NULL,
                         output_tokens INTEGER NOT NULL,
+                        cost_usd REAL NOT NULL,
                         purpose TEXT NOT NULL,
                         file_path TEXT,
                         created_at INTEGER NOT NULL
@@ -244,9 +245,9 @@ class SynapStore:
                     CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash);
                     CREATE INDEX IF NOT EXISTS idx_files_git_oid ON files(git_oid);
 
-                    CREATE TRIGGER IF NOT EXISTS tgr_symbols_insert 
+                    CREATE TRIGGER IF NOT EXISTS tgr_symbols_insert
                     AFTER INSERT ON symbols BEGIN
-                        INSERT INTO symbols_fts(symbol_id, name, kind, body) 
+                        INSERT INTO symbols_fts(symbol_id, name, kind, body)
                         VALUES (new.symbol_id, new.name, new.kind, new.metadata_json);
                     END;
 
@@ -682,8 +683,10 @@ class SynapStore:
                 res = conn.execute("PRAGMA quick_check").fetchone()[0]
                 if res == "ok":
                     return False
-        except Exception:
-            pass
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
         # If we got here, it's corrupted or unreachable. Wipe it securely.
         for ext in ["", "-wal", "-shm"]:
@@ -702,6 +705,7 @@ class SynapStore:
         input_tokens: int,
         output_tokens: int,
         purpose: str,
+        cost_usd: float = 0.0,
         file_path: str | None = None,
     ) -> None:
         import uuid
@@ -712,8 +716,8 @@ class SynapStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, purpose, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, cost_usd, purpose, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     call_id,
@@ -721,6 +725,7 @@ class SynapStore:
                     model or "unknown",
                     input_tokens,
                     output_tokens,
+                    cost_usd,
                     purpose,
                     file_path,
                     now,

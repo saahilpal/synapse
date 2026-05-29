@@ -141,8 +141,10 @@ class SynapRuntime:
                 if change.kind == "revert":
                     self.handle_revert(prev, git_state)
                     return git_state.head_commit
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
         return self.index_repository(git_state=git_state, force=force)
 
@@ -263,11 +265,20 @@ class SynapRuntime:
                     for sym in batch:
                         try:
                             # Avoid re-embedding if unchanged?
-                            text = sym["name"] + " " + sym.get("metadata", {}).get("docstring", "")
+                            text = (
+                                sym["name"] + " " + (sym.get("metadata") or {}).get("docstring", "")
+                            )
                             vector = provider.embed(text)
                             self.store.put_embedding(
                                 sym["symbol_id"], model_name, "1.0", "1.0", vector, content_hash
                             )
+                        except NotImplementedError as e:
+                            logger.warning(
+                                "embedding_not_supported_by_provider",
+                                error=str(e),
+                                suggestion="Configure SYNAP_EMBED_PROVIDER=ollama or openai.",
+                            )
+                            return  # Stop attempting batch if not supported
                         except Exception as e:
                             logger.warning("background_embed_failed_for_symbol", error=str(e))
             except Exception as e:
@@ -676,8 +687,12 @@ class SynapRuntime:
                         candidate_rel = (target_dir / "/".join(parts)).as_posix()
                         for ext in [".py", ".ts", ".go", ".rs"]:
                             candidate_paths.add(f"{candidate_rel}{ext}")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import structlog
+
+                        structlog.get_logger().error(
+                            "suppressed_error_caught", error=str(e), exc_info=True
+                        )
                 else:
                     module_keys.add(module_part)
                 fts_names.add(target_name)
@@ -743,8 +758,12 @@ class SynapRuntime:
                                 if cand_path in path_to_file_id:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            import structlog
+
+                            structlog.get_logger().error(
+                                "suppressed_error_caught", error=str(e), exc_info=True
+                            )
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -811,8 +830,12 @@ class SynapRuntime:
                                 if cand_path in path_to_file_id:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            import structlog
+
+                            structlog.get_logger().error(
+                                "suppressed_error_caught", error=str(e), exc_info=True
+                            )
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -888,8 +911,10 @@ class SynapRuntime:
         is_dirty = False
         try:
             is_dirty = self.git.state().is_dirty
-        except Exception:
-            pass
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
         return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
 
     def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:

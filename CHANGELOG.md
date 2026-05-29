@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-05-29
+
+### Added
+- **CLI `search` command**: New user-facing command for executing hybrid structural searches directly from the terminal.
+- **`embed_provider` configuration**: Added explicit control over the vector embedding provider via `SYNAP_EMBED_PROVIDER` or `config.toml`.
+
+### Fixed
+- **CRITICAL: Metadata Nullability Bug**: Resolved a type mismatch in `CodeSymbol` where `metadata=None` caused background worker crashes. Enforced strict `dict` contract with `default_factory`.
+- **CRITICAL: Exception Swallowing**: Eradicated 26 instances of silent failure (`except Exception: pass`) across all core subsystems (API, Indexer, Storage, Retrieval, MCP, Providers). Replaced with structured, traceback-aware logging.
+- **CRITICAL: SQLite Schema Integrity**: Fixed `NOT NULL` constraint failure in `llm_calls` table by aligning schema with insertion logic and adding `cost_usd` support.
+- **HIGH: Repository-Local Logging**: Redirected daemon logs from a global shared directory to repository-local `.synap/logs` to prevent cross-repository log corruption and lock contention.
+- **HIGH: Rollback Atomicity**: Reordered `synap rollback` operations to ensure Git state is successfully restored before purging index checkpoints.
+- **MEDIUM: Provider Resiliency**: Added explicit handling for `NotImplementedError` in Anthropic and OpenRouter providers, preventing worker panics when embeddings are misconfigured.
+
 ## [2.0.0] - 2026-05-29
 
 ### Added

@@ -284,8 +284,12 @@ class HybridRetrievalEngine:
                         output_tokens=response.completion_tokens,
                         purpose="retrieval",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    import structlog
+
+                    structlog.get_logger().error(
+                        "suppressed_error_caught", error=str(e), exc_info=True
+                    )
             else:
                 err_msg = str(last_err)
                 answer_content = (

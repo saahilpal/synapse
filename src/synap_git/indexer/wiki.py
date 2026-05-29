@@ -132,8 +132,10 @@ class WikiEngine:
                     purpose="wiki",
                     file_path=file_path,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
         except Exception as e:
             logger.error("wiki_generation_failed", path=file_path, error=str(e))
             raise
@@ -189,7 +191,9 @@ class WikiEngine:
                     purpose="wiki_project",
                     file_path=clean_name,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
         except Exception as e:
             logger.error("wiki_project_generation_failed", page=clean_name, error=str(e))

@@ -22,7 +22,6 @@ class TraceResult:
 
 def configure_logging(settings: SynapSettings) -> None:
     from logging.handlers import RotatingFileHandler
-    from pathlib import Path
 
     timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
     shared_processors: list[structlog.typing.Processor] = [
@@ -38,7 +37,8 @@ def configure_logging(settings: SynapSettings) -> None:
     else:
         renderer = structlog.dev.ConsoleRenderer(colors=False)
 
-    log_dir = Path("~/.config/synap/logs").expanduser()
+    log_dir = settings.log_path
+    assert log_dir is not None
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "daemon.log"
 

@@ -101,8 +101,10 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
             target = target[:-3]
         try:
             await asyncio.to_thread(runtime.wiki.ensure_wiki_page, target)
-        except Exception:
-            pass
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
         wiki_path = runtime.wiki.wiki_dir / f"{target}.md"
         exists = await asyncio.to_thread(wiki_path.exists)

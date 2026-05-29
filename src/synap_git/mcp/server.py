@@ -138,8 +138,12 @@ class SynapMCPServer:
                                 "dirty_tree": dirty,
                             },
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import structlog
+
+                        structlog.get_logger().error(
+                            "suppressed_error_caught", error=str(e), exc_info=True
+                        )
 
                     return json.dumps(
                         {
@@ -176,8 +180,12 @@ class SynapMCPServer:
                                 "trace_id": trace_id,
                             },
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import structlog
+
+                        structlog.get_logger().error(
+                            "suppressed_error_caught", error=str(e), exc_info=True
+                        )
 
                     return json.dumps(
                         {

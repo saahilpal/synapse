@@ -85,6 +85,19 @@ Shows current repository context status and daemon metrics.
 ```bash
 synap status .
 ```
+
+### `synap search`
+Executes a hybrid structural search across the repository.
+* **Usage:** `synap search <QUERY> [OPTIONS]`
+* **Arguments:**
+  * `query` — The natural language search query.
+* **Options:**
+  * `--path`, `-p` — Repository path.
+  * `--max-tokens` — Maximum context window tokens (default: 4000).
+* **Example:**
+```bash
+synap search "How does the indexing engine work?"
+```
 * **Output:**
 ```
 Property      Value

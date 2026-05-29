@@ -128,8 +128,10 @@ class GitRepository:
                         break
                 if is_revert:
                     return GitChange(kind=GitChangeKind.REVERT, previous=previous, current=current)
-            except Exception:
-                pass
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
             if len(current.commit_parent_hashes) > 1:
                 return GitChange(kind=GitChangeKind.MERGE, previous=previous, current=current)

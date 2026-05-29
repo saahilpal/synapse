@@ -5,8 +5,12 @@ import urllib.request
 from collections.abc import Iterator
 from typing import Any
 
+import structlog
+
 from synap_git.provider.base import LLMResponse
 from synap_git.provider.openai import OpenAIProvider
+
+logger = structlog.get_logger(__name__)
 
 
 class OpenRouterProvider(OpenAIProvider):
@@ -106,7 +110,7 @@ class OpenRouterProvider(OpenAIProvider):
                             if "content" in delta:
                                 yield delta["content"]
                         except Exception:
-                            pass
+                            logger.exception("openrouter_stream_chunk_parse_failed", data=data_part)
         except Exception as exc:
             raise RuntimeError(f"OpenRouter generate stream failed: {exc}") from exc
 

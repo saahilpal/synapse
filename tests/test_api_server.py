@@ -55,8 +55,8 @@ def test_api_get_usage(client: TestClient, runtime: SynapRuntime) -> None:
     with runtime.store.connect() as conn:
         conn.execute(
             """
-            INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, purpose, created_at)
-            VALUES ('c1', 'anthropic', 'claude', 10, 20, 'wiki', 0)
+            INSERT INTO llm_calls (call_id, provider, model, input_tokens, output_tokens, cost_usd, purpose, created_at)
+            VALUES ('c1', 'anthropic', 'claude', 10, 20, 0.0, 'wiki', 0)
         """
         )
 
