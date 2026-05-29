@@ -55,28 +55,38 @@ class CodeParserRegistry:
         return self._parsers[lang_name]
 
     def parse(self, path: Path, *, relative_path: str, text: str | None = None) -> CodeParseResult:
-        suffix = path.suffix.lower()
-        if text is None:
-            text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            suffix = path.suffix.lower()
+            if text is None:
+                text = path.read_text(encoding="utf-8", errors="replace")
 
-        if suffix in PYTHON_SUFFIXES:
-            return self._parse_tree_sitter(text, "python", relative_path)
-        if suffix in JAVASCRIPT_SUFFIXES:
-            return self._parse_tree_sitter(text, "javascript", relative_path)
-        if suffix in TYPESCRIPT_SUFFIXES:
-            return self._parse_tree_sitter(text, "tsx", relative_path)
-        if suffix in GO_SUFFIXES:
-            return self._parse_tree_sitter(text, "go", relative_path)
-        if suffix in RUST_SUFFIXES:
-            return self._parse_tree_sitter(text, "rust", relative_path)
-        if suffix in JAVA_SUFFIXES:
-            return self._parse_tree_sitter(text, "java", relative_path)
-        if suffix in CPP_SUFFIXES:
-            return self._parse_tree_sitter(text, "cpp", relative_path)
-        if suffix in RUBY_SUFFIXES:
-            return self._parse_tree_sitter(text, "ruby", relative_path)
+            if suffix in PYTHON_SUFFIXES:
+                return self._parse_tree_sitter(text, "python", relative_path)
+            if suffix in JAVASCRIPT_SUFFIXES:
+                return self._parse_tree_sitter(text, "javascript", relative_path)
+            if suffix in TYPESCRIPT_SUFFIXES:
+                return self._parse_tree_sitter(text, "tsx", relative_path)
+            if suffix in GO_SUFFIXES:
+                return self._parse_tree_sitter(text, "go", relative_path)
+            if suffix in RUST_SUFFIXES:
+                return self._parse_tree_sitter(text, "rust", relative_path)
+            if suffix in JAVA_SUFFIXES:
+                return self._parse_tree_sitter(text, "java", relative_path)
+            if suffix in CPP_SUFFIXES:
+                return self._parse_tree_sitter(text, "cpp", relative_path)
+            if suffix in RUBY_SUFFIXES:
+                return self._parse_tree_sitter(text, "ruby", relative_path)
 
-        return CodeParseResult(path=relative_path, language="unknown", symbols=())
+            return CodeParseResult(path=relative_path, language="unknown", symbols=())
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "parser_failed", path=relative_path, error=str(e)
+            )
+            return CodeParseResult(
+                path=relative_path, language="unknown", symbols=(), syntax_error=str(e)
+            )
 
     def _parse_tree_sitter(self, text: str, lang_name: str, relative_path: str) -> CodeParseResult:
         parser = self._get_parser(lang_name)

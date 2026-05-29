@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-05-29
+
+### Added
+- **.synapignore Support**: Implemented context-aware filtering to prevent traversing symlinks, binary files, and files listed in `.synapignore` or `.gitignore`.
+- **FTS5 Integration**: Shifted semantic full-text search directly to SQLite FTS5 with bounding limits (`LIMIT 50`) for `O(1)` lexical retrieval scaling on 10,000+ file monorepos.
+
+### Fixed
+- **LLM Hangs in Test Suite**: Isolated testing environment by strictly bypassing real LLM provider configs (`SYNAP_LLM_PROVIDER=""`) preventing test CI suite hangs.
+- **Repository Path Scoping in Hybrid Engine**: Fixed a bug where `repo_path` initialization mistakenly truncated the path to `/tmp` in tests, failing contextual snippet aggregation.
+- **Unbounded BM25 Expansion**: Bounded full-text search token extraction and BM25 results, preventing out-of-memory cascading in CTE traversal during monorepo indexing.
+
 ## [1.2.3] - 2026-05-28
 
 ### Added

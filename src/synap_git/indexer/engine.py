@@ -69,6 +69,7 @@ class SynapRuntime:
         self.parser_registry = CodeParserRegistry()
         self.llm_provider = get_llm_provider(settings)
         self.retrieval_engine = HybridRetrievalEngine(
+            repo_path=self.settings.repository_path,
             store=self.store,
             llm_provider=self.llm_provider,
             trace_store=self.trace_store,
@@ -244,6 +245,44 @@ class SynapRuntime:
 
         return commit
 
+    def _schedule_embedding(
+        self, file_id: str, symbols: list[dict[str, Any]], content_hash: str
+    ) -> None:
+        provider = self.llm_provider
+        if not provider:
+            return
+
+        def _worker() -> None:
+            import structlog
+
+            logger = structlog.get_logger()
+            try:
+                batches = [symbols[i : i + 50] for i in range(0, len(symbols), 50)]
+                model_name = getattr(provider, "default_model", "unknown")
+                for batch in batches:
+                    for sym in batch:
+                        try:
+                            # Avoid re-embedding if unchanged?
+                            text = sym["name"] + " " + sym.get("metadata", {}).get("docstring", "")
+                            vector = provider.embed(text)
+                            self.store.put_embedding(
+                                sym["symbol_id"], model_name, "1.0", "1.0", vector, content_hash
+                            )
+                        except Exception as e:
+                            logger.warning("background_embed_failed_for_symbol", error=str(e))
+            except Exception as e:
+                logger.warning("background_embed_failed", error=str(e))
+
+        try:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(_worker))
+        except RuntimeError:
+            import threading
+
+            threading.Thread(target=_worker, daemon=True).start()
+
     def _first_run_index(self, git_state: GitState) -> str | None:
         self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)
         import time
@@ -254,16 +293,9 @@ class SynapRuntime:
             repository_path=self.settings.repository_path,
             max_file_bytes=self.settings.max_file_bytes,
         )
-        scan = scanner.scan()
-
-        files_to_parse = []
-        for file_info in scan.files:
-            files_to_parse.append((file_info.path, file_info.relative_path, file_info.content))
-
-        num_files = len(files_to_parse)
+        num_files = scanner.count_files()
         chunk_size = 500
         parsed_results = []
-
         # Parallel parsing using ProcessPoolExecutor
         import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
@@ -301,16 +333,22 @@ class SynapRuntime:
                 task = progress.add_task("[yellow]Parsing codebase...[/yellow]", total=num_files)
 
                 with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    for chunk_idx in range(0, num_files, chunk_size):
-                        chunk = files_to_parse[chunk_idx : chunk_idx + chunk_size]
+                    from itertools import islice
+
+                    file_iterator = scanner.scan()
+                    while True:
+                        chunk_files = list(islice(file_iterator, chunk_size))
+                        if not chunk_files:
+                            break
+
+                        file_info_map = {f.relative_path: f for f in chunk_files}
+                        chunk = [(f.path, f.relative_path, f.content) for f in chunk_files]
                         futures = [executor.submit(_parse_worker, item) for item in chunk]
                         chunk_results = [f.result() for f in futures]
 
                         for res in chunk_results:
                             rel_path = res["path"]
-                            matching_info = next(
-                                (f for f in scan.files if f.relative_path == rel_path), None
-                            )
+                            matching_info = file_info_map.get(rel_path)
                             git_oid = matching_info.git_oid if matching_info else ""
                             content_hash = matching_info.content_hash if matching_info else ""
 
@@ -328,6 +366,7 @@ class SynapRuntime:
                                 language=res["language"],
                                 symbols=res["symbols"],
                             )
+                            self._schedule_embedding(file_id_hash, res["symbols"], content_hash)
                             self.store.enqueue_wiki(rel_path)
                             parsed_results.append((file_id_hash, rel_path, res["imports"]))
 
@@ -336,20 +375,26 @@ class SynapRuntime:
                             self._resolve_and_insert_edges(parsed_results)
                             parsed_results.clear()
 
-                        progress.advance(task, len(chunk))
+                        progress.advance(task, len(chunk_files))
                         del chunk_results
         else:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                for chunk_idx in range(0, num_files, chunk_size):
-                    chunk = files_to_parse[chunk_idx : chunk_idx + chunk_size]
+                from itertools import islice
+
+                file_iterator = scanner.scan()
+                while True:
+                    chunk_files = list(islice(file_iterator, chunk_size))
+                    if not chunk_files:
+                        break
+
+                    file_info_map = {f.relative_path: f for f in chunk_files}
+                    chunk = [(f.path, f.relative_path, f.content) for f in chunk_files]
                     futures = [executor.submit(_parse_worker, item) for item in chunk]
                     chunk_results = [f.result() for f in futures]
 
                     for res in chunk_results:
                         rel_path = res["path"]
-                        matching_info = next(
-                            (f for f in scan.files if f.relative_path == rel_path), None
-                        )
+                        matching_info = file_info_map.get(rel_path)
                         git_oid = matching_info.git_oid if matching_info else ""
                         content_hash = matching_info.content_hash if matching_info else ""
 
@@ -367,6 +412,7 @@ class SynapRuntime:
                             language=res["language"],
                             symbols=res["symbols"],
                         )
+                        self._schedule_embedding(file_id_hash, res["symbols"], content_hash)
                         self.store.enqueue_wiki(rel_path)
                         parsed_results.append((file_id_hash, rel_path, res["imports"]))
 
@@ -426,6 +472,7 @@ class SynapRuntime:
 
         added_or_modified = []
         deleted = []
+        renames = []
         for line in res.stdout.splitlines():
             if not line.strip():
                 continue
@@ -433,12 +480,40 @@ class SynapRuntime:
             if len(parts) >= 2:
                 status = parts[0]
                 if status.startswith("R"):
-                    deleted.append(parts[1])
+                    renames.append((parts[1], parts[2]))
                     added_or_modified.append(parts[2])
                 elif status == "D":
                     deleted.append(parts[1])
                 else:
                     added_or_modified.append(parts[1])
+
+        import hashlib
+
+        # Apply renames to preserve identity
+        with self.store.connect() as conn:
+            for old_path, new_path in renames:
+                file_row = conn.execute(
+                    "SELECT file_id, content_hash FROM files WHERE path = ?", (old_path,)
+                ).fetchone()
+                if file_row:
+                    old_file_id = file_row["file_id"]
+                    content_hash = file_row["content_hash"]
+                    new_file_id = hashlib.sha256(
+                        (new_path + content_hash).encode("utf-8")
+                    ).hexdigest()
+
+                    conn.execute("PRAGMA foreign_keys=OFF")
+                    try:
+                        conn.execute(
+                            "UPDATE files SET file_id = ?, path = ? WHERE file_id = ?",
+                            (new_file_id, new_path, old_file_id),
+                        )
+                        conn.execute(
+                            "UPDATE symbols SET file_id = ? WHERE file_id = ?",
+                            (new_file_id, old_file_id),
+                        )
+                    finally:
+                        conn.execute("PRAGMA foreign_keys=ON")
 
         # Filter added/modified files
         scanner = RepositoryScanner(
@@ -549,6 +624,7 @@ class SynapRuntime:
                 language=parse_result.language,
                 symbols=symbols_list,
             )
+            self._schedule_embedding(file_id_hash, symbols_list, content_hash)
 
             self.store.set_wiki_status(rel_path, None, "stale")
             self.store.enqueue_wiki(rel_path)
@@ -701,11 +777,23 @@ class SynapRuntime:
                     for row in rows:
                         fts_symbols_by_name.setdefault(row["name"], []).append(dict(row))
 
+            target_symbols_dict: dict[str, dict[str, list[dict[str, Any]]]] = {}
+            for t_file_id, syms in target_symbols_by_file.items():
+                name_map: dict[str, Any] = {}
+                for sym in syms:
+                    name_map.setdefault(sym["name"], []).append(sym)
+                target_symbols_dict[t_file_id] = name_map
+
             for file_id, rel_path, imports in parsed_results:
                 file_symbols = file_symbols_map.get(file_id, [])
                 current_path = Path(rel_path)
+                edges_added_for_file = 0
+                max_edges_per_file = 1000
 
                 for imp in imports:
+                    if edges_added_for_file >= max_edges_per_file:
+                        break
+
                     target_file_id = None
                     if ":" in imp:
                         module_part, target_name = imp.split(":", 1)
@@ -728,15 +816,27 @@ class SynapRuntime:
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
+                        # Fuzzy fallback
+                        if not target_file_id:
+                            for mk, fid in module_key_to_file_id.items():
+                                if mk.endswith(module_part) or mk.endswith(f".{module_part}"):
+                                    target_file_id = fid
+                                    break
+
                     target_symbols = []
                     if target_file_id:
-                        all_target_syms = target_symbols_by_file.get(target_file_id, [])
-                        target_symbols = [ts for ts in all_target_syms if ts["name"] == target_name]
+                        target_symbols = target_symbols_dict.get(target_file_id, {}).get(
+                            target_name, []
+                        )
                     else:
                         target_symbols = fts_symbols_by_name.get(target_name, [])
 
                     for ts in target_symbols:
+                        if edges_added_for_file >= max_edges_per_file:
+                            break
                         for fs in file_symbols:
+                            if edges_added_for_file >= max_edges_per_file:
+                                break
                             if fs["symbol_id"] == ts["symbol_id"]:
                                 continue
                             edge_id = stable_hash(
@@ -747,6 +847,7 @@ class SynapRuntime:
                                 }
                             )
                             edges_to_insert.append((edge_id, fs["symbol_id"], ts["symbol_id"]))
+                            edges_added_for_file += 1
 
             if edges_to_insert:
                 conn.executemany(

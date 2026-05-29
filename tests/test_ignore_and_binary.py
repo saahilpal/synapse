@@ -22,7 +22,7 @@ def test_gitignore_compliance(tmp_path: Path) -> None:
     scanner = RepositoryScanner(repository_path=repo)
     scan = scanner.scan()
 
-    relative_paths = {f.relative_path for f in scan.files}
+    relative_paths = {f.relative_path for f in scan}
 
     assert "source.py" in relative_paths
     assert "nested/keep.py" in relative_paths
@@ -49,7 +49,7 @@ def test_binary_file_skipping(tmp_path: Path) -> None:
     scanner = RepositoryScanner(repository_path=repo)
     scan = scanner.scan()
 
-    relative_paths = {f.relative_path for f in scan.files}
+    relative_paths = {f.relative_path for f in scan}
 
     assert "valid.txt" in relative_paths
     assert "image.png" not in relative_paths
@@ -81,7 +81,7 @@ def test_symlink_traversal_prevention(tmp_path: Path) -> None:
     scanner = RepositoryScanner(repository_path=repo)
     scan = scanner.scan()
 
-    relative_paths = {f.relative_path for f in scan.files}
+    relative_paths = {f.relative_path for f in scan}
 
     assert "source.py" in relative_paths
     assert "linked_secret" not in relative_paths

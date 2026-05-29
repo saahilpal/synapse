@@ -1,11 +1,35 @@
 from __future__ import annotations
 
-import json
-import urllib.request
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from typing import Any
 
+import httpx
+
 from synap_git.provider.base import LLMProvider, LLMResponse
+
+
+def _with_retries(func: Callable[..., Any]) -> Callable[..., Any]:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        attempts = 3
+        backoff = 1.0
+        for i in range(attempts):
+            try:
+                return func(*args, **kwargs)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 500, 502, 503, 504) and i < attempts - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                raise RuntimeError(f"API request failed: {e}") from e
+            except httpx.RequestError as e:
+                if i < attempts - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                raise RuntimeError(f"API request failed: {e}") from e
+
+    return wrapper
 
 
 class OllamaProvider(LLMProvider):
@@ -16,7 +40,9 @@ class OllamaProvider(LLMProvider):
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
+        self.client = httpx.Client(timeout=300.0)
 
+    @_with_retries
     def generate(
         self,
         system_prompt: str,
@@ -28,43 +54,31 @@ class OllamaProvider(LLMProvider):
     ) -> LLMResponse:
         model_name = model or self.default_model
         url = f"{self.base_url}/api/chat"
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         payload: dict[str, Any] = {
             "model": model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "options": {
-                "temperature": temperature,
-            },
+            "options": {"temperature": temperature},
             "stream": False,
         }
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
 
-        req = urllib.request.Request(
-            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+        resp = self.client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+        message = data["message"]
+        prompt_tokens = int(data.get("prompt_eval_count", 0))
+        completion_tokens = int(data.get("eval_count", 0))
+        return LLMResponse(
+            content=str(message["content"]),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
-        try:
-            with urllib.request.urlopen(req, timeout=300.0) as resp:  # nosec B310
-                data = json.loads(resp.read().decode("utf-8"))
-            message = data["message"]
-            # Ollama provides prompt_eval_count and eval_count
-            prompt_tokens = int(data.get("prompt_eval_count", 0))
-            completion_tokens = int(data.get("eval_count", 0))
-            return LLMResponse(
-                content=str(message["content"]),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            )
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8")
-            raise RuntimeError(f"Ollama generate HTTP error {exc.code}: {err_body}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"Ollama generate failed: {exc}") from exc
 
     def generate_stream(
         self,
@@ -75,38 +89,12 @@ class OllamaProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float = 0.2,
     ) -> Iterator[str]:
-        model_name = model or self.default_model
-        url = f"{self.base_url}/api/chat"
-        headers = {
-            "Content-Type": "application/json",
-        }
-        payload: dict[str, Any] = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "options": {
-                "temperature": temperature,
-            },
-            "stream": True,
-        }
-        if max_tokens:
-            payload["options"]["num_predict"] = max_tokens
-
-        req = urllib.request.Request(
-            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+        res = self.generate(
+            system_prompt, user_prompt, model=model, max_tokens=max_tokens, temperature=temperature
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
-                for line in resp:
-                    if line.strip():
-                        data = json.loads(line.decode("utf-8"))
-                        if "message" in data and "content" in data["message"]:
-                            yield data["message"]["content"]
-        except Exception as exc:
-            raise RuntimeError(f"Ollama generate stream failed: {exc}") from exc
+        yield res.content
 
+    @_with_retries
     def embed(
         self,
         text: str,
@@ -115,23 +103,14 @@ class OllamaProvider(LLMProvider):
     ) -> list[float]:
         model_name = model or self.default_model
         url = f"{self.base_url}/api/embeddings"
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         payload = {"model": model_name, "prompt": text}
-        req = urllib.request.Request(
-            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60.0) as resp:  # nosec B310
-                data = json.loads(resp.read().decode("utf-8"))
-            embedding = data["embedding"]
-            return [float(x) for x in embedding]
-        except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8")
-            raise RuntimeError(f"Ollama embed HTTP error {exc.code}: {err_body}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"Ollama embed failed: {exc}") from exc
+
+        resp = self.client.post(url, json=payload, headers=headers, timeout=60.0)
+        resp.raise_for_status()
+        data = resp.json()
+        embedding = data["embedding"]
+        return [float(x) for x in embedding]
 
     def count_tokens(self, text: str) -> int:
         import tiktoken

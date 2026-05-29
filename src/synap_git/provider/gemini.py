@@ -1,11 +1,35 @@
 from __future__ import annotations
 
-import json
-import urllib.request
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from typing import Any
 
+import httpx
+
 from synap_git.provider.base import LLMProvider, LLMResponse
+
+
+def _with_retries(func: Callable[..., Any]) -> Callable[..., Any]:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        attempts = 3
+        backoff = 1.0
+        for i in range(attempts):
+            try:
+                return func(*args, **kwargs)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 500, 502, 503, 504) and i < attempts - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                raise RuntimeError(f"API request failed: {e}") from e
+            except httpx.RequestError as e:
+                if i < attempts - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                raise RuntimeError(f"API request failed: {e}") from e
+
+    return wrapper
 
 
 class GeminiProvider(LLMProvider):
@@ -14,7 +38,9 @@ class GeminiProvider(LLMProvider):
     def __init__(self, api_key: str, default_model: str = "gemini-1.5-flash") -> None:
         self.api_key = api_key
         self.default_model = default_model
+        self.client = httpx.Client(timeout=30.0)
 
+    @_with_retries
     def generate(
         self,
         system_prompt: str,
@@ -25,47 +51,32 @@ class GeminiProvider(LLMProvider):
         temperature: float = 0.2,
     ) -> LLMResponse:
         model_name = model or self.default_model
-        # Strip models/ prefix if present
         if model_name.startswith("models/"):
             model_name = model_name[7:]
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         payload: dict[str, Any] = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_prompt}],
-                }
-            ],
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "systemInstruction": {"parts": [{"text": system_prompt}]},
-            "generationConfig": {
-                "temperature": temperature,
-            },
+            "generationConfig": {"temperature": temperature},
         }
         if max_tokens:
             payload["generationConfig"]["maxOutputTokens"] = max_tokens
 
-        req = urllib.request.Request(
-            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+        resp = self.client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise RuntimeError(f"Gemini API returned no candidates: {data}")
+        text_val = candidates[0]["content"]["parts"][0]["text"]
+        usage = data.get("usageMetadata", {})
+        return LLMResponse(
+            content=str(text_val),
+            prompt_tokens=int(usage.get("promptTokenCount", 0)),
+            completion_tokens=int(usage.get("candidatesTokenCount", 0)),
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
-                data = json.loads(resp.read().decode("utf-8"))
-            candidates = data.get("candidates", [])
-            if not candidates:
-                raise RuntimeError(f"Gemini API returned no candidates: {data}")
-            text_val = candidates[0]["content"]["parts"][0]["text"]
-            # Gemini does not always provide exact token counts in basic responses, or they might be in usageMetadata
-            usage = data.get("usageMetadata", {})
-            return LLMResponse(
-                content=str(text_val),
-                prompt_tokens=int(usage.get("promptTokenCount", 0)),
-                completion_tokens=int(usage.get("candidatesTokenCount", 0)),
-            )
-        except Exception as exc:
-            raise RuntimeError(f"Gemini generate failed: {exc}") from exc
 
     def generate_stream(
         self,
@@ -81,6 +92,7 @@ class GeminiProvider(LLMProvider):
         )
         yield res.content
 
+    @_with_retries
     def embed(
         self,
         text: str,
@@ -91,20 +103,14 @@ class GeminiProvider(LLMProvider):
         if not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:embedContent?key={self.api_key}"
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         payload = {"model": model_name, "content": {"parts": [{"text": text}]}}
-        req = urllib.request.Request(
-            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:  # nosec B310
-                data = json.loads(resp.read().decode("utf-8"))
-            embedding = data["embedding"]["values"]
-            return [float(x) for x in embedding]
-        except Exception as exc:
-            raise RuntimeError(f"Gemini embed failed: {exc}") from exc
+
+        resp = self.client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        embedding = data["embedding"]["values"]
+        return [float(x) for x in embedding]
 
     def count_tokens(self, text: str) -> int:
         import tiktoken

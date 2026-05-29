@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
 import subprocess
 import tomllib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -196,6 +196,7 @@ class RepositoryScanner:
         self.excludes = excludes or DEFAULT_EXCLUDES
         self.max_file_bytes = max_file_bytes
         self.gitignore = None
+        self.synapignore = None
 
         gitignore_path = self.repository_path / ".gitignore"
         if gitignore_path.exists():
@@ -205,13 +206,15 @@ class RepositoryScanner:
             except Exception as e:
                 logger.warning("failed_to_load_gitignore", error=str(e))
 
-    async def scan_async(self) -> RepositoryScan:
-        return await asyncio.to_thread(self.scan)
+        synapignore_path = self.repository_path / ".synapignore"
+        if synapignore_path.exists():
+            try:
+                lines = synapignore_path.read_text(encoding="utf-8").splitlines()
+                self.synapignore = GitIgnoreSpec(self.repository_path, lines)
+            except Exception as e:
+                logger.warning("failed_to_load_synapignore", error=str(e))
 
-    def scan(self) -> RepositoryScan:
-        files: list[FileObservation] = []
-        manifests: list[ManifestObservation] = []
-
+    def _get_paths(self) -> list[Path]:
         paths: list[Path] = []
         try:
             result = subprocess.run(  # noqa: S603
@@ -227,10 +230,29 @@ class RepositoryScanner:
                     except UnicodeDecodeError:
                         pass
         except (subprocess.CalledProcessError, FileNotFoundError):
-            # Fallback to rglob if not a git repository
             paths = list(self.repository_path.rglob("*"))
+        return paths
 
-        for path in paths:
+    def count_files(self) -> int:
+        count = 0
+        for path in self._get_paths():
+            if not path.is_file():
+                continue
+            if self._excluded(path):
+                continue
+            try:
+                stat = path.stat()
+                if stat.st_size > self.max_file_bytes:
+                    continue
+            except OSError:
+                continue
+            if _is_binary_file(path):
+                continue
+            count += 1
+        return count
+
+    def scan(self) -> Iterator[FileObservation]:
+        for path in self._get_paths():
             if not path.is_file():
                 continue
             if self._excluded(path):
@@ -250,11 +272,13 @@ class RepositoryScanner:
                 path.resolve().relative_to(self.repository_path)
             except (ValueError, OSError):
                 continue
+
             content_hash, content_text = _read_and_hash_file(path)
             language = LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
             folder_role = self._classify_folder(relative_path)
             is_manifest = path.name in MANIFEST_NAMES
-            observation = FileObservation(
+
+            yield FileObservation(
                 path=path,
                 relative_path=relative_path,
                 size_bytes=stat.st_size,
@@ -264,23 +288,6 @@ class RepositoryScanner:
                 content=content_text,
                 is_manifest=is_manifest,
             )
-            files.append(observation)
-            if is_manifest:
-                manifests.append(self._read_manifest(path, relative_path))
-
-        language_counts: dict[str, int] = {}
-        folder_counts: dict[str, int] = {}
-        for file in files:
-            if file.language:
-                language_counts[file.language] = language_counts.get(file.language, 0) + 1
-            folder_counts[file.folder_role.value] = folder_counts.get(file.folder_role.value, 0) + 1
-        return RepositoryScan(
-            repository_path=self.repository_path,
-            files=tuple(files),
-            manifests=tuple(manifests),
-            language_counts=dict(sorted(language_counts.items())),
-            folder_counts=dict(sorted(folder_counts.items())),
-        )
 
     def _excluded(self, path: Path) -> bool:
         try:
@@ -288,6 +295,8 @@ class RepositoryScanner:
         except ValueError:
             return True
         if any(part in self.excludes for part in parts):
+            return True
+        if self.synapignore and self.synapignore.matches(path, is_dir=path.is_dir()):
             return True
         if self.gitignore and self.gitignore.matches(path, is_dir=path.is_dir()):
             return True

@@ -6,6 +6,7 @@ import sys
 import traceback
 
 os.environ["SYNAP_PROFILE"] = "test"
+os.environ["SYNAP_LLM_PROVIDER"] = ""
 from typing import TYPE_CHECKING, Any
 
 import keyring

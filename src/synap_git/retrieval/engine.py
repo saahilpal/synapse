@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -21,19 +22,39 @@ class TraceElement:
     tokens: int
 
 
+def _get_snippet(repo_path: Path, rel_path: str, start_line: int, end_line: int) -> str:
+    try:
+        p = repo_path / rel_path
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        s_idx = max(0, start_line - 1)
+        e_idx = min(len(lines), end_line)
+        return "\n".join(lines[s_idx:e_idx])
+    except Exception:
+        return ""
+
+
+def _get_full_file(repo_path: Path, rel_path: str) -> str:
+    try:
+        p = repo_path / rel_path
+        return p.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
 class HybridRetrievalEngine:
     """Production-grade hybrid retrieval with exact token budgeting and traces."""
 
     def __init__(
         self,
         *,
+        repo_path: Path,
         store: SynapStore,
         llm_provider: LLMProvider | None,
         trace_store: Any | None = None,
     ) -> None:
+        self.repo_path = repo_path
         self.store = store
         self.llm_provider = llm_provider
-        # Use tiktoken for exact budgeting
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         self.max_expansion_depth = 2
         self.trace_store = trace_store
@@ -52,34 +73,81 @@ class HybridRetrievalEngine:
         trace_id = str(uuid4())
         start_time = datetime.now(UTC)
 
-        # 1. Temporal Filter: Handled by SynapStore methods which operate on current state
-        # (In a more advanced version, we'd filter by specific commit/branch here)
+        # M1: Query Intent Classification
+        intent = "logic"
+        if self.llm_provider:
+            try:
+                system_prompt = "You are a retrieval router. Classify the user query intent as one of: 'structural', 'logic', 'conceptual'. Output ONLY the single word."
+                user_prompt = f"Query: {query}"
+                resp = self.llm_provider.generate(system_prompt, user_prompt, max_tokens=10)
+                result = resp.content.lower().strip()
+                if "structural" in result:
+                    intent = "structural"
+                elif "conceptual" in result:
+                    intent = "conceptual"
+            except Exception as e:
+                import structlog
 
-        # 2. & 3. Lexical + Structural
+                structlog.get_logger().warning("intent_classification_failed", error=str(e))
+
+        # 2. Lexical Matches (BM25)
         query_words = {word.lower().strip() for word in query.split() if len(word) > 2}
-
-        # Start with Lexical matches
         lexical_candidates: dict[str, dict[str, Any]] = {}
         for word in query_words:
             symbols = self.store.get_symbols_by_name(word)
-            for sym in symbols:
+            for rank, sym in enumerate(symbols):
                 sid = sym["symbol_id"]
                 if sid not in lexical_candidates:
-                    lexical_candidates[sid] = {**sym, "reason": f"lexical:'{word}'"}
+                    lexical_candidates[sid] = {
+                        **sym,
+                        "reason": f"lexical:'{word}'",
+                        "lexical_rank": rank,
+                    }
+                else:
+                    lexical_candidates[sid]["lexical_rank"] = min(
+                        lexical_candidates[sid].get("lexical_rank", rank), rank
+                    )
 
         t_lexical = time.perf_counter()
+
+        # 3. Semantic Matches (Vector Search)
+        semantic_candidates: dict[str, dict[str, Any]] = {}
+        if self.llm_provider:
+            try:
+                query_vector = self.llm_provider.embed(query)
+                symbols = self.store.get_similar_symbols(query_vector, limit=50)
+                for rank, sym in enumerate(symbols):
+                    sid = sym["symbol_id"]
+                    semantic_candidates[sid] = {**sym, "reason": "semantic", "semantic_rank": rank}
+            except Exception as e:
+                import structlog
+
+                structlog.get_logger().warning("semantic_search_failed", error=str(e))
+
+        t_semantic = time.perf_counter()
+
+        # Merge Lexical and Semantic candidates
+        combined_candidates: dict[str, dict[str, Any]] = {}
+        for sid, sym in lexical_candidates.items():
+            combined_candidates[sid] = sym
+        for sid, sym in semantic_candidates.items():
+            if sid not in combined_candidates:
+                combined_candidates[sid] = sym
+            else:
+                combined_candidates[sid]["semantic_rank"] = sym["semantic_rank"]
+                combined_candidates[sid]["reason"] += "+semantic"
 
         # Expand to Structural neighborhood
         structural_candidates: dict[str, dict[str, Any]] = {}
         structural_hops = []
-        for sid in list(lexical_candidates.keys()):
+        for sid in list(combined_candidates.keys()):
             neighbors = self.store.get_neighborhood(sid, depth=self.max_expansion_depth)
             for n in neighbors:
                 nid = n["symbol_id"]
                 dist = n.get("distance", 0)
                 structural_hops.append(
                     {
-                        "from_symbol": lexical_candidates[sid]["name"],
+                        "from_symbol": combined_candidates[sid]["name"],
                         "to_symbol": n["name"],
                         "distance": dist,
                     }
@@ -89,51 +157,51 @@ class HybridRetrievalEngine:
 
         t_structural = time.perf_counter()
 
-        # Combine and Rank
-        combined = {**structural_candidates, **lexical_candidates}
+        # Combine all
+        combined = {**structural_candidates, **combined_candidates}
 
-        # 4. Semantic Ranking (simplified for recovery)
-        ranked = self._rank_candidates(query, list(combined.values()))
+        # 4. RRF Ranking with Intent weighting
+        ranked = self._rank_candidates(query, list(combined.values()), intent)
 
         t_ranking = time.perf_counter()
 
         # Context Packing with exact token budgeting
-        packed_blocks = []
-        grounding_sources = []
-        trace_elements = []
-        tokens_used = 0
-
-        # Reserve buffer for system/user prompts
         reserved_buffer = 600
         retrieval_budget = max_tokens - reserved_buffer
 
+        # 5. Token-Aware Context Packing
+        packed_blocks = []
+        tokens_used = 0
+        repo_path = self.repo_path
+        grounding_sources = []
+        trace_elements = []
+
+        included_files = set()
         for cand, score in ranked:
+            if tokens_used >= retrieval_budget:
+                break
+
             path = cand["source_path"]
             name = cand["name"]
             kind = cand["kind"]
-            lines = f"{cand['start_line']}-{cand['end_line']}"
+            start = cand.get("start_line", 1)
+            end = cand.get("end_line", 1)
             reason = cand["reason"]
 
-            block = f"### File: {path}\nSymbol: {name} ({kind})\nLines: {lines}\nReason: {reason}\n"
+            snippet = _get_snippet(repo_path, path, start, end)
+            if not snippet:
+                continue
+
+            block = f"### File: {path}\nSymbol: {name} ({kind})\nLines: {start}-{end}\nReason: {reason}\n```\n{snippet}\n```\n"
             block_tokens = len(self.tokenizer.encode(block))
 
             if tokens_used + block_tokens > retrieval_budget:
-                remaining = retrieval_budget - tokens_used
-                trace_elements.append(
-                    TraceElement(
-                        stable_id=cand["symbol_id"],
-                        name=name,
-                        path=path,
-                        score=score,
-                        reason=f"truncated:over_budget. Requires {block_tokens} tokens, but only {remaining} remain.",
-                        tokens=block_tokens,
-                    )
-                )
                 continue
 
             packed_blocks.append(block)
             grounding_sources.append(cand)
             tokens_used += block_tokens
+            included_files.add(path)
 
             trace_elements.append(
                 TraceElement(
@@ -145,6 +213,20 @@ class HybridRetrievalEngine:
                     tokens=block_tokens,
                 )
             )
+
+        # Expand to full file context if budget allows
+        for path in list(included_files):
+            if tokens_used >= retrieval_budget:
+                break
+            full_file = _get_full_file(repo_path, path)
+            if not full_file:
+                continue
+
+            block = f"### File Full Context: {path}\n```\n{full_file}\n```\n"
+            block_tokens = len(self.tokenizer.encode(block))
+            if tokens_used + block_tokens <= retrieval_budget:
+                packed_blocks.append(block)
+                tokens_used += block_tokens
 
         context_str = "\n".join(packed_blocks)
 
@@ -258,24 +340,42 @@ class HybridRetrievalEngine:
         return answer_content, grounding_sources, trace
 
     def _rank_candidates(
-        self, query: str, candidates: list[dict[str, Any]]
+        self, query: str, candidates: list[dict[str, Any]], intent: str = "logic"
     ) -> list[tuple[dict[str, Any], float]]:
-        """Rank based on priority: Lexical > Structural > Distance."""
+        """Rank candidates using Reciprocal Rank Fusion (RRF) and structural signals."""
+        k = 60
         ranked = []
         for cand in candidates:
-            # Base score from reason
+            score = 0.0
+
+            # Intent-based weights
+            lexical_w = 1.0
+            semantic_w = 1.0
+            structural_w = 1.0
+            if intent == "structural":
+                structural_w = 2.0
+                semantic_w = 0.5
+            elif intent == "conceptual":
+                semantic_w = 2.0
+                lexical_w = 0.5
+            elif intent == "logic":
+                lexical_w = 2.0
+                structural_w = 0.5
+
+            if "lexical_rank" in cand:
+                score += (1.0 / (k + cand["lexical_rank"])) * lexical_w
+            if "semantic_rank" in cand:
+                score += (1.0 / (k + cand["semantic_rank"])) * semantic_w
+
+            # Structural scoring
             reason = cand["reason"]
-            if reason.startswith("lexical"):
-                score = 1.0
-            elif reason.startswith("structural"):
+            if reason.startswith("structural"):
                 dist = int(reason.split("=")[-1])
-                score = 0.8**dist
-            else:
-                score = 0.5
+                score += (1.0 / (k + 100 + dist)) * structural_w
 
             # Name match boost
-            if any(w in cand["name"].lower() for w in query.lower().split()):
-                score += 0.2
+            if any(w in cand["name"].lower() for w in query.lower().split() if len(w) > 2):
+                score += 0.05
 
             ranked.append((cand, score))
 

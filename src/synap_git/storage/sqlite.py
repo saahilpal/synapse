@@ -12,6 +12,20 @@ from typing import Any
 from synap_git.utils.serialization import stable_hash
 
 
+def _cosine_similarity(vec1_json: str, vec2_json: str) -> float:
+    try:
+        v1 = json.loads(vec1_json)
+        v2 = json.loads(vec2_json)
+        dot = sum(a * b for a, b in zip(v1, v2, strict=False))
+        norm_a = sum(a * a for a in v1) ** 0.5
+        norm_b = sum(b * b for b in v2) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return float(dot / (norm_a * norm_b))
+    except Exception:
+        return 0.0
+
+
 class LessonStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -38,7 +52,7 @@ class SynapStore:
             current_version = conn.execute("PRAGMA user_version").fetchone()[0]
 
             # Target schema version
-            TARGET_VERSION = 2
+            TARGET_VERSION = 5
 
             if current_version < 1:
                 conn.executescript("""
@@ -225,10 +239,51 @@ class SynapStore:
                 conn.execute("PRAGMA user_version = 3")
                 current_version = 3
 
+            if current_version < 4:
+                conn.executescript("""
+                    CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash);
+                    CREATE INDEX IF NOT EXISTS idx_files_git_oid ON files(git_oid);
+
+                    CREATE TRIGGER IF NOT EXISTS tgr_symbols_insert 
+                    AFTER INSERT ON symbols BEGIN
+                        INSERT INTO symbols_fts(symbol_id, name, kind, body) 
+                        VALUES (new.symbol_id, new.name, new.kind, new.metadata_json);
+                    END;
+
+                    -- Re-create symbols_fts with body column
+                    DROP TABLE IF EXISTS symbols_fts;
+                    CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
+                        symbol_id UNINDEXED,
+                        name,
+                        kind UNINDEXED,
+                        body
+                    );
+
+                    INSERT INTO symbols_fts (symbol_id, name, kind, body)
+                    SELECT symbol_id, name, kind, metadata_json FROM symbols;
+                """)
+                conn.execute("PRAGMA user_version = 4")
+                current_version = 4
+
+            if current_version < 5:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS agent_memory (
+                        id TEXT PRIMARY KEY,
+                        timestamp INTEGER,
+                        context_key TEXT,
+                        payload TEXT,
+                        summary TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_agent_memory_key ON agent_memory(context_key);
+                """)
+                conn.execute("PRAGMA user_version = 5")
+                current_version = 5
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.create_function("cosine_similarity", 2, _cosine_similarity)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=FULL")
@@ -298,12 +353,6 @@ class SynapStore:
                 symbols_data,
             )
 
-            # Batch insert into FTS5
-            fts_data = [(sym["symbol_id"], sym["name"], sym["kind"]) for sym in symbols]
-            conn.executemany(
-                "INSERT INTO symbols_fts (symbol_id, name, kind) VALUES (?, ?, ?)",
-                fts_data,
-            )
         return file_id
 
     def get_file_by_path(self, path: str) -> dict[str, Any] | None:
@@ -345,22 +394,25 @@ class SynapStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_symbols_by_name(self, name: str) -> list[dict[str, Any]]:
+    def get_symbols_by_name(self, clean_name: str, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            clean_name = name.replace('"', '""')
             rows = conn.execute(
                 """
-                SELECT s.*, f.path as source_path
+                SELECT s.*, f.path as source_path, bm25(symbols_fts) as rank
                 FROM symbols_fts fts
                 JOIN symbols s ON fts.symbol_id = s.symbol_id
                 JOIN files f ON s.file_id = f.file_id
                 WHERE symbols_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
                 """,
-                (f'"{clean_name}"*',),
+                (f'"{clean_name}"* OR body:"{clean_name}"*', limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_neighborhood(self, symbol_id: str, depth: int = 2) -> list[dict[str, Any]]:
+    def get_neighborhood(
+        self, symbol_id: str, depth: int = 2, max_neighbors: int = 50
+    ) -> list[dict[str, Any]]:
         """Use Recursive CTE for SQL-side graph traversal."""
         with self.connect() as conn:
             rows = conn.execute(
@@ -381,8 +433,9 @@ class SynapStore:
                 JOIN files f ON s.file_id = f.file_id
                 JOIN neighborhood n ON s.symbol_id = n.id
                 ORDER BY n.d ASC
+                LIMIT ?
             """,
-                (symbol_id, depth, depth),
+                (symbol_id, depth, depth, max_neighbors),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -433,6 +486,24 @@ class SynapStore:
                 (symbol_id, model_name),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_similar_symbols(
+        self, query_vector: list[float], limit: int = 50
+    ) -> list[dict[str, Any]]:
+        vec_json = json.dumps(query_vector)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.*, f.path as source_path, cosine_similarity(e.vector, ?) as similarity
+                FROM embeddings e
+                JOIN symbols s ON e.symbol_id = s.symbol_id
+                JOIN files f ON s.file_id = f.file_id
+                ORDER BY similarity DESC
+                LIMIT ?
+                """,
+                (vec_json, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def put_decision(
         self, decision_id: str, branch: str, commit_hash: str, content: str, context_info: str
@@ -543,6 +614,36 @@ class SynapStore:
                 (checkpoint_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def store_memory(
+        self,
+        memory_id: str,
+        context_key: str,
+        payload: str,
+        summary: str,
+    ) -> None:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_memory (id, timestamp, context_key, payload, summary)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (memory_id, now, context_key, payload, summary),
+            )
+
+    def get_recent_memory(self, context_key: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM agent_memory
+                WHERE context_key = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (context_key, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def delete_checkpoint(self, checkpoint_id: str) -> None:
         with self.connect() as conn:
