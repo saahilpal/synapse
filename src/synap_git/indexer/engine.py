@@ -317,7 +317,7 @@ class SynapRuntime:
         from rich.console import Console
         from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-        console = Console()
+        console = Console(stderr=True)
         show_progress = self.settings.logging_mode.name == "HUMAN" and num_files > 5
 
         if show_progress:

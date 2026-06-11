@@ -83,7 +83,11 @@ class SynapMCPFacade:
         if should_checkpoint:
             message += f"Threshold ({threshold:.1%}) reached. Checkpoint recommended."
             # Emit CLI notification
-            print(f"\n[Synapse] ⚠ Agent at {percentage:.0%} context — checkpoint recommended.")
+            import sys
+
+            sys.stderr.write(
+                f"\n[Synapse] ⚠ Agent at {percentage:.0%} context — checkpoint recommended.\n"
+            )
         else:
             message += f"Context is within limits (threshold {threshold:.1%})."
 

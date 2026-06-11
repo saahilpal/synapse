@@ -1470,7 +1470,7 @@ def mcp_start(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Start the MCP server."""
-    settings = _settings(path)
+    settings = _settings(path, json_output=True)
     runtime = SynapRuntime(settings)
     runtime.bootstrap()
 

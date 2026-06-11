@@ -45,7 +45,7 @@ class SynapStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
 
             # Get current user version
@@ -287,7 +287,7 @@ class SynapStore:
         conn.create_function("cosine_similarity", 2, _cosine_similarity)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
             conn.commit()
         except Exception:
@@ -395,7 +395,16 @@ class SynapStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_symbols_by_name(self, clean_name: str, limit: int = 50) -> list[dict[str, Any]]:
+    def get_symbols_by_lexical_query(
+        self, query_words: set[str], limit: int = 50
+    ) -> list[dict[str, Any]]:
+        if not query_words:
+            return []
+        parts = []
+        for w in query_words:
+            parts.append(f'"{w}"*')
+            parts.append(f'body:"{w}"*')
+        match_expr = " OR ".join(parts)
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -407,7 +416,7 @@ class SynapStore:
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (f'"{clean_name}"* OR body:"{clean_name}"*', limit),
+                (match_expr, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 

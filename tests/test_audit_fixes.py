@@ -171,8 +171,8 @@ def test_database_connection_synchronous_pragma(tmp_path: Path) -> None:
 
     with runtime.store.connect() as conn:
         sync_mode = conn.execute("PRAGMA synchronous").fetchone()[0]
-        # FULL maps to 2 in SQLite (NORMAL was 1)
-        assert sync_mode == 2, f"Expected synchronous mode 2 (FULL), got {sync_mode}"
+        # NORMAL maps to 1 in SQLite
+        assert sync_mode == 1, f"Expected synchronous mode 1 (NORMAL), got {sync_mode}"
 
 
 def test_file_id_hashing_spec001(tmp_path: Path) -> None:
@@ -392,7 +392,7 @@ async def test_signal_low_context_thresholds(
     res = json.loads(content.text)
     assert res["data"]["should_checkpoint"] is True
     captured = capsys.readouterr()
-    assert "checkpoint recommended" in captured.out
+    assert "checkpoint recommended" in captured.err
 
     # 2. 50% usage (under 60% threshold)
     results2 = await server.mcp.call_tool(

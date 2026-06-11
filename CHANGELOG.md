@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-06-11
+
+### Fixed
+- **CRITICAL: MCP StdIO Stream Corruption**: Fixed a bug where `synap mcp start` and `signal_low_context` would accidentally print progress bars or notifications to `sys.stdout` instead of `sys.stderr`, which corrupted the MCP protocol stream and disconnected IDEs like Cursor/Windsurf.
+- **UX Improvements**: Improved the silence logic in CLI initialization to prevent unnecessary rich formatting in JSON/MCP environments.
+
 ## [2.1.0] - 2026-05-29
 
 ### Added

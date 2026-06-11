@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,23 +23,32 @@ class TraceElement:
     tokens: int
 
 
-def _get_snippet(repo_path: Path, rel_path: str, start_line: int, end_line: int) -> str:
+@functools.lru_cache(maxsize=256)
+def _get_file_lines(repo_path: Path, rel_path: str) -> list[str] | None:
     try:
         p = repo_path / rel_path
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        s_idx = max(0, start_line - 1)
-        e_idx = min(len(lines), end_line)
-        return "\n".join(lines[s_idx:e_idx])
-    except Exception:
+        return p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as e:
+        import structlog
+
+        structlog.get_logger().warning("file_read_failed", path=rel_path, error=str(e))
+        return None
+
+
+def _get_snippet(repo_path: Path, rel_path: str, start_line: int, end_line: int) -> str:
+    lines = _get_file_lines(repo_path, rel_path)
+    if lines is None:
         return ""
+    s_idx = max(0, start_line - 1)
+    e_idx = min(len(lines), end_line)
+    return "\n".join(lines[s_idx:e_idx])
 
 
 def _get_full_file(repo_path: Path, rel_path: str) -> str:
-    try:
-        p = repo_path / rel_path
-        return p.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+    lines = _get_file_lines(repo_path, rel_path)
+    if lines is None:
         return ""
+    return "\n".join(lines)
 
 
 class HybridRetrievalEngine:
@@ -93,20 +103,15 @@ class HybridRetrievalEngine:
         # 2. Lexical Matches (BM25)
         query_words = {word.lower().strip() for word in query.split() if len(word) > 2}
         lexical_candidates: dict[str, dict[str, Any]] = {}
-        for word in query_words:
-            symbols = self.store.get_symbols_by_name(word)
-            for rank, sym in enumerate(symbols):
-                sid = sym["symbol_id"]
-                if sid not in lexical_candidates:
-                    lexical_candidates[sid] = {
-                        **sym,
-                        "reason": f"lexical:'{word}'",
-                        "lexical_rank": rank,
-                    }
-                else:
-                    lexical_candidates[sid]["lexical_rank"] = min(
-                        lexical_candidates[sid].get("lexical_rank", rank), rank
-                    )
+        symbols = self.store.get_symbols_by_lexical_query(query_words)
+        for rank, sym in enumerate(symbols):
+            sid = sym["symbol_id"]
+            if sid not in lexical_candidates:
+                lexical_candidates[sid] = {
+                    **sym,
+                    "reason": "lexical_match",
+                    "lexical_rank": rank,
+                }
 
         t_lexical = time.perf_counter()
 
