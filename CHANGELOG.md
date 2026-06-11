@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2026-06-11
+
+### Refactored
+- **Daemon Teardown**: Refactored the forceful SIGTERM daemon teardown logic to safely toggle via `force_exit=True` rather than a blanket catch-all. Makes programmatic `daemon.stop()` safer without blocking terminal UI interactions.
+
 ## [2.1.4] - 2026-06-11
 
 ### Fixed

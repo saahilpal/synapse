@@ -123,21 +123,22 @@ class RuntimeDaemon:
             self._delete_heartbeat()
             self.logger.info("daemon_stopped")
 
-    def stop(self) -> None:
+    def stop(self, force_exit: bool = False) -> None:
         if not self._stop_event.is_set():
             self.logger.info("daemon_stop_requested")
             self._stop_event.set()
 
             # Force immediate cleanup and exit to avoid thread-join blocking
-            try:
-                self.runtime.shutdown()
-                self._delete_heartbeat()
-            except Exception:
-                pass
+            if force_exit:
+                try:
+                    self.runtime.shutdown()
+                    self._delete_heartbeat()
+                except Exception:
+                    pass
 
-            import os
+                import os
 
-            os._exit(0)
+                os._exit(0)
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
@@ -327,7 +328,7 @@ class RuntimeDaemon:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(sig, self.stop)
+                loop.add_signal_handler(sig, lambda: self.stop(force_exit=True))
             except NotImplementedError:
                 continue
 
