@@ -718,6 +718,9 @@ def daemon_run(
     daemon = RuntimeDaemon(settings)
     asyncio.run(daemon.start())
 
+    # Forceful process exit to prevent atexit thread-join blocking
+    os._exit(0)
+
 
 @app.command()
 def stop(

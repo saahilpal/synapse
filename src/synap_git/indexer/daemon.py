@@ -100,14 +100,10 @@ class RuntimeDaemon:
             self._running = False
             self.logger.info("daemon_shutting_down")
             self._ui_server.should_exit = True
-
-            from synap_git.config import RuntimeProfile
-
-            if self.settings.profile == RuntimeProfile.TEST:
-                self._ui_server.force_exit = True
+            self._ui_server.force_exit = True  # Always force exit since daemon is terminating
 
             # Allow uvicorn and wiki worker to shut down gracefully
-            timeout = self.settings.shutdown_timeout_seconds
+            timeout = 0.5
             self.logger.info("daemon_waiting_for_tasks", timeout=timeout)
 
             tasks = [server_task, wiki_worker_task]
@@ -131,6 +127,17 @@ class RuntimeDaemon:
         if not self._stop_event.is_set():
             self.logger.info("daemon_stop_requested")
             self._stop_event.set()
+
+            # Force immediate cleanup and exit to avoid thread-join blocking
+            try:
+                self.runtime.shutdown()
+                self._delete_heartbeat()
+            except Exception:
+                pass
+
+            import os
+
+            os._exit(0)
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
