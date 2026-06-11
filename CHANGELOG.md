@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-06-11
+
+### Fixed
+- **CRITICAL: Daemon Thread Explosion**: Patched a massive concurrency edge case in `SynapRuntime` where large repository indexing would trigger unbounded `threading.Thread` loops for LLM embeddings. A bounded `ThreadPoolExecutor` has been introduced to prevent OOMs, OS thread starvation, and rate-limit hits during first-run indexing.
+- **Daemon Lifecycle**: Ensure `embedding_executor` shuts down cleanly without leaking background threads when the daemon loop receives SIGTERM.
+
 ## [2.1.1] - 2026-06-11
 
 ### Fixed

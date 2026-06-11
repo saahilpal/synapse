@@ -81,6 +81,17 @@ class SynapRuntime:
         self.wiki = WikiEngine(settings, self.store)
         self.commit_count = 0
 
+        import concurrent.futures
+
+        self.embedding_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=5, thread_name_prefix="embed_worker"
+        )
+
+    def shutdown(self) -> None:
+        """Gracefully shutdown background tasks and executors."""
+        self.logger.info("shutting_down_embedding_executor")
+        self.embedding_executor.shutdown(wait=False)
+
     def initialize_storage(self, *, auto_recover: bool = True) -> None:
         self.settings.ensure_directories()
         if auto_recover and self.store.path.exists() and self.store.recover_if_corrupted():
@@ -284,15 +295,7 @@ class SynapRuntime:
             except Exception as e:
                 logger.warning("background_embed_failed", error=str(e))
 
-        try:
-            import asyncio
-
-            loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(_worker))
-        except RuntimeError:
-            import threading
-
-            threading.Thread(target=_worker, daemon=True).start()
+        self.embedding_executor.submit(_worker)
 
     def _first_run_index(self, git_state: GitState) -> str | None:
         self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)

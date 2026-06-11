@@ -123,6 +123,7 @@ class RuntimeDaemon:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+            self.runtime.shutdown()
             self._delete_heartbeat()
             self.logger.info("daemon_stopped")
 
