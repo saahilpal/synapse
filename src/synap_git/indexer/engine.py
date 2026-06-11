@@ -601,55 +601,77 @@ class SynapRuntime:
         # Process additions and modifications
         registry = CodeParserRegistry()
         parsed_results = []
-        for rel_path in filtered_added_or_modified:
-            self.logger.info("reindexing_file", path=rel_path)
-            p = self.settings.repository_path / rel_path
 
-            try:
-                content = p.read_text(encoding="utf-8", errors="replace")
-            except Exception as e:
-                self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
-                continue
+        import contextlib
 
-            import hashlib
+        from rich.console import Console
 
-            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-            file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
+        console = Console(stderr=True)
+        show_progress = (
+            self.settings.logging_mode.name == "HUMAN" and len(filtered_added_or_modified) > 0
+        )
 
-            parse_result = registry.parse(p, relative_path=rel_path, text=content)
-            symbols_list = [
-                {
-                    "symbol_id": sym.stable_id,
-                    "name": sym.name,
-                    "kind": sym.kind,
-                    "start_line": sym.start_line,
-                    "end_line": sym.end_line,
-                    "ast_hash": sym.ast_hash,
-                    "metadata": sym.metadata,
-                }
-                for sym in parse_result.symbols
-            ]
-
-            self.store.upsert_file_and_symbols(
-                file_id=file_id_hash,
-                path=rel_path,
-                git_oid=git_oids.get(rel_path, ""),
-                content_hash=content_hash,
-                language=parse_result.language,
-                symbols=symbols_list,
+        with (
+            console.status(
+                "[yellow]Parsing incrementally changed files...[/yellow]", spinner="dots"
             )
-            self._schedule_embedding(file_id_hash, symbols_list, content_hash)
+            if show_progress
+            else contextlib.nullcontext()
+        ) as status_ctx:
+            for idx, rel_path in enumerate(filtered_added_or_modified, 1):
+                if show_progress and hasattr(status_ctx, "update"):
+                    status_ctx.update(  # type: ignore[union-attr]
+                        f"[yellow]Parsing incrementally changed files ([white]{idx}/{len(filtered_added_or_modified)}[/white])...[/yellow]"
+                    )
 
-            self.store.set_wiki_status(rel_path, None, "stale")
-            self.store.enqueue_wiki(rel_path)
+                self.logger.info("reindexing_file", path=rel_path)
+                p = self.settings.repository_path / rel_path
 
-            with self.store.connect() as conn:
-                conn.execute(
-                    "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
-                    (file_id_hash,),
+                try:
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                except Exception as e:
+                    self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
+                    continue
+
+                import hashlib
+
+                content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
+
+                parse_result = registry.parse(p, relative_path=rel_path, text=content)
+                symbols_list = [
+                    {
+                        "symbol_id": sym.stable_id,
+                        "name": sym.name,
+                        "kind": sym.kind,
+                        "start_line": sym.start_line,
+                        "end_line": sym.end_line,
+                        "ast_hash": sym.ast_hash,
+                        "metadata": sym.metadata,
+                    }
+                    for sym in parse_result.symbols
+                ]
+
+                self.store.upsert_file_and_symbols(
+                    file_id=file_id_hash,
+                    path=rel_path,
+                    git_oid=git_oids.get(rel_path, ""),
+                    content_hash=content_hash,
+                    language=parse_result.language,
+                    symbols=symbols_list,
                 )
+                self._schedule_embedding(file_id_hash, symbols_list, content_hash)
 
-            parsed_results.append((file_id_hash, rel_path, list(parse_result.imports)))
+                self.store.set_wiki_status(rel_path, None, "stale")
+                self.store.enqueue_wiki(rel_path)
+
+                with self.store.connect() as conn:
+                    conn.execute(
+                        "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                        (file_id_hash,),
+                    )
+
+                parsed_results.append((file_id_hash, rel_path, list(parse_result.imports)))
 
         # Re-resolve edges for changed files
         if parsed_results:

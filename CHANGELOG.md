@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-06-11
+
+### Changed
+- **CLI Interactivity Enhancement**: Wrapped all long-running `synap` CLI commands (`init`, `start`, `stop`, `rollback`, `repair`) with interactive rich status spinners to ensure users never stare at an empty screen.
+- **Incremental Indexing Progress**: Added a rich progress status to the `_incremental_index` background loop to provide visibility into parsing tasks during cache hits.
+
 ## [2.1.2] - 2026-06-11
 
 ### Fixed

@@ -524,7 +524,13 @@ def init(
     _auto_protect_synap(settings.repository_path)
 
     runtime = SynapRuntime(settings)
-    commit = runtime.bootstrap(force=force)
+    if not quiet and not json_output:
+        with console.status(
+            "[yellow]Initializing Synap runtime and scanning repository...[/yellow]", spinner="dots"
+        ):
+            commit = runtime.bootstrap(force=force)
+    else:
+        commit = runtime.bootstrap(force=force)
 
     if json_output:
         _emit({"active_commit": commit, "state": "initialized"}, json_output=True)
@@ -670,20 +676,22 @@ def start(
         console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
         raise typer.Exit(1)
 
-    console.print("[yellow]Starting Synap daemon...[/yellow]")
     success = False
-    for _ in range(15):  # wait up to 3 seconds
-        time.sleep(0.2)
-        if pid_file.exists():
-            hb = _read_daemon_heartbeat(abs_path)
-            if hb and hb.get("status") in ("healthy", "degraded"):
-                success = True
-                port = hb.get("port", 9876)
-                pid = int(hb.get("pid", 0))
-                console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
-                console.print("[green]✓ Runtime healthy[/green]")
-                console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
-                break
+    with console.status(
+        "[yellow]Starting Synap daemon and awaiting health check...[/yellow]", spinner="dots"
+    ):
+        for _ in range(15):  # wait up to 3 seconds
+            time.sleep(0.2)
+            if pid_file.exists():
+                hb = _read_daemon_heartbeat(abs_path)
+                if hb and hb.get("status") in ("healthy", "degraded"):
+                    success = True
+                    port = hb.get("port", 9876)
+                    pid = int(hb.get("pid", 0))
+                    console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
+                    console.print("[green]✓ Runtime healthy[/green]")
+                    console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
+                    break
 
     if not success:
         console.print(
@@ -766,11 +774,15 @@ def stop(
 
     # Wait for graceful shutdown (up to 10 seconds)
     success = False
-    for _ in range(50):
-        time.sleep(0.2)
-        if not _is_process_running(pid):
-            success = True
-            break
+    with console.status(
+        f"[yellow]Waiting for daemon (PID {pid}) to shut down gracefully...[/yellow]",
+        spinner="dots",
+    ):
+        for _ in range(50):
+            time.sleep(0.2)
+            if not _is_process_running(pid):
+                success = True
+                break
 
     # If graceful failed, force kill
     if not success:
@@ -1234,7 +1246,10 @@ def rollback(
 
         structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
-    runtime.bootstrap(force=True)
+    with console.status(
+        f"[yellow]Reindexing repository to match {selected_commit}...[/yellow]", spinner="dots"
+    ):
+        runtime.bootstrap(force=True)
     console.print(f"[green]✓ Rolled back successfully to {selected_commit}[/green]")
 
 
@@ -1294,15 +1309,17 @@ def repair(
 
     runtime.initialize_storage()
     console.print("[2/3] Reindexing all symbols")
-    runtime.bootstrap(force=True)
+    with console.status("[yellow]Reindexing repository...[/yellow]", spinner="dots"):
+        runtime.bootstrap(force=True)
 
     console.print("[3/3] Regenerating wiki from last known state")
-    try:
-        runtime.wiki.generate_project_wiki()
-    except Exception as e:
-        import structlog
+    with console.status("[yellow]Regenerating wiki documentation...[/yellow]", spinner="dots"):
+        try:
+            runtime.wiki.generate_project_wiki()
+        except Exception as e:
+            import structlog
 
-        structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
 
     status_info = runtime.status()
     console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")

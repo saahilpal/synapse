@@ -27,7 +27,7 @@
     <path d="M-200,-40 C-100,-40 -50,60 0,20 S100,-40 200,30" stroke="url(#primary)" stroke-width="3" fill="none" opacity="0.8" filter="url(#glow)"/>
     <path d="M-150,50 L-50,0 L50,50 L150,-10" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,4" fill="none" opacity="0.5"/>
     <path d="M-100,-20 L0,-60 L100,-20" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="2,2" fill="none" opacity="0.4"/>
-    
+
     <!-- Data Points -->
     <circle cx="-200" cy="-40" r="6" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
     <circle cx="-150" cy="50" r="4" fill="#3b82f6"/>
