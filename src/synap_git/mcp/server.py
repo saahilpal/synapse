@@ -145,9 +145,7 @@ class SynapMCPServer:
                     except Exception as e:
                         import structlog
 
-                        structlog.get_logger().error(
-                            "suppressed_error_caught", error=str(e), exc_info=True
-                        )
+                        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
                     return json.dumps(
                         {
@@ -187,9 +185,7 @@ class SynapMCPServer:
                     except Exception as e:
                         import structlog
 
-                        structlog.get_logger().error(
-                            "suppressed_error_caught", error=str(e), exc_info=True
-                        )
+                        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
                     return json.dumps(
                         {

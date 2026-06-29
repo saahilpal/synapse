@@ -57,11 +57,9 @@ class TraceStore:
         try:
             data = json.loads(self.trace_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                import typing
-
-                return typing.cast(dict[str, Any], data)
+                return data
             return {"error": "Invalid trace structure"}
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             return {
                 "trace_id": "error",
                 "timestamp": datetime.now(UTC).isoformat(),

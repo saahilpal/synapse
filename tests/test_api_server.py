@@ -19,13 +19,21 @@ def runtime(tmp_path: Path) -> SynapRuntime:
     )
     r = SynapRuntime(settings)
     r.initialize_storage()
+
+    import json
+
+    (tmp_path / ".synap").mkdir(exist_ok=True, parents=True)
+    (tmp_path / ".synap" / "daemon_heartbeat.json").write_text(
+        json.dumps({"pid": 1234, "api_token": "test-token"})
+    )
     return r
 
 
 @pytest.fixture
 def client(runtime: SynapRuntime) -> TestClient:
     app = create_app(runtime)
-    return TestClient(app)
+    client = TestClient(app, headers={"Authorization": "Bearer test-token"})
+    return client
 
 
 def test_api_get_status(client: TestClient) -> None:

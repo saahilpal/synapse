@@ -39,12 +39,42 @@ MANIFEST_NAMES = {
 LANGUAGE_BY_SUFFIX = {
     ".py": "python",
     ".ts": "typescript",
-    ".tsx": "typescript",
+    ".tsx": "tsx",
     ".js": "javascript",
     ".jsx": "javascript",
     ".rs": "rust",
     ".go": "go",
     ".md": "markdown",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".cc": "cpp",
+    ".java": "java",
+    ".rb": "ruby",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".cs": "c_sharp",
+    ".php": "php",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".sql": "sql",
+    ".json": "json",
+    ".toml": "toml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".html": "html",
+    ".css": "css",
+    ".scss": "scss",
+    ".xml": "xml",
+    ".lua": "lua",
+    ".r": "r",
+    ".jl": "julia",
+    ".dart": "dart",
+    ".m": "objc",
+    ".mm": "objc",
 }
 
 
@@ -204,7 +234,7 @@ class RepositoryScanner:
                 lines = gitignore_path.read_text(encoding="utf-8").splitlines()
                 self.gitignore = GitIgnoreSpec(self.repository_path, lines)
             except Exception as e:
-                logger.warning("failed_to_load_gitignore", error=str(e))
+                logger.warning("failed_to_load_gitignore", exc_info=True)
 
         synapignore_path = self.repository_path / ".synapignore"
         if synapignore_path.exists():
@@ -212,7 +242,7 @@ class RepositoryScanner:
                 lines = synapignore_path.read_text(encoding="utf-8").splitlines()
                 self.synapignore = GitIgnoreSpec(self.repository_path, lines)
             except Exception as e:
-                logger.warning("failed_to_load_synapignore", error=str(e))
+                logger.warning("failed_to_load_synapignore", exc_info=True)
 
     def _get_paths(self) -> list[Path]:
         paths: list[Path] = []

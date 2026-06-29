@@ -9,15 +9,6 @@ from tree_sitter import Node, Parser
 
 from synap_git.utils.serialization import stable_hash
 
-PYTHON_SUFFIXES = {".py"}
-JAVASCRIPT_SUFFIXES = {".js", ".jsx"}
-TYPESCRIPT_SUFFIXES = {".ts", ".tsx"}
-GO_SUFFIXES = {".go"}
-RUST_SUFFIXES = {".rs"}
-JAVA_SUFFIXES = {".java"}
-CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
-RUBY_SUFFIXES = {".rb"}
-
 
 @dataclass(frozen=True)
 class CodeSymbol:
@@ -44,14 +35,17 @@ class CodeParserRegistry:
     """Deterministic AST parser using Tree-sitter for structural grounding."""
 
     def __init__(self) -> None:
-        self._parsers: dict[str, Parser] = {}
+        self._parsers: dict[str, Parser | None] = {}
 
-    def _get_parser(self, lang_name: str) -> Parser:
+    def _get_parser(self, lang_name: str) -> Parser | None:
         if lang_name not in self._parsers:
-            lang = tree_sitter_languages.get_language(lang_name)
-            parser = Parser()
-            parser.set_language(lang)
-            self._parsers[lang_name] = parser
+            try:
+                lang = tree_sitter_languages.get_language(lang_name)
+                parser = Parser()
+                parser.set_language(lang)
+                self._parsers[lang_name] = parser
+            except Exception:
+                self._parsers[lang_name] = None
         return self._parsers[lang_name]
 
     def parse(self, path: Path, *, relative_path: str, text: str | None = None) -> CodeParseResult:
@@ -60,36 +54,39 @@ class CodeParserRegistry:
             if text is None:
                 text = path.read_text(encoding="utf-8", errors="replace")
 
-            if suffix in PYTHON_SUFFIXES:
-                return self._parse_tree_sitter(text, "python", relative_path)
-            if suffix in JAVASCRIPT_SUFFIXES:
-                return self._parse_tree_sitter(text, "javascript", relative_path)
-            if suffix in TYPESCRIPT_SUFFIXES:
-                return self._parse_tree_sitter(text, "tsx", relative_path)
-            if suffix in GO_SUFFIXES:
-                return self._parse_tree_sitter(text, "go", relative_path)
-            if suffix in RUST_SUFFIXES:
-                return self._parse_tree_sitter(text, "rust", relative_path)
-            if suffix in JAVA_SUFFIXES:
-                return self._parse_tree_sitter(text, "java", relative_path)
-            if suffix in CPP_SUFFIXES:
-                return self._parse_tree_sitter(text, "cpp", relative_path)
-            if suffix in RUBY_SUFFIXES:
-                return self._parse_tree_sitter(text, "ruby", relative_path)
+            from synap_git.indexer.scanner import LANGUAGE_BY_SUFFIX
+
+            lang_name = LANGUAGE_BY_SUFFIX.get(suffix)
+
+            # Shebang detection for files without extension
+            if not lang_name and text.startswith("#!"):
+                first_line = text.split("\n", 1)[0].lower()
+                if "python" in first_line:
+                    lang_name = "python"
+                elif "node" in first_line:
+                    lang_name = "javascript"
+                elif "bash" in first_line or "sh" in first_line:
+                    lang_name = "bash"
+                elif "ruby" in first_line:
+                    lang_name = "ruby"
+
+            if lang_name:
+                parser = self._get_parser(lang_name)
+                if parser:
+                    return self._parse_tree_sitter(text, lang_name, relative_path, parser)
 
             return CodeParseResult(path=relative_path, language="unknown", symbols=())
         except Exception as e:
             import structlog
 
-            structlog.get_logger(__name__).warning(
-                "parser_failed", path=relative_path, error=str(e)
-            )
+            structlog.get_logger().warning("parser_failed", path=relative_path, exc_info=True)
             return CodeParseResult(
                 path=relative_path, language="unknown", symbols=(), syntax_error=str(e)
             )
 
-    def _parse_tree_sitter(self, text: str, lang_name: str, relative_path: str) -> CodeParseResult:
-        parser = self._get_parser(lang_name)
+    def _parse_tree_sitter(
+        self, text: str, lang_name: str, relative_path: str, parser: Parser
+    ) -> CodeParseResult:
         text_bytes = bytes(text, "utf8")
         tree = parser.parse(text_bytes)
 

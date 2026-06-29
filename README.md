@@ -393,15 +393,19 @@ synap mcp config .
 
 ## Supported Languages
 
-Synap processes syntax for the following formats:
+Synap now processes syntax dynamically for **over 50 programming languages** via `tree-sitter-languages`, including:
+
 * **Python** (`.py`)
-* **JavaScript / JSX** (`.js`, `.jsx`)
-* **TypeScript / TSX** (`.ts`, `.tsx`)
-* **Go** (`.go`)
-* **Rust** (`.rs`)
-* **Java** (`.java`)
-* **C / C++** (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`)
-* **Ruby** (`.rb`)
+* **JavaScript / TypeScript** (`.js`, `.jsx`, `.ts`, `.tsx`)
+* **C / C++ / C#** (`.c`, `.cpp`, `.h`, `.hpp`, `.cs`)
+* **Java / Kotlin / Scala** (`.java`, `.kt`, `.kts`, `.scala`)
+* **Go / Rust / Swift** (`.go`, `.rs`, `.swift`)
+* **Ruby / PHP / Perl** (`.rb`, `.php`, `.pl`)
+* **Shell Scripts** (`.sh`, `.bash`, or via `#!` shebang detection)
+* **Data / Config** (`.sql`, `.json`, `.yaml`, `.toml`, `.xml`)
+* **Web** (`.html`, `.css`, `.scss`)
+
+Even extensionless scripts are gracefully detected via shebang parsing. Missing grammars automatically degrade gracefully to plaintext indexing.
 
 ---
 

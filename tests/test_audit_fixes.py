@@ -34,8 +34,13 @@ def test_path_traversal_protection(tmp_path: Path) -> None:
     # Write an unsafe file outside the wiki dir
     (tmp_path / "unsafe.md").write_text("Secret content", encoding="utf-8")
 
+    import json
+
+    (tmp_path / ".synap" / "daemon_heartbeat.json").write_text(
+        json.dumps({"pid": 1234, "api_token": "test-token"})
+    )
     app = create_app(runtime)
-    client = TestClient(app)
+    client = TestClient(app, headers={"Authorization": "Bearer test-token"})
 
     # Test safe request
     res = client.get("/wiki/safe")

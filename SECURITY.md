@@ -21,11 +21,12 @@ Synap handles repository structure, source summaries, manual notes, and agent-fa
 
 ## Controls
 
-- `SecretRedactor` recursively scrubs common credential keys and token patterns.
-- `InputValidator` clamps limits and enforces repository path containment.
-- `IngestionSanitizer` rejects unsafe manual note content.
+- `SecretRedactor` recursively scrubs common credential keys and token patterns from retrieval outputs.
+- `InputValidator` clamps numeric limits, enforces repository path containment, and validates query safety.
+- `IngestionSanitizer` cleans and validates manual notes, lesson contents, and checkpoint fields before storage.
 - SQLite runs locally in WAL mode.
 - `synap doctor` verifies database health, object integrity, and replay diagnostics.
+- API authentication secures the REST endpoints and CORS is restricted to localhost.
 
 ## Reporting Vulnerabilities
 

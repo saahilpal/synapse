@@ -143,7 +143,13 @@ app.add_typer(usage_app, name="usage")
 def setup(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Interactive first-run setup and onboarding."""
+    """
+    Interactive first-run setup and onboarding.
+
+    Examples:
+        synap setup
+        synap setup /path/to/repo
+    """
     import sys
 
     import httpx
@@ -516,7 +522,13 @@ def init(
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress output.")] = False,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
-    """Initialize local Synap state and perform first scan."""
+    """
+    Initialize local Synap state and perform first scan.
+
+    Examples:
+        synap init
+        synap init --force --skip-llm
+    """
     settings = _settings(path, json_output=json_output)
     if skip_llm:
         settings.llm_provider = None
@@ -547,9 +559,14 @@ def init(
 @app.command()
 def wipe(
     path: Annotated[str, typer.Argument(help="Repository path to wipe.")] = ".",
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip confirmation prompt and force wipe")
+    ] = False,
 ) -> None:
     """Completely purge the local index for a fresh rebuild."""
-    if not typer.confirm("This will delete all indexed symbols and embeddings. Continue?"):
+    if not yes and not typer.confirm(
+        "This will delete all indexed symbols and embeddings. Continue?"
+    ):
         raise typer.Abort()
     runtime = SynapRuntime(_settings(path))
     runtime.wipe_index()
@@ -651,7 +668,7 @@ def start(
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
     # 2. Spawn detached daemon process
     cmd = [sys.executable, "-m", "synap_git.cli", "daemon-run", abs_path.as_posix()]
@@ -718,8 +735,9 @@ def daemon_run(
     daemon = RuntimeDaemon(settings)
     asyncio.run(daemon.start())
 
-    # Forceful process exit to prevent atexit thread-join blocking
-    os._exit(0)
+    import sys
+
+    sys.exit(0)
 
 
 @app.command()
@@ -802,7 +820,7 @@ def stop(
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
         success = not _is_process_running(pid)
 
     # Clean up lockfiles
@@ -968,7 +986,13 @@ def search(
         int, typer.Option("--max-tokens", help="Maximum context window tokens.")
     ] = 4000,
 ) -> None:
-    """Execute a hybrid structural search across the repository."""
+    """
+    Execute a hybrid structural search across the repository.
+
+    Examples:
+        synap search "database connection logic"
+        synap search "authentication middleware" --path /path/to/repo --max-tokens 8000
+    """
     settings = _settings(path)
     runtime = SynapRuntime(settings)
 
@@ -1247,7 +1271,7 @@ def rollback(
     except Exception as e:
         import structlog
 
-        structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
     with console.status(
         f"[yellow]Reindexing repository to match {selected_commit}...[/yellow]", spinner="dots"
@@ -1322,7 +1346,7 @@ def repair(
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
     status_info = runtime.status()
     console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")

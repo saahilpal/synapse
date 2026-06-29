@@ -40,10 +40,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/saahilpal/synap-git"
-Repository = "https://github.com/saahilpal/synap-git"
-Issues = "https://github.com/saahilpal/synap-git/issues"
-Changelog = "https://github.com/saahilpal/synap-git/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/saahilpal/synapse"
+Repository = "https://github.com/saahilpal/synapse"
+Issues = "https://github.com/saahilpal/synapse/issues"
+Changelog = "https://github.com/saahilpal/synapse/blob/main/CHANGELOG.md"
 
 
 [project.optional-dependencies]

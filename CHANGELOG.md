@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.5] - 2026-06-11
 
+## [2.1.6] - 2026-06-29
+
+### Added
+- **Universal Language Expansion**: Expanded tree-sitter AST parsing support from 4 hardcoded languages to dynamically supporting over ~50 languages using `tree-sitter-languages`. Also added dynamic shebang detection (`#!`) to parse extensionless scripts as python, ruby, node, and bash scripts.
+- **API Rate Limiting**: Implemented a global `RateLimitedProvider` to throttle LLM and embedding calls to 3 requests per second to mitigate resource exhaustion on the diagnostic API.
+
+### Fixed
+- **Broad Exception Handling**: Eradicated remaining `except Exception:` blocks across diagnostics, daemon execution, indexer scanning, and module resolution, and replaced them with `OSError`, `sqlite3.Error`, and specific errors to prevent silent data corruption.
+- **Async Sleep Compatibility**: Fixed thread-blocking `time.sleep()` in LLM retries by delegating to `anyio.from_thread.run(anyio.sleep)` if invoked inside FastMCP worker threads.
+- **Edge Resolution & Source Paths**: Added support for resolving Javascript, Java, C++, Ruby, and more during import/edge resolution.
+- **Module Path Trimming**: Improved module path mapping by trimming `internal/`, `source/`, `packages/`, `main/`, `java/`, `kotlin/`, `scala/` from module keys.
+- **Wipe Confirmation**: Added a `--yes` confirmation bypass flag for `synap wipe` and enforced safety confirmation in non-interactive terminals.
+- **Metadata Fixes**: Corrected repository URLs in `pyproject.toml` to correctly point to `synapse` instead of `synap-git`.
+
 ### Refactored
 - **Daemon Teardown**: Refactored the forceful SIGTERM daemon teardown logic to safely toggle via `force_exit=True` rather than a blanket catch-all. Makes programmatic `daemon.stop()` safer without blocking terminal UI interactions.
 

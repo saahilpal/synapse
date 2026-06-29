@@ -290,7 +290,7 @@ class SynapStore:
             conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
             conn.commit()
-        except Exception:
+        except sqlite3.Error:
             conn.rollback()
             raise
         finally:
@@ -311,7 +311,21 @@ class SynapStore:
             p = Path(path)
             stem_path = p.with_suffix("")
             parts = list(stem_path.parts)
-            if parts and parts[0] in ("src", "lib", "app", "cmd", "pkg"):
+            skip_prefixes = {
+                "src",
+                "lib",
+                "app",
+                "cmd",
+                "pkg",
+                "internal",
+                "source",
+                "packages",
+                "main",
+                "java",
+                "kotlin",
+                "scala",
+            }
+            while parts and parts[0] in skip_prefixes:
                 parts = parts[1:]
             if parts and parts[-1] == "__init__":
                 parts = parts[:-1]
@@ -695,7 +709,7 @@ class SynapStore:
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
         # If we got here, it's corrupted or unreachable. Wipe it securely.
         for ext in ["", "-wal", "-shm"]:
@@ -840,7 +854,6 @@ class SynapStore:
             conn.execute("DELETE FROM llm_calls")
             conn.execute("DELETE FROM wiki_status")
             conn.execute("DELETE FROM wiki_queue")
-            conn.execute("DELETE FROM symbols_fts")
 
         # Run VACUUM outside the transaction context
         conn = sqlite3.connect(self.path, isolation_level=None, timeout=30.0)

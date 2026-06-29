@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import concurrent.futures
+import contextlib
+import hashlib
+import json
+import multiprocessing
+import subprocess
+import time
+import uuid
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
+import structlog
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
 from synap_git.config import SynapSettings
 from synap_git.diagnostics.logger import get_logger
+from synap_git.diagnostics.tracing import TraceStore
 from synap_git.git import GitRepository, GitState
-from synap_git.indexer.scanner import RepositoryScanner
+from synap_git.indexer.scanner import RepositoryScanner, _is_binary_file
+from synap_git.indexer.wiki import WikiEngine
 from synap_git.parser.registry import CodeParserRegistry
 from synap_git.provider.factory import get_llm_provider
 from synap_git.retrieval.engine import HybridRetrievalEngine
@@ -16,8 +33,6 @@ from synap_git.utils.serialization import stable_hash
 
 
 def _parse_worker(args: tuple[Path, str, str | None]) -> dict[str, Any]:
-    from synap_git.parser.registry import CodeParserRegistry
-
     path, rel_path, content = args
     registry = CodeParserRegistry()
     res = registry.parse(path, relative_path=rel_path, text=content)
@@ -61,8 +76,6 @@ class SynapRuntime:
         if settings.sqlite_path is None:
             raise ValueError("Storage paths must be configured.")
 
-        from synap_git.diagnostics.tracing import TraceStore
-
         self.trace_store = TraceStore(settings.repository_path)
         self.store = SynapStore(settings.sqlite_path)
         self.git = GitRepository(settings.repository_path)
@@ -76,12 +89,8 @@ class SynapRuntime:
         )
         self.logger = get_logger("runtime")
 
-        from synap_git.indexer.wiki import WikiEngine
-
         self.wiki = WikiEngine(settings, self.store)
         self.commit_count = 0
-
-        import concurrent.futures
 
         self.embedding_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=5, thread_name_prefix="embed_worker"
@@ -121,7 +130,7 @@ class SynapRuntime:
             if added:
                 gitignore_path.write_text(new_content, encoding="utf-8")
         except Exception as e:
-            self.logger.warning("failed_to_auto_protect_synap", error=str(e))
+            self.logger.warning("failed_to_auto_protect_synap", exc_info=True)
 
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
@@ -140,8 +149,6 @@ class SynapRuntime:
             and existing_commit != "unknown"
         ):
             try:
-                from synap_git.git.state import GitState
-
                 prev = GitState(
                     repository_path=self.settings.repository_path,
                     is_repository=True,
@@ -153,9 +160,7 @@ class SynapRuntime:
                     self.handle_revert(prev, git_state)
                     return git_state.head_commit
             except Exception as e:
-                import structlog
-
-                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
         return self.index_repository(git_state=git_state, force=force)
 
@@ -179,11 +184,6 @@ class SynapRuntime:
         self.initialize_storage()
         revert_commit = current_state.head_commit or "unknown"
         reverted_from = previous_state.head_commit if previous_state else "unknown"
-
-        import json
-        import subprocess
-        import uuid
-        from datetime import UTC, datetime
 
         try:
             diff_out = subprocess.check_output(  # noqa: S603
@@ -243,8 +243,6 @@ class SynapRuntime:
         # Automatic periodic checkpointing (unrelated to indexing itself, but keeps spec compatibility)
         self.commit_count += 1
         if self.commit_count % 10 == 0:
-            import uuid
-
             self.store.put_checkpoint(
                 checkpoint_id=str(uuid.uuid4()),
                 branch=git_state.effective_branch,
@@ -266,8 +264,6 @@ class SynapRuntime:
             return
 
         def _worker() -> None:
-            import structlog
-
             logger = structlog.get_logger()
             try:
                 batches = [symbols[i : i + 50] for i in range(0, len(symbols), 50)]
@@ -286,20 +282,19 @@ class SynapRuntime:
                         except NotImplementedError as e:
                             logger.warning(
                                 "embedding_not_supported_by_provider",
-                                error=str(e),
+                                exc_info=True,
                                 suggestion="Configure SYNAP_EMBED_PROVIDER=ollama or openai.",
                             )
                             return  # Stop attempting batch if not supported
                         except Exception as e:
-                            logger.warning("background_embed_failed_for_symbol", error=str(e))
+                            logger.warning("background_embed_failed_for_symbol", exc_info=True)
             except Exception as e:
-                logger.warning("background_embed_failed", error=str(e))
+                logger.warning("background_embed_failed", exc_info=True)
 
         self.embedding_executor.submit(_worker)
 
     def _first_run_index(self, git_state: GitState) -> str | None:
         self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)
-        import time
 
         t_start = time.perf_counter()
 
@@ -311,14 +306,9 @@ class SynapRuntime:
         chunk_size = 500
         parsed_results = []
         # Parallel parsing using ProcessPoolExecutor
-        import multiprocessing
-        from concurrent.futures import ProcessPoolExecutor
 
         num_workers = max(1, multiprocessing.cpu_count())
         self.logger.info("parallel_parsing_started", files=num_files, workers=num_workers)
-
-        from rich.console import Console
-        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
         console = Console(stderr=True)
         show_progress = self.settings.logging_mode.name == "HUMAN" and num_files > 5
@@ -347,8 +337,6 @@ class SynapRuntime:
                 task = progress.add_task("[yellow]Parsing codebase...[/yellow]", total=num_files)
 
                 with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    from itertools import islice
-
                     file_iterator = scanner.scan()
                     while True:
                         chunk_files = list(islice(file_iterator, chunk_size))
@@ -365,8 +353,6 @@ class SynapRuntime:
                             matching_info = file_info_map.get(rel_path)
                             git_oid = matching_info.git_oid if matching_info else ""
                             content_hash = matching_info.content_hash if matching_info else ""
-
-                            import hashlib
 
                             file_id_hash = hashlib.sha256(
                                 (rel_path + content_hash).encode("utf-8")
@@ -393,8 +379,6 @@ class SynapRuntime:
                         del chunk_results
         else:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                from itertools import islice
-
                 file_iterator = scanner.scan()
                 while True:
                     chunk_files = list(islice(file_iterator, chunk_size))
@@ -411,8 +395,6 @@ class SynapRuntime:
                         matching_info = file_info_map.get(rel_path)
                         git_oid = matching_info.git_oid if matching_info else ""
                         content_hash = matching_info.content_hash if matching_info else ""
-
-                        import hashlib
 
                         file_id_hash = hashlib.sha256(
                             (rel_path + content_hash).encode("utf-8")
@@ -454,15 +436,12 @@ class SynapRuntime:
             previous_commit=previous_commit,
             current_commit=git_state.head_commit,
         )
-        import time
 
         t_start = time.perf_counter()
 
         if not git_state.is_repository or not git_state.head_commit or previous_commit == "unknown":
             self.logger.warning("fallback_to_first_run_no_git_commit")
             return self._first_run_index(git_state)
-
-        import subprocess
 
         try:
             res = subprocess.run(
@@ -481,7 +460,7 @@ class SynapRuntime:
                 check=True,
             )
         except Exception as e:
-            self.logger.error("git_diff_tree_failed", error=str(e))
+            self.logger.error("git_diff_tree_failed", exc_info=True)
             return self._first_run_index(git_state)
 
         added_or_modified = []
@@ -500,8 +479,6 @@ class SynapRuntime:
                     deleted.append(parts[1])
                 else:
                     added_or_modified.append(parts[1])
-
-        import hashlib
 
         # Apply renames to preserve identity
         with self.store.connect() as conn:
@@ -547,7 +524,6 @@ class SynapRuntime:
                     continue
             except OSError:
                 continue
-            from synap_git.indexer.scanner import _is_binary_file
 
             if _is_binary_file(p):
                 continue
@@ -596,15 +572,11 @@ class SynapRuntime:
                             path = line_parts[1]
                             git_oids[path] = oid
             except Exception as e:
-                self.logger.warning("git_ls_tree_failed", error=str(e))
+                self.logger.warning("git_ls_tree_failed", exc_info=True)
 
         # Process additions and modifications
         registry = CodeParserRegistry()
         parsed_results = []
-
-        import contextlib
-
-        from rich.console import Console
 
         console = Console(stderr=True)
         show_progress = (
@@ -630,10 +602,8 @@ class SynapRuntime:
                 try:
                     content = p.read_text(encoding="utf-8", errors="replace")
                 except Exception as e:
-                    self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
+                    self.logger.warning("failed_to_read_file", path=rel_path, exc_info=True)
                     continue
-
-                import hashlib
 
                 content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
@@ -687,8 +657,6 @@ class SynapRuntime:
         return git_state.head_commit
 
     def _resolve_and_insert_edges(self, parsed_results: list[tuple[str, str, list[str]]]) -> None:
-        from pathlib import Path
-
         edges_to_insert = []
         source_file_ids = set()
         candidate_paths = set()
@@ -710,14 +678,25 @@ class SynapRuntime:
                     try:
                         target_dir = current_path.parents[dot_count - 1]
                         candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                        for ext in [".py", ".ts", ".go", ".rs"]:
+                        for ext in [
+                            ".py",
+                            ".ts",
+                            ".tsx",
+                            ".js",
+                            ".jsx",
+                            ".go",
+                            ".rs",
+                            ".java",
+                            ".cpp",
+                            ".cc",
+                            ".c",
+                            ".h",
+                            ".hpp",
+                            ".rb",
+                        ]:
                             candidate_paths.add(f"{candidate_rel}{ext}")
                     except Exception as e:
-                        import structlog
-
-                        structlog.get_logger().error(
-                            "suppressed_error_caught", error=str(e), exc_info=True
-                        )
+                        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
                 else:
                     module_keys.add(module_part)
                 fts_names.add(target_name)
@@ -778,17 +757,28 @@ class SynapRuntime:
                         try:
                             target_dir = current_path.parents[dot_count - 1]
                             candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                            for ext in [".py", ".ts", ".go", ".rs"]:
+                            for ext in [
+                                ".py",
+                                ".ts",
+                                ".tsx",
+                                ".js",
+                                ".jsx",
+                                ".go",
+                                ".rs",
+                                ".java",
+                                ".cpp",
+                                ".cc",
+                                ".c",
+                                ".h",
+                                ".hpp",
+                                ".rb",
+                            ]:
                                 cand_path = f"{candidate_rel}{ext}"
                                 if cand_path in path_to_file_id:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
                         except Exception as e:
-                            import structlog
-
-                            structlog.get_logger().error(
-                                "suppressed_error_caught", error=str(e), exc_info=True
-                            )
+                            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -850,17 +840,28 @@ class SynapRuntime:
                         try:
                             target_dir = current_path.parents[dot_count - 1]
                             candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                            for ext in [".py", ".ts", ".go", ".rs"]:
+                            for ext in [
+                                ".py",
+                                ".ts",
+                                ".tsx",
+                                ".js",
+                                ".jsx",
+                                ".go",
+                                ".rs",
+                                ".java",
+                                ".cpp",
+                                ".cc",
+                                ".c",
+                                ".h",
+                                ".hpp",
+                                ".rb",
+                            ]:
                                 cand_path = f"{candidate_rel}{ext}"
                                 if cand_path in path_to_file_id:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
                         except Exception as e:
-                            import structlog
-
-                            structlog.get_logger().error(
-                                "suppressed_error_caught", error=str(e), exc_info=True
-                            )
+                            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -937,9 +938,7 @@ class SynapRuntime:
         try:
             is_dirty = self.git.state().is_dirty
         except Exception as e:
-            import structlog
-
-            structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
         return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
 
     def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:

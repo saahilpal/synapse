@@ -136,9 +136,9 @@ class RuntimeDaemon:
                 except Exception:
                     pass
 
-                import os
+                import sys
 
-                os._exit(0)
+                sys.exit(0)
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
@@ -246,7 +246,7 @@ class RuntimeDaemon:
             }
             heartbeat_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
-            self.logger.error("daemon_write_heartbeat_error", error=str(e))
+            self.logger.error("daemon_write_heartbeat_error", exc_info=True)
 
     def _delete_heartbeat(self) -> None:
         heartbeat_file = self.settings.repository_path / ".synap" / "daemon_heartbeat.json"
@@ -256,7 +256,7 @@ class RuntimeDaemon:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
         # Cleanup process PID lockfile as well
         pid_file = self.settings.repository_path / ".synap" / "daemon.pid"
@@ -266,7 +266,7 @@ class RuntimeDaemon:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", error=str(e), exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
 
     async def _poll_git_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -302,7 +302,7 @@ class RuntimeDaemon:
 
                 self._write_heartbeat(status="healthy")
             except Exception as e:
-                self.logger.error("daemon_loop_error", error=str(e))
+                self.logger.error("daemon_loop_error", exc_info=True)
                 self._recovery_attempts += 1
                 self._write_heartbeat(status="degraded", last_error=str(e))
 
@@ -438,6 +438,6 @@ class RuntimeDaemon:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error("wiki_worker_loop_error", error=str(e))
+                self.logger.error("wiki_worker_loop_error", exc_info=True)
                 await asyncio.sleep(5.0)
         self.logger.info("wiki_worker_stopped")

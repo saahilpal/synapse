@@ -28,10 +28,10 @@ def _get_file_lines(repo_path: Path, rel_path: str) -> list[str] | None:
     try:
         p = repo_path / rel_path
         return p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except Exception as e:
+    except OSError as e:
         import structlog
 
-        structlog.get_logger().warning("file_read_failed", path=rel_path, error=str(e))
+        structlog.get_logger().warning("file_read_failed", path=rel_path, exc_info=True)
         return None
 
 
@@ -98,7 +98,7 @@ class HybridRetrievalEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().warning("intent_classification_failed", error=str(e))
+                structlog.get_logger().warning("intent_classification_failed", exc_info=True)
 
         # 2. Lexical Matches (BM25)
         query_words = {word.lower().strip() for word in query.split() if len(word) > 2}
@@ -127,7 +127,7 @@ class HybridRetrievalEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().warning("semantic_search_failed", error=str(e))
+                structlog.get_logger().warning("semantic_search_failed", exc_info=True)
 
         t_semantic = time.perf_counter()
 
@@ -272,7 +272,12 @@ class HybridRetrievalEngine:
                 except Exception as e:
                     last_err = e
                     if attempt < attempts - 1:
-                        time.sleep(backoff_sec)
+                        try:
+                            import anyio
+
+                            anyio.from_thread.run(anyio.sleep, backoff_sec)
+                        except Exception:
+                            time.sleep(backoff_sec)
                         backoff_sec *= 2.0
 
             if response is not None:
@@ -292,9 +297,7 @@ class HybridRetrievalEngine:
                 except Exception as e:
                     import structlog
 
-                    structlog.get_logger().error(
-                        "suppressed_error_caught", error=str(e), exc_info=True
-                    )
+                    structlog.get_logger().error("suppressed_error_caught", exc_info=True)
             else:
                 err_msg = str(last_err)
                 answer_content = (

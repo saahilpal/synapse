@@ -68,6 +68,13 @@ class SynapSettings(BaseSettings):
     llm_model: str | None = Field(default=None, description="LLM model.")
     ollama_url: str = "http://127.0.0.1:11434"
 
+    embedding_provider: str | None = Field(
+        default=None,
+        description="Embedding provider (e.g. openai, gemini, ollama). Defaults to llm_provider if not set.",
+    )
+    embedding_model: str | None = Field(default=None, description="Embedding model name.")
+    embedding_url: str | None = Field(default=None, description="Custom URL for embedding API.")
+
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 9876
 
