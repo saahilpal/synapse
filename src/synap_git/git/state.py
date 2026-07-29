@@ -131,7 +131,7 @@ class GitRepository:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
             if len(current.commit_parent_hashes) > 1:
                 return GitChange(kind=GitChangeKind.MERGE, previous=previous, current=current)

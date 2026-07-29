@@ -31,7 +31,7 @@ def _get_file_lines(repo_path: Path, rel_path: str) -> list[str] | None:
     except OSError as e:
         import structlog
 
-        structlog.get_logger().warning("file_read_failed", path=rel_path, exc_info=True)
+        structlog.get_logger().warning("file_read_failed", path=rel_path, error=str(e))
         return None
 
 
@@ -60,11 +60,13 @@ class HybridRetrievalEngine:
         repo_path: Path,
         store: SynapStore,
         llm_provider: LLMProvider | None,
+        embed_provider: LLMProvider | None = None,
         trace_store: Any | None = None,
     ) -> None:
         self.repo_path = repo_path
         self.store = store
         self.llm_provider = llm_provider
+        self.embed_provider = embed_provider
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         self.max_expansion_depth = 2
         self.trace_store = trace_store
@@ -98,7 +100,7 @@ class HybridRetrievalEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().warning("intent_classification_failed", exc_info=True)
+                structlog.get_logger().warning("intent_classification_failed", error=str(e))
 
         # 2. Lexical Matches (BM25)
         query_words = {word.lower().strip() for word in query.split() if len(word) > 2}
@@ -117,9 +119,9 @@ class HybridRetrievalEngine:
 
         # 3. Semantic Matches (Vector Search)
         semantic_candidates: dict[str, dict[str, Any]] = {}
-        if self.llm_provider:
+        if self.embed_provider:
             try:
-                query_vector = self.llm_provider.embed(query)
+                query_vector = self.embed_provider.embed(query)
                 symbols = self.store.get_similar_symbols(query_vector, limit=50)
                 for rank, sym in enumerate(symbols):
                     sid = sym["symbol_id"]
@@ -127,7 +129,7 @@ class HybridRetrievalEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().warning("semantic_search_failed", exc_info=True)
+                structlog.get_logger().warning("semantic_search_failed", error=str(e))
 
         t_semantic = time.perf_counter()
 
@@ -297,7 +299,7 @@ class HybridRetrievalEngine:
                 except Exception as e:
                     import structlog
 
-                    structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                    structlog.get_logger().error("suppressed_error_caught", error=str(e))
             else:
                 err_msg = str(last_err)
                 answer_content = (

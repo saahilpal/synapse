@@ -56,6 +56,10 @@ def configure_logging(settings: SynapSettings) -> None:
     # Set up stream handler (stderr)
     stream_handler = logging.StreamHandler(sys.stderr)
     stream_handler.setFormatter(logging.Formatter("%(message)s"))
+    if settings.log_level.upper() == "DEBUG":
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.WARNING)
     root_logger.addHandler(stream_handler)
 
     root_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))

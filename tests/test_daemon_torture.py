@@ -85,12 +85,18 @@ async def test_daemon_survives_branch_switching(torture_settings: SynapSettings)
     subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
     subprocess.run([git_bin, "commit", "-m", "add feature file"], cwd=repo, check=True)
 
-    await asyncio.sleep(0.3)
+    for _ in range(20):
+        await asyncio.sleep(0.1)
+        if daemon.runtime.status().branch == "feature/torture":
+            break
 
     # Checkout back to main
     subprocess.run([git_bin, "checkout", "main"], cwd=repo, check=True)
 
-    await asyncio.sleep(0.3)
+    for _ in range(20):
+        await asyncio.sleep(0.1)
+        if daemon.runtime.status().branch == "main":
+            break
 
     daemon.stop()
     await daemon_task

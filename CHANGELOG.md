@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.5] - 2026-06-11
+## [2.1.7] - 2026-07-29
+
+### Added
+- **AI Engineer Rules**: Created standardized agent rulesets across `AGENTS.md`, `.cursorrules`, `.windsurfrules`, and `.github/copilot-instructions.md`.
+
+### Fixed
+- **Daemon Branch Switching Test Stability**: Resolved timing race condition in daemon branch checkout verification.
+- **CLI Setup Connectivity**: Fixed setup connectivity verification and non-TTY prompt fallback handling.
 
 ## [2.1.6] - 2026-06-29
 

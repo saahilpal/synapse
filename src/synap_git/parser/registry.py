@@ -79,7 +79,7 @@ class CodeParserRegistry:
         except Exception as e:
             import structlog
 
-            structlog.get_logger().warning("parser_failed", path=relative_path, exc_info=True)
+            structlog.get_logger().warning("parser_failed", path=relative_path, error=str(e))
             return CodeParseResult(
                 path=relative_path, language="unknown", symbols=(), syntax_error=str(e)
             )

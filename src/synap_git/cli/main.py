@@ -57,7 +57,7 @@ def _custom_call(*args: Any, **kwargs: Any) -> Any:
 app.__call__ = _custom_call  # type: ignore[method-assign]
 
 JSON_OPTION = typer.Option("--json", help="Emit machine-readable JSON.")
-console = Console()
+console = Console(stderr=True)
 
 
 def _settings(
@@ -88,9 +88,19 @@ def _settings(
     return settings
 
 
+def _verify_is_git(path: str) -> None:
+    from synap_git.git.state import GitRepository
+
+    if not GitRepository(Path(path)).state().is_repository:
+        console.print(f"[bold red]Error:[/bold red] '{path}' is not a valid Git repository.")
+        raise typer.Exit(1)
+
+
 def _emit(value: Any, *, json_output: bool) -> None:
     if json_output:
-        console.print(json.dumps(_jsonable(value), indent=2, sort_keys=True))
+        import sys
+
+        print(json.dumps(_jsonable(value), indent=2, sort_keys=True), file=sys.stdout)
         return
     if isinstance(value, str):
         console.print(value)
@@ -529,6 +539,7 @@ def init(
         synap init
         synap init --force --skip-llm
     """
+    _verify_is_git(path)
     settings = _settings(path, json_output=json_output)
     if skip_llm:
         settings.llm_provider = None
@@ -537,12 +548,9 @@ def init(
 
     runtime = SynapRuntime(settings)
     if not quiet and not json_output:
-        with console.status(
-            "[yellow]Initializing Synap runtime and scanning repository...[/yellow]", spinner="dots"
-        ):
-            commit = runtime.bootstrap(force=force)
-    else:
-        commit = runtime.bootstrap(force=force)
+        console.print("[yellow]Initializing Synap runtime and scanning repository...[/yellow]")
+
+    commit = runtime.bootstrap(force=force)
 
     if json_output:
         _emit({"active_commit": commit, "state": "initialized"}, json_output=True)
@@ -646,14 +654,19 @@ def start(
     path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
 ) -> None:
     """Start the Synap daemon in the background."""
+    _verify_is_git(path)
+    import asyncio
+    import os
     import subprocess
     import sys
     import time
 
+    from synap_git.mcp.server import SynapMCPServer
+
     abs_path = Path(path).resolve()
     pid_file = abs_path / ".synap" / "daemon.pid"
 
-    # 1. Check if daemon is already running for the repository
+    is_running = False
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
@@ -662,59 +675,78 @@ def start(
                 hb = _read_daemon_heartbeat(abs_path)
                 if hb and "port" in hb:
                     console.print(f"[green]✓ UI available at http://127.0.0.1:{hb['port']}[/green]")
-                return
+                is_running = True
             else:
                 pid_file.unlink()
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
-    # 2. Spawn detached daemon process
-    cmd = [sys.executable, "-m", "synap_git.cli", "daemon-run", abs_path.as_posix()]
+    if not is_running:
+        # 2. Spawn detached daemon process
+        cmd = [sys.executable, "-m", "synap_git.cli", "daemon-run", abs_path.as_posix()]
+        try:
+            if sys.platform == "win32":
+                subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=0x00000008,  # DETACHED_PROCESS
+                )
+            else:
+                subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+        except Exception as e:
+            console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
+            raise typer.Exit(1)
+
+        success = False
+        with console.status(
+            "[yellow]Starting Synap daemon and awaiting health check...[/yellow]", spinner="dots"
+        ):
+            for _ in range(25):  # wait up to 5 seconds for initial heartbeat
+                time.sleep(0.2)
+                if pid_file.exists():
+                    hb = _read_daemon_heartbeat(abs_path)
+                    if hb:
+                        status = hb.get("status")
+                        if status in ("healthy", "degraded", "starting"):
+                            success = True
+                            port = hb.get("port", 9876)
+                            pid = int(hb.get("pid", 0))
+                            console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
+                            if status == "starting":
+                                console.print(
+                                    "[yellow]ℹ Daemon is currently indexing in the background...[/yellow]"
+                                )
+                            else:
+                                console.print("[green]✓ Runtime healthy[/green]")
+                            console.print(
+                                f"[green]✓ UI available at http://127.0.0.1:{port}[/green]"
+                            )
+                            break
+
+        if not success:
+            console.print(
+                "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
+            )
+            raise typer.Exit(1)
+
+    # 3. Start MCP Server in the foreground
+    settings = _settings(path, json_output=True)
+    runtime = SynapRuntime(settings)
+    server = SynapMCPServer(runtime)
     try:
-        if sys.platform == "win32":
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                creationflags=0x00000008,  # DETACHED_PROCESS
-            )
-        else:
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-    except Exception as e:
-        console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
-        raise typer.Exit(1)
-
-    success = False
-    with console.status(
-        "[yellow]Starting Synap daemon and awaiting health check...[/yellow]", spinner="dots"
-    ):
-        for _ in range(15):  # wait up to 3 seconds
-            time.sleep(0.2)
-            if pid_file.exists():
-                hb = _read_daemon_heartbeat(abs_path)
-                if hb and hb.get("status") in ("healthy", "degraded"):
-                    success = True
-                    port = hb.get("port", 9876)
-                    pid = int(hb.get("pid", 0))
-                    console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
-                    console.print("[green]✓ Runtime healthy[/green]")
-                    console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
-                    break
-
-    if not success:
-        console.print(
-            "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
-        )
-        raise typer.Exit(1)
+        asyncio.run(server.run())
+    except KeyboardInterrupt:
+        os._exit(0)
 
 
 @app.command("daemon-run", hidden=True)
@@ -820,7 +852,7 @@ def stop(
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e))
         success = not _is_process_running(pid)
 
     # Clean up lockfiles
@@ -1271,7 +1303,7 @@ def rollback(
     except Exception as e:
         import structlog
 
-        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+        structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
     with console.status(
         f"[yellow]Reindexing repository to match {selected_commit}...[/yellow]", spinner="dots"
@@ -1346,7 +1378,7 @@ def repair(
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
     status_info = runtime.status()
     console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")
@@ -1475,6 +1507,12 @@ def doctor(
                         completed=1,
                         description=f"[green]✓ Daemon active and healthy (PID {daemon_info['pid']}, uptime {daemon_info['uptime_seconds']}s)[/green]",
                     )
+                elif status_str == "STARTING":
+                    progress.update(
+                        task_daemon,
+                        completed=1,
+                        description=f"[green]✓ Daemon is active and currently starting/indexing (PID {daemon_info['pid']})[/green]",
+                    )
                 elif status_str == "STALE":
                     progress.update(
                         task_daemon,
@@ -1509,21 +1547,6 @@ def run(
     start(path)
 
 
-@mcp_app.command("start")
-def mcp_start(
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-) -> None:
-    """Start the MCP server."""
-    settings = _settings(path, json_output=True)
-    runtime = SynapRuntime(settings)
-    runtime.bootstrap()
-
-    from synap_git.mcp.server import SynapMCPServer
-
-    server = SynapMCPServer(runtime)
-    asyncio.run(server.run())
-
-
 @mcp_app.command("config")
 def mcp_config(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
@@ -1534,11 +1557,7 @@ def mcp_config(
 
     config = {
         "mcpServers": {
-            "synap": {
-                "command": sys.executable,
-                "args": ["-m", "synap_git.cli", "mcp", "start", abs_path],
-                "autoConnect": True,
-            }
+            "synap": {"command": sys.executable, "args": ["-m", "synap_git.cli", "start", abs_path]}
         }
     }
     typer.echo(json.dumps(config, indent=2))

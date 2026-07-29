@@ -234,7 +234,7 @@ class RepositoryScanner:
                 lines = gitignore_path.read_text(encoding="utf-8").splitlines()
                 self.gitignore = GitIgnoreSpec(self.repository_path, lines)
             except Exception as e:
-                logger.warning("failed_to_load_gitignore", exc_info=True)
+                logger.warning("failed_to_load_gitignore", error=str(e))
 
         synapignore_path = self.repository_path / ".synapignore"
         if synapignore_path.exists():
@@ -242,7 +242,7 @@ class RepositoryScanner:
                 lines = synapignore_path.read_text(encoding="utf-8").splitlines()
                 self.synapignore = GitIgnoreSpec(self.repository_path, lines)
             except Exception as e:
-                logger.warning("failed_to_load_synapignore", exc_info=True)
+                logger.warning("failed_to_load_synapignore", error=str(e))
 
     def _get_paths(self) -> list[Path]:
         paths: list[Path] = []

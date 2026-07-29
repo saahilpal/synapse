@@ -135,9 +135,9 @@ class WikiEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
         except Exception as e:
-            logger.error("wiki_generation_failed", path=file_path, exc_info=True)
+            logger.error("wiki_generation_failed", path=file_path, error=str(e))
             raise
 
     def generate_project_wiki_page_sync(self, page_name: str) -> None:
@@ -194,6 +194,6 @@ class WikiEngine:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
         except Exception as e:
-            logger.error("wiki_project_generation_failed", page=clean_name, exc_info=True)
+            logger.error("wiki_project_generation_failed", page=clean_name, error=str(e))

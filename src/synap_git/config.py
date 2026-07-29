@@ -50,7 +50,6 @@ class SynapSettings(BaseSettings):
     repository_path: Path = Field(default=Path(), description="Repository root.")
     state_path: Path = Field(default=Path(".synap"), description="Local runtime state.")
     sqlite_path: Path | None = None
-    object_path: Path | None = None
     log_path: Path | None = None
 
     logging_mode: LoggingMode = LoggingMode.HUMAN
@@ -150,7 +149,6 @@ class SynapSettings(BaseSettings):
         self.repository_path = repository_path
         self.state_path = state_path.resolve()
         self.sqlite_path = self._resolve_optional_path(self.sqlite_path, "synap.db")
-        self.object_path = self._resolve_optional_path(self.object_path, "objects")
         self.log_path = self._resolve_optional_path(self.log_path, "logs")
 
         if self.profile is RuntimeProfile.TEST:
@@ -166,10 +164,6 @@ class SynapSettings(BaseSettings):
 
     def ensure_directories(self) -> None:
         self.state_path.mkdir(parents=True, exist_ok=True)
-        if self.object_path:
-            self.object_path.mkdir(parents=True, exist_ok=True)
-        if self.log_path:
-            self.log_path.mkdir(parents=True, exist_ok=True)
 
     def validate_configuration(self) -> list[str]:
         errors = []

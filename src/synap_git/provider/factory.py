@@ -126,11 +126,12 @@ def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
 
 def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an embedding provider based on runtime settings."""
-    if not settings.llm_provider:
+    provider_val = settings.embedding_provider or settings.llm_provider
+    if not provider_val:
         return None
 
-    provider_name = str(settings.llm_provider).lower().strip()
-    model = settings.llm_model or ""
+    provider_name = str(provider_val).lower().strip()
+    model = settings.embedding_model or settings.llm_model or ""
 
     if provider_name == "openai":
         if not settings.openai_api_key:

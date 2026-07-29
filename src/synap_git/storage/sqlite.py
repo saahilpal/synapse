@@ -709,7 +709,7 @@ class SynapStore:
         except Exception as e:
             import structlog
 
-            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
         # If we got here, it's corrupted or unreachable. Wipe it securely.
         for ext in ["", "-wal", "-shm"]:
@@ -733,6 +733,29 @@ class SynapStore:
     ) -> None:
         import uuid
         from datetime import UTC
+
+        if not cost_usd:
+            cost_usd = 0.0
+            p_lower = provider.lower() if provider else ""
+            m_lower = model.lower() if model else ""
+
+            if "openai" in p_lower:
+                if "mini" in m_lower:
+                    cost_usd = (input_tokens * 0.150 + output_tokens * 0.600) / 1_000_000
+                else:
+                    cost_usd = (input_tokens * 5.00 + output_tokens * 15.00) / 1_000_000
+            elif "gemini" in p_lower:
+                if "pro" in m_lower:
+                    cost_usd = (input_tokens * 3.50 + output_tokens * 10.50) / 1_000_000
+                else:
+                    cost_usd = (input_tokens * 0.075 + output_tokens * 0.300) / 1_000_000
+            elif "anthropic" in p_lower:
+                if "sonnet" in m_lower:
+                    cost_usd = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
+                elif "haiku" in m_lower:
+                    cost_usd = (input_tokens * 0.25 + output_tokens * 1.25) / 1_000_000
+                else:
+                    cost_usd = (input_tokens * 3.00 + output_tokens * 15.00) / 1_000_000
 
         call_id = str(uuid.uuid4())
         now = int(datetime.now(UTC).timestamp())

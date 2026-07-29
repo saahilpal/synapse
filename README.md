@@ -289,8 +289,8 @@ Initialize the local SQLite database index:
 synap init .
 ```
 
-### 3. Detach Watcher Daemon
-Start background monitoring:
+### 3. Connect IDE / Start MCP
+Launch the unified background daemon and MCP stdio server:
 ```bash
 synap start .
 ```
@@ -322,7 +322,6 @@ All commands support target path arguments:
 * `synap doctor [PATH]` — Verifies database integrity and parsers.
 * `synap run [PATH]` — Runs daemon in foreground.
 * `synap ui [PATH]` — Launches HTML dashboard.
-* `synap mcp start [PATH]` — Hosts MCP stdio server.
 * `synap mcp config [PATH]` — Outputs Cursor connection blocks.
 * `synap mcp verify [PATH]` — Asserts MCP server stability.
 * `synap memory status [PATH]` — Lists lesson counts.
@@ -382,8 +381,7 @@ synap mcp config .
   "mcpServers": {
     "synap": {
       "command": "/usr/local/bin/python",
-      "args": ["-m", "synap_git.cli", "mcp", "start", "/Users/username/repo"],
-      "autoConnect": true
+      "args": ["-m", "synap_git.cli", "start", "/Users/username/repo"]
     }
   }
 }

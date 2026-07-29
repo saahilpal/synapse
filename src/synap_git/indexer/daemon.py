@@ -75,6 +75,7 @@ class RuntimeDaemon:
         self._ui_server.capture_signals = dummy_capture_signals  # type: ignore[method-assign]
 
         # Initial bootstrap
+        self._write_heartbeat(status="starting")
         await asyncio.to_thread(self.runtime.bootstrap)
 
         with self.runtime.store.connect() as conn:
@@ -127,18 +128,6 @@ class RuntimeDaemon:
         if not self._stop_event.is_set():
             self.logger.info("daemon_stop_requested")
             self._stop_event.set()
-
-            # Force immediate cleanup and exit to avoid thread-join blocking
-            if force_exit:
-                try:
-                    self.runtime.shutdown()
-                    self._delete_heartbeat()
-                except Exception:
-                    pass
-
-                import sys
-
-                sys.exit(0)
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
@@ -246,7 +235,7 @@ class RuntimeDaemon:
             }
             heartbeat_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
-            self.logger.error("daemon_write_heartbeat_error", exc_info=True)
+            self.logger.error("daemon_write_heartbeat_error", error=str(e))
 
     def _delete_heartbeat(self) -> None:
         heartbeat_file = self.settings.repository_path / ".synap" / "daemon_heartbeat.json"
@@ -256,7 +245,7 @@ class RuntimeDaemon:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
         # Cleanup process PID lockfile as well
         pid_file = self.settings.repository_path / ".synap" / "daemon.pid"
@@ -266,7 +255,7 @@ class RuntimeDaemon:
             except Exception as e:
                 import structlog
 
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
     async def _poll_git_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -302,7 +291,7 @@ class RuntimeDaemon:
 
                 self._write_heartbeat(status="healthy")
             except Exception as e:
-                self.logger.error("daemon_loop_error", exc_info=True)
+                self.logger.error("daemon_loop_error", error=str(e))
                 self._recovery_attempts += 1
                 self._write_heartbeat(status="degraded", last_error=str(e))
 
@@ -334,11 +323,6 @@ class RuntimeDaemon:
 
     async def _wiki_worker_loop(self) -> None:
         self.logger.info("wiki_worker_started")
-        from rich.console import Console
-
-        from synap_git.config import LoggingMode
-
-        console = Console()
 
         while not self._stop_event.is_set():
             try:
@@ -364,39 +348,7 @@ class RuntimeDaemon:
 
                     start_time = time.time()
                     try:
-                        if self.settings.logging_mode == LoggingMode.HUMAN:
-                            with console.status(
-                                f"[bold cyan][Wiki][/bold cyan] Generating: [white]{file_path}[/white] (0.0s) ({total_pending} remaining)"
-                            ) as status:
-                                # Update status periodically with elapsed time
-                                async def _update_status(
-                                    st: float = start_time,
-                                    fp: str = file_path,
-                                    tp: int = total_pending,
-                                ) -> None:
-                                    try:
-                                        while True:
-                                            await asyncio.sleep(0.1)
-                                            elapsed = time.time() - st
-                                            status.update(
-                                                f"[bold cyan][Wiki][/bold cyan] Generating: [white]{fp}[/white] [dim]({elapsed:.1f}s)[/dim] ({tp} remaining)"
-                                            )
-                                    except asyncio.CancelledError:
-                                        pass
-
-                                status_task = asyncio.create_task(_update_status())
-                                try:
-                                    await asyncio.to_thread(
-                                        self.runtime.wiki.ensure_wiki_page, file_path
-                                    )
-                                finally:
-                                    status_task.cancel()
-                                    try:
-                                        await status_task
-                                    except asyncio.CancelledError:
-                                        pass
-                        else:
-                            await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
+                        await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
 
                         await asyncio.to_thread(
                             self.runtime.store.update_wiki_queue_status,
@@ -408,11 +360,6 @@ class RuntimeDaemon:
                         self.logger.info(
                             "wiki_worker_completed_task", path=file_path, elapsed=elapsed
                         )
-
-                        if self.settings.logging_mode == LoggingMode.HUMAN:
-                            print(
-                                f"[bold green]✓[/bold green] Wiki generated: [white]{file_path}[/white] [dim]({elapsed:.1f}s)[/dim]"
-                            )
                     except Exception as ex:
                         self.logger.error("wiki_worker_task_failed", path=file_path, error=str(ex))
                         if attempts + 1 >= 3:
@@ -422,10 +369,6 @@ class RuntimeDaemon:
                                 "failed",
                                 attempts + 1,
                             )
-                            if self.settings.logging_mode == LoggingMode.HUMAN:
-                                print(
-                                    f"[bold red]✗[/bold red] Wiki failed: [white]{file_path}[/white] [dim]({str(ex)})[/dim]"
-                                )
                         else:
                             await asyncio.to_thread(
                                 self.runtime.store.update_wiki_queue_status,
@@ -438,6 +381,6 @@ class RuntimeDaemon:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error("wiki_worker_loop_error", exc_info=True)
+                self.logger.error("wiki_worker_loop_error", error=str(e))
                 await asyncio.sleep(5.0)
         self.logger.info("wiki_worker_stopped")

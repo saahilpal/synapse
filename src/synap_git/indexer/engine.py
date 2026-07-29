@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
 import contextlib
 import hashlib
 import json
@@ -26,15 +25,19 @@ from synap_git.git import GitRepository, GitState
 from synap_git.indexer.scanner import RepositoryScanner, _is_binary_file
 from synap_git.indexer.wiki import WikiEngine
 from synap_git.parser.registry import CodeParserRegistry
-from synap_git.provider.factory import get_llm_provider
+from synap_git.provider.factory import get_embed_provider, get_llm_provider
 from synap_git.retrieval.engine import HybridRetrievalEngine
 from synap_git.storage.sqlite import SynapStore
 from synap_git.utils.serialization import stable_hash
 
 
-def _parse_worker(args: tuple[Path, str, str | None]) -> dict[str, Any]:
-    path, rel_path, content = args
+def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
+    path, rel_path = args
     registry = CodeParserRegistry()
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        content = ""
     res = registry.parse(path, relative_path=rel_path, text=content)
     return {
         "path": res.path,
@@ -81,6 +84,7 @@ class SynapRuntime:
         self.git = GitRepository(settings.repository_path)
         self.parser_registry = CodeParserRegistry()
         self.llm_provider = get_llm_provider(settings)
+        self.embed_provider = get_embed_provider(settings)
         self.retrieval_engine = HybridRetrievalEngine(
             repo_path=self.settings.repository_path,
             store=self.store,
@@ -92,14 +96,16 @@ class SynapRuntime:
         self.wiki = WikiEngine(settings, self.store)
         self.commit_count = 0
 
-        self.embedding_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=5, thread_name_prefix="embed_worker"
-        )
-
     def shutdown(self) -> None:
         """Gracefully shutdown background tasks and executors."""
-        self.logger.info("shutting_down_embedding_executor")
-        self.embedding_executor.shutdown(wait=False)
+
+        for d in ["objects", "logs"]:
+            path = self.settings.state_path / d
+            if path.exists() and path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
 
     def initialize_storage(self, *, auto_recover: bool = True) -> None:
         self.settings.ensure_directories()
@@ -130,7 +136,7 @@ class SynapRuntime:
             if added:
                 gitignore_path.write_text(new_content, encoding="utf-8")
         except Exception as e:
-            self.logger.warning("failed_to_auto_protect_synap", exc_info=True)
+            self.logger.warning("failed_to_auto_protect_synap", error=str(e))
 
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
@@ -160,7 +166,7 @@ class SynapRuntime:
                     self.handle_revert(prev, git_state)
                     return git_state.head_commit
             except Exception as e:
-                structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
         return self.index_repository(git_state=git_state, force=force)
 
@@ -256,42 +262,52 @@ class SynapRuntime:
 
         return commit
 
-    def _schedule_embedding(
-        self, file_id: str, symbols: list[dict[str, Any]], content_hash: str
+    def _generate_embeddings(
+        self, symbols_to_embed: list[tuple[str, list[dict[str, Any]], str]]
     ) -> None:
-        provider = self.llm_provider
-        if not provider:
+        provider = self.embed_provider
+        if not provider or not symbols_to_embed:
             return
 
-        def _worker() -> None:
-            logger = structlog.get_logger()
-            try:
-                batches = [symbols[i : i + 50] for i in range(0, len(symbols), 50)]
-                model_name = getattr(provider, "default_model", "unknown")
-                for batch in batches:
-                    for sym in batch:
-                        try:
-                            # Avoid re-embedding if unchanged?
-                            text = (
-                                sym["name"] + " " + (sym.get("metadata") or {}).get("docstring", "")
-                            )
-                            vector = provider.embed(text)
-                            self.store.put_embedding(
-                                sym["symbol_id"], model_name, "1.0", "1.0", vector, content_hash
-                            )
-                        except NotImplementedError as e:
-                            logger.warning(
-                                "embedding_not_supported_by_provider",
-                                exc_info=True,
-                                suggestion="Configure SYNAP_EMBED_PROVIDER=ollama or openai.",
-                            )
-                            return  # Stop attempting batch if not supported
-                        except Exception as e:
-                            logger.warning("background_embed_failed_for_symbol", exc_info=True)
-            except Exception as e:
-                logger.warning("background_embed_failed", exc_info=True)
+        total_symbols = sum(len(syms) for _, syms, _ in symbols_to_embed)
+        if total_symbols == 0:
+            return
 
-        self.embedding_executor.submit(_worker)
+        model_name = getattr(provider, "default_model", "unknown")
+
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            transient=True,
+        ) as progress:
+            task = progress.add_task("[cyan]Generating Embeddings...", total=total_symbols)
+
+            for file_id, symbols, content_hash in symbols_to_embed:
+                for sym in symbols:
+                    try:
+                        text = sym["name"] + " " + (sym.get("metadata") or {}).get("docstring", "")
+                        vector = provider.embed(text)
+                        self.store.put_embedding(
+                            sym["symbol_id"], model_name, "1.0", "1.0", vector, content_hash
+                        )
+                    except KeyboardInterrupt:
+                        self.logger.warning("embedding_interrupted_by_user")
+                        raise
+                    except NotImplementedError:
+                        self.logger.warning(
+                            "embedding_not_supported", provider=provider.__class__.__name__
+                        )
+                        return
+                    except Exception as e:
+                        self.logger.debug(
+                            "embedding_failed_for_symbol", symbol=sym["name"], error=str(e)
+                        )
+                    finally:
+                        progress.advance(task)
 
     def _first_run_index(self, git_state: GitState) -> str | None:
         self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)
@@ -305,6 +321,7 @@ class SynapRuntime:
         num_files = scanner.count_files()
         chunk_size = 500
         parsed_results = []
+        symbols_to_embed = []
         # Parallel parsing using ProcessPoolExecutor
 
         num_workers = max(1, multiprocessing.cpu_count())
@@ -327,7 +344,7 @@ class SynapRuntime:
 
         if show_progress:
             with Progress(
-                SpinnerColumn(),
+                SpinnerColumn("line"),
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
@@ -344,7 +361,7 @@ class SynapRuntime:
                             break
 
                         file_info_map = {f.relative_path: f for f in chunk_files}
-                        chunk = [(f.path, f.relative_path, f.content) for f in chunk_files]
+                        chunk = [(f.path, f.relative_path) for f in chunk_files]
                         futures = [executor.submit(_parse_worker, item) for item in chunk]
                         chunk_results = [f.result() for f in futures]
 
@@ -366,9 +383,13 @@ class SynapRuntime:
                                 language=res["language"],
                                 symbols=res["symbols"],
                             )
-                            self._schedule_embedding(file_id_hash, res["symbols"], content_hash)
+                            symbols_to_embed.append((file_id_hash, res["symbols"], content_hash))
                             self.store.enqueue_wiki(rel_path)
                             parsed_results.append((file_id_hash, rel_path, res["imports"]))
+
+                        # Generate Embeddings Synchronously
+                        self._generate_embeddings(symbols_to_embed)
+                        symbols_to_embed.clear()
 
                         # Resolve edges for this chunk to keep memory bounded (MEDIUM-002)
                         if parsed_results:
@@ -386,7 +407,7 @@ class SynapRuntime:
                         break
 
                     file_info_map = {f.relative_path: f for f in chunk_files}
-                    chunk = [(f.path, f.relative_path, f.content) for f in chunk_files]
+                    chunk = [(f.path, f.relative_path) for f in chunk_files]
                     futures = [executor.submit(_parse_worker, item) for item in chunk]
                     chunk_results = [f.result() for f in futures]
 
@@ -408,9 +429,13 @@ class SynapRuntime:
                             language=res["language"],
                             symbols=res["symbols"],
                         )
-                        self._schedule_embedding(file_id_hash, res["symbols"], content_hash)
+                        symbols_to_embed.append((file_id_hash, res["symbols"], content_hash))
                         self.store.enqueue_wiki(rel_path)
                         parsed_results.append((file_id_hash, rel_path, res["imports"]))
+
+                    # Generate Embeddings Synchronously
+                    self._generate_embeddings(symbols_to_embed)
+                    symbols_to_embed.clear()
 
                     # Resolve edges for this chunk to keep memory bounded (MEDIUM-002)
                     if parsed_results:
@@ -419,7 +444,7 @@ class SynapRuntime:
 
                     del chunk_results
 
-        # Pass 2: Final edge resolution (should be empty now)
+        # Pass 2: Final edge resolution
         if parsed_results:
             self.logger.info("structural_edge_resolution_started")
             self._resolve_and_insert_edges(parsed_results)
@@ -460,7 +485,7 @@ class SynapRuntime:
                 check=True,
             )
         except Exception as e:
-            self.logger.error("git_diff_tree_failed", exc_info=True)
+            self.logger.error("git_diff_tree_failed", error=str(e))
             return self._first_run_index(git_state)
 
         added_or_modified = []
@@ -572,11 +597,12 @@ class SynapRuntime:
                             path = line_parts[1]
                             git_oids[path] = oid
             except Exception as e:
-                self.logger.warning("git_ls_tree_failed", exc_info=True)
+                self.logger.warning("git_ls_tree_failed", error=str(e))
 
         # Process additions and modifications
         registry = CodeParserRegistry()
         parsed_results = []
+        symbols_to_embed = []
 
         console = Console(stderr=True)
         show_progress = (
@@ -585,7 +611,7 @@ class SynapRuntime:
 
         with (
             console.status(
-                "[yellow]Parsing incrementally changed files...[/yellow]", spinner="dots"
+                "[yellow]Parsing incrementally changed files...[/yellow]", spinner="line"
             )
             if show_progress
             else contextlib.nullcontext()
@@ -602,7 +628,7 @@ class SynapRuntime:
                 try:
                     content = p.read_text(encoding="utf-8", errors="replace")
                 except Exception as e:
-                    self.logger.warning("failed_to_read_file", path=rel_path, exc_info=True)
+                    self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
                     continue
 
                 content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -630,7 +656,7 @@ class SynapRuntime:
                     language=parse_result.language,
                     symbols=symbols_list,
                 )
-                self._schedule_embedding(file_id_hash, symbols_list, content_hash)
+                symbols_to_embed.append((file_id_hash, symbols_list, content_hash))
 
                 self.store.set_wiki_status(rel_path, None, "stale")
                 self.store.enqueue_wiki(rel_path)
@@ -642,6 +668,9 @@ class SynapRuntime:
                     )
 
                 parsed_results.append((file_id_hash, rel_path, list(parse_result.imports)))
+
+        # Generate Embeddings Synchronously
+        self._generate_embeddings(symbols_to_embed)
 
         # Re-resolve edges for changed files
         if parsed_results:
@@ -696,7 +725,7 @@ class SynapRuntime:
                         ]:
                             candidate_paths.add(f"{candidate_rel}{ext}")
                     except Exception as e:
-                        structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                        structlog.get_logger().error("suppressed_error_caught", error=str(e))
                 else:
                     module_keys.add(module_part)
                 fts_names.add(target_name)
@@ -778,7 +807,7 @@ class SynapRuntime:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
                         except Exception as e:
-                            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                            structlog.get_logger().error("suppressed_error_caught", error=str(e))
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -861,7 +890,7 @@ class SynapRuntime:
                                     target_file_id = path_to_file_id[cand_path]
                                     break
                         except Exception as e:
-                            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+                            structlog.get_logger().error("suppressed_error_caught", error=str(e))
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
@@ -938,7 +967,7 @@ class SynapRuntime:
         try:
             is_dirty = self.git.state().is_dirty
         except Exception as e:
-            structlog.get_logger().error("suppressed_error_caught", exc_info=True)
+            structlog.get_logger().error("suppressed_error_caught", error=str(e))
         return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
 
     def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:

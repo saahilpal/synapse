@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -46,6 +47,11 @@ def test_daemon_lifecycle_cli(
     assert setup_res.exit_code == 0
 
     # Step 2: Start background daemon
+    async def mock_run(*args: Any, **kwargs: Any) -> None:
+        pass
+
+    monkeypatch.setattr("synap_git.mcp.server.SynapMCPServer.run", mock_run)
+
     start_res = runner.invoke(app, ["start", temp_repo.as_posix()])
     assert start_res.exit_code == 0, start_res.output
     assert "Synap daemon started" in start_res.output

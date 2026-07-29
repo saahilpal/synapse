@@ -1,0 +1,7 @@
+# Synapse Project - AI Agent Rules
+
+- **Tech Stack**: Python 3.12, Typer, FastAPI, Uvicorn, SQLite (WAL mode), Tree-sitter, Pydantic v2, Tiktoken, MCP protocol.
+- **Strict Typing**: MyPy strict mode (`mypy --strict`). All methods must have complete type signatures.
+- **Async I/O**: Use `asyncio.to_thread()` for blocking calls inside async handlers.
+- **Logging**: Always use `structlog.get_logger()`. Never swallow exceptions quietly.
+- **Verification**: Always run `.venv/bin/pytest` and `.venv/bin/ruff check .` before committing.

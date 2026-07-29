@@ -1,0 +1,73 @@
+---
+title: Synap Documentation
+description: Introduction and installation guide for Synap's local semantic intelligence daemon.
+---
+
+# Synap Documentation
+
+Welcome to the documentation for Synap! Synap is a local, privacy-first semantic intelligence daemon designed to help AI coding agents understand your codebase context deeply.
+
+## Features
+
+- **Local AST Parsing:** Synap uses Tree-sitter to parse over 25 languages directly on your machine.
+- **Instant Retrieval:** Powered by SQLite FTS5 for sub-millisecond retrieval of context.
+- **MCP Server Integration:** Seamlessly connect Cursor, Windsurf, or custom AI agents.
+- **Knowledge Wiki:** Manage custom knowledge directly through the Web UI.
+
+## Getting Started: Installation & Usage
+
+Synap runs locally on your machine. To get started, you need Python and `uv` installed.
+
+### 1. Installation
+
+First, clone the repository and navigate into it:
+
+```bash
+git clone https://github.com/saahilpal/synapse.git
+cd synapse
+```
+
+Synap uses `uv` for fast dependency management. If you don't have `uv` installed, [install it here](https://github.com/astral-sh/uv).
+
+Install the dependencies:
+
+```bash
+uv sync
+```
+
+### 2. Initialize a Project
+
+Before indexing, you must initialize Synap in the directory you want to analyze. This creates a `.synap` configuration folder.
+
+```bash
+uv run python -m synap_git.cli init /path/to/your/project
+```
+
+### 3. Start the Daemon
+
+Start the Synap daemon to begin watching files and indexing your codebase in real-time. The Web UI will also become available.
+
+```bash
+uv run python -m synap_git.cli start /path/to/your/project
+```
+
+**What happens next?**
+- Synap recursively scans your project.
+- It parses all supported source files using Tree-sitter.
+- It builds a highly efficient SQLite FTS5 index located at `/path/to/your/project/.synap/index.db`.
+- A Web Dashboard becomes available at `http://localhost:8000` (default port).
+
+### 4. Query the Index (CLI)
+
+You can manually query the index from the command line to verify it's working:
+
+```bash
+# Search for all references to "AuthManager"
+uv run python -m synap_git.cli search /path/to/your/project "AuthManager"
+```
+
+## Next Steps
+
+- Read the [Architecture & Design](/docs/architecture) to understand how Synap works under the hood.
+- Check out the full [CLI Guide](/docs/cli) for advanced commands.
+- Read the [MCP Setup](/docs/mcp) to configure your IDE (Cursor, Windsurf, etc.) to use Synap's context engine.

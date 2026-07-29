@@ -1,0 +1,16 @@
+{
+  "title": "Synap Documentation",
+  "pages": [
+    "index",
+    "cli",
+    "configuration",
+    "mcp",
+    "indexing",
+    "web-ui",
+    "memory",
+    "wiki",
+    "providers",
+    "troubleshooting",
+    "contributing"
+  ]
+}
