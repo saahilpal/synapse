@@ -561,6 +561,15 @@ class SynapRuntime:
             deleted=len(deleted),
         )
 
+        if not filtered_added_or_modified and not deleted:
+            self.store.set_active_commit(
+                git_state.effective_branch, git_state.head_commit or "unknown"
+            )
+            self.logger.info(
+                "incremental_indexing_completed", elapsed_sec=time.perf_counter() - t_start
+            )
+            return git_state.head_commit
+
         # Handle deletions
         with self.store.connect() as conn:
             for rel_path in deleted:

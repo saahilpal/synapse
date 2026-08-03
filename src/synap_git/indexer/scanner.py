@@ -326,6 +326,8 @@ class RepositoryScanner:
             return True
         if any(part in self.excludes for part in parts):
             return True
+        if any(part.startswith(".venv") for part in parts):
+            return True
         if self.synapignore and self.synapignore.matches(path, is_dir=path.is_dir()):
             return True
         if self.gitignore and self.gitignore.matches(path, is_dir=path.is_dir()):
