@@ -216,93 +216,95 @@ export function SynapseHero() {
           {/* Body */}
           <div className="p-6 bg-slate-950 min-h-[380px] grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
 
-            {/* Left: AST Nodes */}
-            <div className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden min-h-[320px] flex flex-col justify-between">
-              <div className="absolute inset-0 bg-dots-pattern opacity-40 pointer-events-none" />
+            {activeTab === "graph" && (
+              <>
+                {/* Left: AST Nodes */}
+                <div className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden min-h-[320px] flex flex-col justify-between">
+                  <div className="absolute inset-0 bg-dots-pattern opacity-40 pointer-events-none" />
 
-              <div className="relative z-10 flex items-center justify-between text-xs font-mono mb-4 pb-2 border-b border-slate-800">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Search className="w-3.5 h-3.5 text-sky-400" />
-                  Query Target: &quot;SynapRuntime&quot;
-                </span>
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <Database className="w-3.5 h-3.5" /> SQLite CTE: 4.8ms
-                </span>
-              </div>
+                  <div className="relative z-10 flex items-center justify-between text-xs font-mono mb-4 pb-2 border-b border-slate-800">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <Search className="w-3.5 h-3.5 text-sky-400" />
+                      Query Target: &quot;SynapRuntime&quot;
+                    </span>
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <Database className="w-3.5 h-3.5" /> SQLite CTE Traversal
+                    </span>
+                  </div>
 
-              <div className="relative z-10 grid grid-cols-2 sm:grid-cols-3 gap-3 my-auto">
-                {INITIAL_NODES.map((node) => {
-                  const isSelected = selectedNode.id === node.id
-                  return (
-                    <div
-                      key={node.id}
-                      onClick={() => setSelectedNode(node)}
-                      className={`cursor-pointer p-3 rounded-xl border text-left transition-all ${
-                        isSelected
-                          ? "bg-slate-800/90 border-sky-500 text-slate-100 ring-1 ring-sky-500/30"
-                          : "bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                          node.layer === "L1" ? "bg-sky-950 text-sky-300 border border-sky-800" : node.layer === "L2" ? "bg-emerald-950 text-emerald-300 border border-emerald-800" : "bg-amber-950 text-amber-300 border border-amber-800"
-                        }`}>
-                          {node.layer}
-                        </span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <div className="relative z-10 grid grid-cols-2 sm:grid-cols-3 gap-3 my-auto">
+                    {INITIAL_NODES.map((node) => {
+                      const isSelected = selectedNode.id === node.id
+                      return (
+                        <div
+                          key={node.id}
+                          onClick={() => setSelectedNode(node)}
+                          className={`cursor-pointer p-3 rounded-xl border text-left transition-all ${
+                            isSelected
+                              ? "bg-slate-800/90 border-sky-500 text-slate-100 ring-1 ring-sky-500/30"
+                              : "bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                              node.layer === "L1" ? "bg-sky-950 text-sky-300 border border-sky-800" : node.layer === "L2" ? "bg-emerald-950 text-emerald-300 border border-emerald-800" : "bg-amber-950 text-amber-300 border border-amber-800"
+                            }`}>
+                              {node.layer}
+                            </span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          </div>
+                          <h4 className="text-xs font-mono font-semibold text-slate-100 truncate">{node.name}</h4>
+                          <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">{node.file}</p>
+                          <div className="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                            <span>{node.type}</span>
+                            <span className="text-sky-400">{node.tokens} tok</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="relative z-10 mt-4 text-[11px] font-mono text-slate-400 flex items-center justify-between">
+                    <span>Click symbol node to inspect primary keys</span>
+                    <span className="text-sky-400">7 AST symbols active</span>
+                  </div>
+                </div>
+
+                {/* Right: Symbol Inspector */}
+                <div className="lg:col-span-5 flex flex-col justify-between bg-slate-900 border border-slate-800 rounded-xl p-5 font-mono text-xs min-h-[320px]">
+                  <div>
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-300">
+                      <span className="font-semibold text-sky-400 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                        Symbol Inspector: {selectedNode.name}
+                      </span>
+                      <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded border border-slate-700">
+                        {selectedNode.layer} Layer
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-slate-400 text-[11px]">
+                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
+                        <span className="text-slate-500">File Path:</span>
+                        <span className="text-slate-200">{selectedNode.file}</span>
                       </div>
-                      <h4 className="text-xs font-mono font-semibold text-slate-100 truncate">{node.name}</h4>
-                      <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">{node.file}</p>
-                      <div className="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
-                        <span>{node.type}</span>
-                        <span className="text-sky-400">{node.tokens} tok</span>
+                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
+                        <span className="text-slate-500">AST Symbol Type:</span>
+                        <span className="text-sky-400">{selectedNode.type}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
+                        <span className="text-slate-500">SHA256 Content Key:</span>
+                        <span className="text-emerald-400">sha256(path + content_hash)</span>
+                      </div>
+                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
+                        <span className="text-slate-500">Token Weight:</span>
+                        <span className="text-amber-400">{selectedNode.tokens} tokens</span>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
 
-              <div className="relative z-10 mt-4 text-[11px] font-mono text-slate-400 flex items-center justify-between">
-                <span>Click symbol node to inspect primary keys</span>
-                <span className="text-sky-400">7 AST symbols active</span>
-              </div>
-            </div>
-
-            {/* Right: Symbol Inspector */}
-            <div className="lg:col-span-5 flex flex-col justify-between bg-slate-900 border border-slate-800 rounded-xl p-5 font-mono text-xs min-h-[320px]">
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-300">
-                  <span className="font-semibold text-sky-400 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                    Symbol Inspector: {selectedNode.name}
-                  </span>
-                  <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded border border-slate-700">
-                    {selectedNode.layer} Layer
-                  </span>
-                </div>
-
-                <div className="mt-4 space-y-2 text-slate-400 text-[11px]">
-                  <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                    <span className="text-slate-500">File Path:</span>
-                    <span className="text-slate-200">{selectedNode.file}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                    <span className="text-slate-500">AST Symbol Type:</span>
-                    <span className="text-sky-400">{selectedNode.type}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                    <span className="text-slate-500">SHA256 Content Key:</span>
-                    <span className="text-emerald-400">sha256(path + content_hash)</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                    <span className="text-slate-500">Token Weight:</span>
-                    <span className="text-amber-400">{selectedNode.tokens} tokens</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 bg-slate-950 p-3 rounded-lg border border-slate-800 text-[11px] leading-relaxed text-slate-300">
-                  <div className="text-slate-500 text-[10px] mb-1">{`// SQLite Recursive CTE Expansion`}</div>
-                  <pre className="overflow-x-auto text-sky-300">
+                    <div className="mt-4 bg-slate-950 p-3 rounded-lg border border-slate-800 text-[11px] leading-relaxed text-slate-300">
+                      <div className="text-slate-500 text-[10px] mb-1">{`// SQLite Recursive CTE Expansion`}</div>
+                      <pre className="overflow-x-auto text-sky-300">
 {`WITH RECURSIVE graph_cte AS (
   SELECT id, name, file_path, 0 AS depth
   FROM symbols WHERE name = '${selectedNode.name}'
@@ -312,17 +314,86 @@ export function SynapseHero() {
   JOIN graph_cte g ON e.source_id = g.id
   WHERE g.depth < 2
 ) SELECT * FROM graph_cte;`}
-                  </pre>
+                      </pre>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
+                    <span className="flex items-center gap-1 text-emerald-400">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Grounded Context Engine
+                    </span>
+                    <span className="text-slate-400">tiktoken budget: 4,000</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {activeTab === "diff" && (
+              <div className="lg:col-span-12 bg-slate-900 border border-slate-800 rounded-xl p-6 font-mono text-xs text-slate-300 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <span className="text-emerald-400 font-semibold flex items-center gap-2">
+                    <GitCommit className="w-4 h-4" /> Git Delta Classification — Commit {activeBranch === "main" ? "a4f8e91" : "c72b109"}
+                  </span>
+                  <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-md border border-slate-700">
+                    watchdog event-driven
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Modified & Renamed Files (git diff-tree -M)</div>
+                    <div className="text-emerald-400 flex items-center gap-2">
+                      <span className="px-1.5 py-0.5 bg-emerald-950 border border-emerald-800 text-[10px] rounded">R100</span>
+                      <span>src/synap_git/parser/old_registry.py → registry.py</span>
+                    </div>
+                    <div className="text-sky-400 flex items-center gap-2">
+                      <span className="px-1.5 py-0.5 bg-sky-950 border border-sky-800 text-[10px] rounded">M</span>
+                      <span>src/synap_git/indexer/daemon.py</span>
+                    </div>
+                    <div className="text-amber-400 flex items-center gap-2">
+                      <span className="px-1.5 py-0.5 bg-amber-950 border border-amber-800 text-[10px] rounded">A</span>
+                      <span>tests/test_audit_fixes_aug2026.py</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Symbol Edge Migration</div>
+                    <p className="text-slate-400 text-[11px]">
+                      File renames preserve primary keys and edge records in SQLite without executing cascading deletions.
+                    </p>
+                    <div className="mt-3 p-2 bg-slate-900 rounded border border-slate-800 text-[10px] text-slate-300">
+                      UPDATE files SET file_id = &apos;new_sha&apos;, path = &apos;new_path&apos; WHERE file_id = &apos;old_sha&apos;
+                    </div>
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Grounded Context Engine
-                </span>
-                <span className="text-slate-400">tiktoken budget: 4,000</span>
+            {activeTab === "mcp" && (
+              <div className="lg:col-span-12 bg-slate-900 border border-slate-800 rounded-xl p-6 font-mono text-xs text-slate-300 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <span className="text-amber-400 font-semibold flex items-center gap-2">
+                    <Layers className="w-4 h-4" /> FastMCP Stdio Packet Protocol
+                  </span>
+                  <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-md border border-slate-700">
+                    stdio transport
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-amber-300 space-y-2">
+                  <div className="text-slate-500">{`// FastMCP JSON-RPC 2.0 stdio stream`}</div>
+                  <pre>{`{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "synap_search",
+    "arguments": { "query": "TreeSitterRegistry", "max_tokens": 4000 }
+  }
+}`}</pre>
+                </div>
               </div>
-            </div>
+            )}
 
           </div>
         </motion.div>

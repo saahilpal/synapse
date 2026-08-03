@@ -32,3 +32,4 @@ test_embed.py
 .vscode/
 .idea/
 *.log
+coverage.xml
