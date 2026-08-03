@@ -57,31 +57,32 @@ Synap coordinates local repository scanning, graph storage, wiki rendering, and 
    └──────────────────────────┘
 ```
 
-* **synap_git.cli** — Mounts Typer subcommands for configuration, database repair, logs tailing, and service management.
-* **synap_git.indexer.daemon** — Runs the background loop tracking commit shifts and processes asynchronous documentation tasks.
-* **synap_git.api.app** — Serves REST endpoints for system metrics, LLM call logging, and diagnostic event streams.
-* **synap_git.git.state** — Extracts Git commit OIDs, untracked changes status, and branch indicators.
-* **synap_git.indexer.engine** — Orchestrates parallel file parsing, AST traversal, and database serialization.
-* **synap_git.parser.registry** — Parses language-specific grammar using Tree-sitter.
-* **synap_git.storage.sqlite** — Controls SQLite databases, Write-Ahead Logging (WAL), and FTS5 search indexing.
-* **synap_git.indexer.wiki** — Generates file, module, and project markdown documentation summaries.
-* **synap_git.retrieval.engine** — Controls lexical, structural, and semantic search queries with token budgeting.
-* **synap_git.mcp.server** — Serves Model Context Protocol commands via stdio.
+- **synap_git.cli** — Mounts Typer subcommands for configuration, database repair, logs tailing, and service management.
+- **synap_git.indexer.daemon** — Runs the background loop tracking commit shifts and processes asynchronous documentation tasks.
+- **synap_git.api.app** — Serves REST endpoints for system metrics, LLM call logging, and diagnostic event streams.
+- **synap_git.git.state** — Extracts Git commit OIDs, untracked changes status, and branch indicators.
+- **synap_git.indexer.engine** — Orchestrates parallel file parsing, AST traversal, and database serialization.
+- **synap_git.parser.registry** — Parses language-specific grammar using Tree-sitter.
+- **synap_git.storage.sqlite** — Controls SQLite databases, Write-Ahead Logging (WAL), and FTS5 search indexing.
+- **synap_git.indexer.wiki** — Generates file, module, and project markdown documentation summaries.
+- **synap_git.retrieval.engine** — Controls lexical, structural, and semantic search queries with token budgeting.
+- **synap_git.mcp.server** — Serves Model Context Protocol commands via stdio.
 
 ### The Layer Model
 
 Synap isolates structural truth from non-deterministic summaries through three defined layers:
 
-* **L1 (Structural Graph):** Tree-sitter parsers convert code files to AST symbols and import dependencies. Imports map caller-callee relations in a database graph, fully regeneratable from HEAD.
-* **L2 (Semantic Wiki):** Asynchronous background prompts construct markdown summaries of files and modules. Missing pages are resolved on-demand through lazy loading.
-* **L3 (Behavioral Memory):** Stored checkpoints, technical decisions, and lessons persist through branch swaps and index rollbacks.
+- **L1 (Structural Graph):** Tree-sitter parsers convert code files to AST symbols and import dependencies. Imports map caller-callee relations in a database graph, fully regeneratable from HEAD.
+- **L2 (Semantic Wiki):** Asynchronous background prompts construct markdown summaries of files and modules. Missing pages are resolved on-demand through lazy loading.
+- **L3 (Behavioral Memory):** Stored checkpoints, technical decisions, and lessons persist through branch swaps and index rollbacks.
 
 ### Runtime Topology
 
 On daemon execution, Synap hosts all services in a single process using the asyncio event loop:
-* **Git Watcher Loop:** Polls repository state every 2 seconds. Identifies branch switches, commit additions, merges, and reverts.
-* **Uvicorn Server:** Hosts the REST API and HTML dashboard on port 9876.
-* **Wiki Worker Task:** Listens to `wiki_queue` changes, generating summaries using LLM calls.
+
+- **Git Watcher Loop:** Polls repository state every 2 seconds. Identifies branch switches, commit additions, merges, and reverts.
+- **Uvicorn Server:** Hosts the REST API and HTML dashboard on port 9876.
+- **Wiki Worker Task:** Listens to `wiki_queue` changes, generating summaries using LLM calls.
 
 ### Data Flow
 
@@ -192,11 +193,13 @@ llm_calls
   file_path     TEXT       associated file path if applicable
   created_at    INTEGER    unix epoch timestamp
 ```
-*Note: Schema versioning is managed via `user_version` pragmas (currently version 3).*
+
+_Note: Schema versioning is managed via `user_version` pragmas (currently version 3)._
 
 ### Indexing Pipeline
 
 Indexing translates source trees to SQLite relations:
+
 1. **Bootstrap Check:** Compares HEAD commit hash with database records. Passes execution to first-run indexing if blank, or incremental indexing if commit history matches.
 2. **First-run Indexing:** Parses all files. Files are split into chunks of 500. `ProcessPoolExecutor` uses all available CPU cores to execute AST parsing in parallel.
 3. **AST Symbol Extraction:** Tree-sitter parsers process code bytes. Traversal scripts register functions and classes.
@@ -207,6 +210,7 @@ Indexing translates source trees to SQLite relations:
 ### Retrieval Design
 
 Retrieval uses a four-stage hybrid query execution loop:
+
 1. **Temporal Selection:** Filters data based on active branch state.
 2. **Lexical Searching:** Queries terms using `symbols_fts` MATCH indexing, starting candidate scores at `1.0`.
 3. **Structural Expansion:** Traverses neighbors up to 2 hops away using SQLite recursive CTEs. Neighbors receive a starting score of `0.8^distance`.
@@ -216,34 +220,41 @@ Retrieval uses a four-stage hybrid query execution loop:
 
 MCP server communicates via stdio, packaging database actions under a JSON envelope.
 
-* **`get_status`** — Returns indexing counts, branch details, and HEAD commit hashes.
-* **`search`** (inputs: `query` string, `max_tokens` integer) — Returns ranked context blocks and latency timelines.
-* **`create_checkpoint`** (inputs: `doing` string, `changed_files` list, `next_step` string, `blockers` string) — Registers new thought snapshot.
-* **`restore_checkpoint`** — Returns the latest checkpoint detail for the active branch.
-* **`log_decision`** (inputs: `content` string, `context_info` string) — Logs architectural decisions.
-* **`verify_system`** — Performs SQLite quick checks.
-* **`submit_lesson_analysis`** (inputs: `lesson_id` string, `why_failed` string) — Saves lesson details under pending status.
-* **`get_approved_memory`** — Returns active approved memory lessons.
-* **`get_pending_memory`** — Returns pending lessons awaiting approval.
-* **`signal_low_context`** (inputs: `token_count` integer, `capacity` integer) — Asserts window usage thresholds, recommending checkpoints if needed.
+- **`get_status`** — Returns indexing counts, branch details, and HEAD commit hashes.
+- **`search`** (inputs: `query` string, `max_tokens` integer) — Returns ranked context blocks and latency timelines.
+- **`create_checkpoint`** (inputs: `doing` string, `changed_files` list, `next_step` string, `blockers` string) — Registers new thought snapshot.
+- **`restore_checkpoint`** — Returns the latest checkpoint detail for the active branch.
+- **`log_decision`** (inputs: `content` string, `context_info` string) — Logs architectural decisions.
+- **`verify_system`** — Performs SQLite quick checks.
+- **`submit_lesson_analysis`** (inputs: `lesson_id` string, `why_failed` string) — Saves lesson details under pending status.
+- **`get_approved_memory`** — Returns active approved memory lessons.
+- **`get_pending_memory`** — Returns pending lessons awaiting approval.
+- **`signal_low_context`** (inputs: `token_count` integer, `capacity` integer) — Asserts window usage thresholds, recommending checkpoints if needed.
 
 ### Key Algorithms
 
 #### Revert Detection
+
 When the daemon watcher registers a checkout transition, it runs:
+
 ```bash
 git log -n 1 --pretty=format:%s
 ```
+
 If the commit message starts with `"Revert "`, Synap parses the commit message to extract the reverted commit hash. It runs `git show --name-only` to identify affected paths and inserts a pending lesson row.
 
 #### Context Packing
+
 Context is packed using `tiktoken`'s `cl100k_base` tokenizer.
-* Enforces limit of `max_tokens - 600` (reserves 600 tokens for instructions).
-* Appends active approved memory lessons under `# APPROVED SYSTEM MEMORY`.
-* Formats code blocks sequentially. Candidate elements exceeding the remaining budget are truncated.
+
+- Enforces limit of `max_tokens - 600` (reserves 600 tokens for instructions).
+- Appends active approved memory lessons under `# APPROVED SYSTEM MEMORY`.
+- Formats code blocks sequentially. Candidate elements exceeding the remaining budget are truncated.
 
 #### Graph CTE Traversal
+
 Recursively traverses dependencies using SQLite SQL CTEs:
+
 ```sql
 WITH RECURSIVE neighborhood(id, d) AS (
     SELECT ? as id, 0 as d
@@ -264,39 +275,49 @@ ORDER BY n.d ASC
 ## Install
 
 Install the python package:
+
 ```bash
 pip install synap-git
 ```
 
 ### System Requirements
-* Python >= 3.11
-* Git Command Line Tool
-* SQLite (compiled with FTS5 virtual table support)
+
+- Python >= 3.11
+- Git Command Line Tool
+- SQLite (compiled with FTS5 virtual table support)
 
 ---
 
 ## Quick Start
 
 ### 1. Setup LLM Credentials
+
 Run interactive configuration to configure your model:
+
 ```bash
 synap setup .
 ```
 
 ### 2. Run Ingestion
+
 Initialize the local SQLite database index:
+
 ```bash
 synap init .
 ```
 
 ### 3. Connect IDE / Start MCP
+
 Launch the unified background daemon and MCP stdio server:
+
 ```bash
 synap start .
 ```
 
 ### 4. Connect IDE
+
 Generate configuration settings:
+
 ```bash
 synap mcp config .
 ```
@@ -307,37 +328,37 @@ synap mcp config .
 
 All commands support target path arguments:
 
-* `synap setup [PATH]` — Runs provider configuration wizard.
-* `synap init [PATH]` — Performs initial structural indexing. Supports `--skip-llm`, `--skip-wiki`.
-* `synap wipe [PATH]` — Purges SQLite index.
-* `synap start [PATH]` — Launches background daemon.
-* `synap stop [PATH]` — Terminate background daemon.
-* `synap restart [PATH]` — Restarts background daemon.
-* `synap status [PATH]` — Prints active indexing parameters. Supports `--json`.
-* `synap logs` — Views system logs. Supports `-t`, `-n`, `-d`.
-* `synap update` — Upgrades Synap installation.
-* `synap version` — Prints version.
-* `synap rollback [PATH]` — Restores index state to previous commit. Supports `-c`, `-y`.
-* `synap repair [PATH]` — Wipes index and rebuilds from HEAD. Supports `-y`.
-* `synap doctor [PATH]` — Verifies database integrity and parsers.
-* `synap run [PATH]` — Runs daemon in foreground.
-* `synap ui [PATH]` — Launches HTML dashboard.
-* `synap mcp config [PATH]` — Outputs Cursor connection blocks.
-* `synap mcp verify [PATH]` — Asserts MCP server stability.
-* `synap memory status [PATH]` — Lists lesson counts.
-* `synap memory prune [PATH]` — Evaluates and deletes expired lessons.
-* `synap memory verify [PATH]` — Checks lessons for missing files. Supports `--json`.
-* `synap lessons approve <ID> [PATH]` — Approves a pending lesson.
-* `synap lessons reject <ID> [PATH]` — Rejects a lesson.
-* `synap lessons review [PATH]` — Launches interactive lesson review console.
-* `synap checkpoint create [PATH]` — Logs progress snapshot. Supports `--doing`, `--files`, `--next-step`, `--blockers`.
-* `synap checkpoint list [PATH]` — Renders checkpoint tables.
-* `synap checkpoint restore <ID> [PATH]` — Displays checkpoint records.
-* `synap usage show [PATH]` — Renders token metrics.
-* `synap usage clear [PATH]` — Clears LLM call logs.
-* `synap cost [PATH]` — Shows aggregated LLM calls, token counts, and estimated USD cost (alias for `synap usage show`).
-* `synap wiki list [PATH]` — Lists generated docs.
-* `synap wiki show <FILE> [PATH]` — Renders wiki files.
+- `synap setup [PATH]` — Runs provider configuration wizard.
+- `synap init [PATH]` — Performs initial structural indexing. Supports `--skip-llm`, `--skip-wiki`.
+- `synap wipe [PATH]` — Purges SQLite index.
+- `synap start [PATH]` — Launches background daemon.
+- `synap stop [PATH]` — Terminate background daemon.
+- `synap restart [PATH]` — Restarts background daemon.
+- `synap status [PATH]` — Prints active indexing parameters. Supports `--json`.
+- `synap logs` — Views system logs. Supports `-t`, `-n`, `-d`.
+- `synap update` — Upgrades Synap installation.
+- `synap version` — Prints version.
+- `synap rollback [PATH]` — Restores index state to previous commit. Supports `-c`, `-y`.
+- `synap repair [PATH]` — Wipes index and rebuilds from HEAD. Supports `-y`.
+- `synap doctor [PATH]` — Verifies database integrity and parsers.
+- `synap run [PATH]` — Runs daemon in foreground.
+- `synap ui [PATH]` — Launches HTML dashboard.
+- `synap mcp config [PATH]` — Outputs Cursor connection blocks.
+- `synap mcp verify [PATH]` — Asserts MCP server stability.
+- `synap memory status [PATH]` — Lists lesson counts.
+- `synap memory prune [PATH]` — Evaluates and deletes expired lessons.
+- `synap memory verify [PATH]` — Checks lessons for missing files. Supports `--json`.
+- `synap lessons approve <ID> [PATH]` — Approves a pending lesson.
+- `synap lessons reject <ID> [PATH]` — Rejects a lesson.
+- `synap lessons review [PATH]` — Launches interactive lesson review console.
+- `synap checkpoint create [PATH]` — Logs progress snapshot. Supports `--doing`, `--files`, `--next-step`, `--blockers`.
+- `synap checkpoint list [PATH]` — Renders checkpoint tables.
+- `synap checkpoint restore <ID> [PATH]` — Displays checkpoint records.
+- `synap usage show [PATH]` — Renders token metrics.
+- `synap usage clear [PATH]` — Clears LLM call logs.
+- `synap cost [PATH]` — Shows aggregated LLM calls, token counts, and estimated USD cost (alias for `synap usage show`).
+- `synap wiki list [PATH]` — Lists generated docs.
+- `synap wiki show <FILE> [PATH]` — Renders wiki files.
 
 ---
 
@@ -345,46 +366,48 @@ All commands support target path arguments:
 
 Configuration values are parsed from `~/.config/synap/config.toml`.
 
-| Field Name | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `profile` | `string` | `"dev"` | Active environment configuration profile. |
-| `mode` | `string` | `"active"` | Watcher polling mode selector. |
-| `repository_path` | `string` | `"."` | Repository root directory. |
-| `state_path` | `string` | `".synap"` | Root storage path. |
-| `sqlite_path` | `string` | `".synap/synap.db"` | Database file location. |
-| `object_path` | `string` | `".synap/objects"` | Directory for serialized artifacts. |
-| `log_path` | `string` | `".synap/logs"` | Directory for logs. |
-| `logging_mode` | `string` | `"human"` | Log output format type. |
-| `log_level` | `string` | `"INFO"` | Minimum logging level threshold. |
-| `max_file_bytes` | `integer` | `1000000` | Size threshold for parsed files. |
-| `checkpoint_threshold` | `float` | `0.60` | Threshold ratio for memory warnings. |
-| `lesson_expiry_days` | `integer` | `7` | Days before memory lessons expire. |
-| `llm_provider` | `string` | `null` | Generative provider: `openai`, `gemini`, `anthropic`, `ollama`, `openrouter`. |
-| `llm_model` | `string` | `null` | Named model used for prompts. |
-| `ollama_url` | `string` | `"http://127.0.0.1:11434"` | Endpoint URL for Ollama connectivity. |
-| `mcp_host` | `string` | `"127.0.0.1"` | Bind host for local networking. |
-| `mcp_port` | `integer` | `9876` | Server listener port. |
-| `daemon_poll_interval_seconds` | `float` | `2.0` | Git state polling frequency. |
-| `shutdown_timeout_seconds` | `float` | `5.0` | Timeout threshold for shutting down. |
+| Field Name                     | Type      | Default                    | Description                                                                   |
+| :----------------------------- | :-------- | :------------------------- | :---------------------------------------------------------------------------- |
+| `profile`                      | `string`  | `"dev"`                    | Active environment configuration profile.                                     |
+| `mode`                         | `string`  | `"active"`                 | Watcher polling mode selector.                                                |
+| `repository_path`              | `string`  | `"."`                      | Repository root directory.                                                    |
+| `state_path`                   | `string`  | `".synap"`                 | Root storage path.                                                            |
+| `sqlite_path`                  | `string`  | `".synap/synap.db"`        | Database file location.                                                       |
+| `object_path`                  | `string`  | `".synap/objects"`         | Directory for serialized artifacts.                                           |
+| `log_path`                     | `string`  | `".synap/logs"`            | Directory for logs.                                                           |
+| `logging_mode`                 | `string`  | `"human"`                  | Log output format type.                                                       |
+| `log_level`                    | `string`  | `"INFO"`                   | Minimum logging level threshold.                                              |
+| `max_file_bytes`               | `integer` | `1000000`                  | Size threshold for parsed files.                                              |
+| `checkpoint_threshold`         | `float`   | `0.60`                     | Threshold ratio for memory warnings.                                          |
+| `lesson_expiry_days`           | `integer` | `7`                        | Days before memory lessons expire.                                            |
+| `llm_provider`                 | `string`  | `null`                     | Generative provider: `openai`, `gemini`, `anthropic`, `ollama`, `openrouter`. |
+| `llm_model`                    | `string`  | `null`                     | Named model used for prompts.                                                 |
+| `ollama_url`                   | `string`  | `"http://127.0.0.1:11434"` | Endpoint URL for Ollama connectivity.                                         |
+| `mcp_host`                     | `string`  | `"127.0.0.1"`              | Bind host for local networking.                                               |
+| `mcp_port`                     | `integer` | `9876`                     | Server listener port.                                                         |
+| `daemon_poll_interval_seconds` | `float`   | `2.0`                      | Git state polling frequency.                                                  |
+| `shutdown_timeout_seconds`     | `float`   | `5.0`                      | Timeout threshold for shutting down.                                          |
 
 ---
 
 ## MCP Integration
 
 Verify configurations using:
+
 ```bash
 synap mcp config .
 ```
 
 ### Server Configuration Block
+
 ```json
 {
-  "mcpServers": {
-    "synap": {
-      "command": "/usr/local/bin/python",
-      "args": ["-m", "synap_git.cli", "start", "/Users/username/repo"]
+    "mcpServers": {
+        "synap": {
+            "command": "/usr/local/bin/python",
+            "args": ["-m", "synap_git.cli", "start", "/Users/username/repo"]
+        }
     }
-  }
 }
 ```
 
@@ -394,15 +417,15 @@ synap mcp config .
 
 Synap now processes syntax dynamically for **over 50 programming languages** via `tree-sitter-languages`, including:
 
-* **Python** (`.py`)
-* **JavaScript / TypeScript** (`.js`, `.jsx`, `.ts`, `.tsx`)
-* **C / C++ / C#** (`.c`, `.cpp`, `.h`, `.hpp`, `.cs`)
-* **Java / Kotlin / Scala** (`.java`, `.kt`, `.kts`, `.scala`)
-* **Go / Rust / Swift** (`.go`, `.rs`, `.swift`)
-* **Ruby / PHP / Perl** (`.rb`, `.php`, `.pl`)
-* **Shell Scripts** (`.sh`, `.bash`, or via `#!` shebang detection)
-* **Data / Config** (`.sql`, `.json`, `.yaml`, `.toml`, `.xml`)
-* **Web** (`.html`, `.css`, `.scss`)
+- **Python** (`.py`)
+- **JavaScript / TypeScript** (`.js`, `.jsx`, `.ts`, `.tsx`)
+- **C / C++ / C#** (`.c`, `.cpp`, `.h`, `.hpp`, `.cs`)
+- **Java / Kotlin / Scala** (`.java`, `.kt`, `.kts`, `.scala`)
+- **Go / Rust / Swift** (`.go`, `.rs`, `.swift`)
+- **Ruby / PHP / Perl** (`.rb`, `.php`, `.pl`)
+- **Shell Scripts** (`.sh`, `.bash`, or via `#!` shebang detection)
+- **Data / Config** (`.sql`, `.json`, `.yaml`, `.toml`, `.xml`)
+- **Web** (`.html`, `.css`, `.scss`)
 
 Even extensionless scripts are gracefully detected via shebang parsing. Missing grammars automatically degrade gracefully to plaintext indexing.
 
@@ -410,30 +433,32 @@ Even extensionless scripts are gracefully detected via shebang parsing. Missing 
 
 ## Supported Providers
 
-* **Ollama** — Local model integration.
-* **OpenAI** — Cloud GPT models. (Environment Variable: `SYNAP_OPENAI_API_KEY`)
-* **Anthropic** — Cloud Claude models. (Environment Variable: `SYNAP_ANTHROPIC_API_KEY`)
-* **Gemini** — Cloud Gemini models. (Environment Variable: `SYNAP_GEMINI_API_KEY`)
-* **OpenRouter** — Unified cloud model routing. (Environment Variable: `SYNAP_OPENROUTER_API_KEY`)
+- **Ollama** — Local model integration.
+- **OpenAI** — Cloud GPT models. (Environment Variable: `SYNAP_OPENAI_API_KEY`)
+- **Anthropic** — Cloud Claude models. (Environment Variable: `SYNAP_ANTHROPIC_API_KEY`)
+- **Gemini** — Cloud Gemini models. (Environment Variable: `SYNAP_GEMINI_API_KEY`)
+- **OpenRouter** — Unified cloud model routing. (Environment Variable: `SYNAP_OPENROUTER_API_KEY`)
 
 ---
 
 ## Limitations
 
-* **Git workspace dependency:** Indexes and tracks metadata solely inside valid Git repositories.
-* **Structural-only mode:** Runs without wiki generation or contextual LLM generation if `llm_provider` is unset.
-* **Size exclusions:** Skips binary files and files larger than `max_file_bytes` (default 1MB).
+- **Git workspace dependency:** Indexes and tracks metadata solely inside valid Git repositories.
+- **Structural-only mode:** Runs without wiki generation or contextual LLM generation if `llm_provider` is unset.
+- **Size exclusions:** Skips binary files and files larger than `max_file_bytes` (default 1MB).
 
 ---
 
 ## Contributing
 
 Execute unit tests:
+
 ```bash
 SYNAP_SKIP_STRESS=1 uv run pytest tests/ -x --tb=short
 ```
 
 Format code and check types:
+
 ```bash
 uv run ruff format src/
 uv run ruff check src/
