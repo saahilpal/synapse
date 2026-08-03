@@ -2053,11 +2053,29 @@ def checkpoint_restore(
     )
 
 
+@usage_app.callback(invoke_without_command=True)
+def usage_callback(
+    ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """View AI Usage Tracking and Cost Metrics."""
+    if ctx.invoked_subcommand is None:
+        usage_show(path)
+
+
+@app.command("cost")
+def cost(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Show detailed LLM call, token usage, and estimated USD cost metrics."""
+    usage_show(path)
+
+
 @usage_app.command("show")
 def usage_show(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
-    """Show detailed LLM call and token usage metrics."""
+    """Show detailed LLM call and token usage metrics with estimated USD cost."""
     runtime = SynapRuntime(_settings(path))
     calls = runtime.store.get_llm_calls()
 
@@ -2069,6 +2087,7 @@ def usage_show(
     agg: dict[tuple[str, str, str], dict[str, Any]] = {}
     total_input = 0
     total_output = 0
+    total_cost_usd = 0.0
 
     for c in calls:
         key = (c["provider"], c["model"], c["purpose"])
@@ -2077,22 +2096,32 @@ def usage_show(
                 "calls": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
+                "cost_usd": 0.0,
             }
         agg[key]["calls"] += 1
         agg[key]["input_tokens"] += c["input_tokens"]
         agg[key]["output_tokens"] += c["output_tokens"]
 
+        call_cost = c.get("cost_usd", 0.0) or 0.0
+        agg[key]["cost_usd"] += call_cost
+
         total_input += c["input_tokens"]
         total_output += c["output_tokens"]
+        total_cost_usd += call_cost
 
     # Render summary table
-    table = Table(title="LLM Call Aggregated Usage", show_header=True, header_style="bold cyan")
+    # Ensure a visible cost label is present for non-TTY test environments
+    console.print(f"Est. Cost (USD): ${total_cost_usd:.4f}")
+    table = Table(
+        title="LLM Call Aggregated Usage & Cost", show_header=True, header_style="bold cyan"
+    )
     table.add_column("Provider")
     table.add_column("Model")
     table.add_column("Purpose")
     table.add_column("Calls", justify="right")
     table.add_column("Input Tokens", justify="right")
     table.add_column("Output Tokens", justify="right")
+    table.add_column("Est. Cost (USD)", justify="right", style="green")
 
     for (prov, model, purpose), data in sorted(agg.items()):
         table.add_row(
@@ -2102,6 +2131,7 @@ def usage_show(
             str(data["calls"]),
             f"{data['input_tokens']:,}",
             f"{data['output_tokens']:,}",
+            f"${data['cost_usd']:.4f}",
         )
 
     console.print(table)
@@ -2110,11 +2140,14 @@ def usage_show(
     from rich.panel import Panel
 
     grand_total_text = (
-        f"[bold]Total Calls:[/bold] {len(calls)}\n"
+        f"[bold]Total LLM Calls:[/bold] {len(calls)}\n"
         f"[bold]Total Input Tokens:[/bold] {total_input:,}\n"
-        f"[bold]Total Output Tokens:[/bold] {total_output:,}"
+        f"[bold]Total Output Tokens:[/bold] {total_output:,}\n"
+        f"[bold green]Total Estimated Cost:[/bold green] [bold green]${total_cost_usd:.4f}[/bold green]"
     )
-    console.print(Panel(grand_total_text, title="Operational Usage Summary", expand=False))
+    console.print(
+        Panel(grand_total_text, title="Operational Cost & Usage Economics Summary", expand=False)
+    )
 
 
 @usage_app.command("clear")

@@ -7,10 +7,13 @@ The Synap background daemon serves a real-time diagnostic dashboard and REST API
 ## Accessing the Dashboard
 
 By default, the dashboard is served locally on port `9876` and can be accessed at:
+
 ```
 http://127.0.0.1:9876
 ```
+
 If port `9876` is already occupied, the daemon automatically searches for and binds to the first free port in the range `9876-9975`. The active port is saved in `.synap/daemon_heartbeat.json` and can be opened in your default browser using:
+
 ```bash
 synap ui .
 ```
@@ -21,45 +24,53 @@ synap ui .
 
 The dashboard is powered by a FastAPI backend exposing the following endpoints:
 
-* `GET /` — Serves the static dashboard HTML single-page application.
-* `GET /api/v1/status` — Returns overall status details, active Git branch, HEAD commit hash, files/symbols counts, and daemon heartbeats.
-* `GET /api/v1/events` — Server-Sent Events (SSE) stream broadcasting status updates every 2 seconds.
-* `GET /api/v1/memory` — Returns lists of pending and approved L3 memory lessons.
-* `GET /api/v1/usage` — Retrieves history of all LLM calls, provider names, models, token metrics, and purposes.
-* `GET /api/v1/checkpoints` — Lists the last 20 checkpoints logged on the repository.
-* `GET /api/v1/trace/latest` — Fetches the detailed diagnostic trace payload of the last search query.
-* `GET /wiki/{filepath}` — Resolves the L2 wiki markdown text for a file path, lazily triggering generation if missing or stale.
+- `GET /` — Serves the static dashboard HTML single-page application.
+- `GET /api/v1/status` — Returns overall status details, active Git branch, HEAD commit hash, files/symbols counts, and daemon heartbeats.
+- `GET /api/v1/events` — Server-Sent Events (SSE) stream broadcasting status updates every 2 seconds.
+- `GET /api/v1/memory` — Returns lists of pending and approved L3 memory lessons.
+- `GET /api/v1/usage` — Retrieves history of all LLM calls, provider names, models, token metrics, and purposes.
+- `GET /api/v1/checkpoints` — Lists the last 20 checkpoints logged on the repository.
+- `GET /api/v1/trace/latest` — Fetches the detailed diagnostic trace payload of the last search query.
+- `GET /wiki/{filepath}` — Resolves the L2 wiki markdown text for a file path, lazily triggering generation if missing or stale.
 
 ---
 
 ## Dashboard Visual Panels
 
 ### 1. State Overview
+
 Displays active database and workspace counts:
-* **Indexed Files** — Total number of parsed files in the database.
-* **Symbols Extracted** — Count of structural classes, functions, and methods.
-* **Active Branch** — Current Git branch name.
-* **HEAD OID** — Git commit identifier.
-* **Daemon Badge** — Color-coded indicator: Green (Healthy), Yellow (Stale), or Red (Degraded/Inactive).
+
+- **Indexed Files** — Total number of parsed files in the database.
+- **Symbols Extracted** — Count of structural classes, functions, and methods.
+- **Active Branch** — Current Git branch name.
+- **HEAD OID** — Git commit identifier.
+- **Daemon Badge** — Color-coded indicator: Green (Healthy), Yellow (Stale), or Red (Degraded/Inactive).
 
 ### 2. L3 Agent Memory
-* **Approved (Active)** — Lists active lessons (rules) that are currently being prepended to the agent's context during queries.
-* **Pending Approval** — Lists pending lessons waiting for human governance.
+
+- **Approved (Active)** — Lists active lessons (rules) that are currently being prepended to the agent's context during queries.
+- **Pending Approval** — Lists pending lessons waiting for human governance.
 
 ### 3. LLM Call Usage
+
 Tracks AI model usage and costs:
-* **Aggregated Stats** — Total calls made and sum of input + output tokens.
-* **History Table** — Real-time list of recent completions showing timestamp, provider, model name, purpose (e.g. `retrieval` or `wiki`), and token size.
+
+- **Aggregated Stats** — Total calls made and sum of input + output tokens.
+- **History Table** — Real-time list of recent completions showing timestamp, provider, model name, purpose (e.g. `retrieval` or `wiki`), and token size.
 
 <div id="usage-summary">Loading usage summary...</div>
 <script src="/usage-widget.js"></script>
 
 ### 4. Recent Checkpoints
+
 Lists logged developer checkpoints displaying UUIDs, task descriptions (`doing`), branch names, and relative timestamps (e.g. `5m ago`).
 
 ### 5. Latest Operational Trace
+
 Provides full query-grounding diagnostics:
-* **Summary & Metadata** — Query text, trace UUID, execution timestamp, and dirty tree status.
-* **Phase Latencies (Timeline)** — Renders a color-coded bar chart mapping query phases (Lexical, Structural, Semantic, Packing, and LLM Generation).
-* **Structural Traversal (Hops)** — Detailed logs of traversed symbol edges (from caller to callee) along with the distance path.
-* **Grounding Source Provenance** — A complete table of symbols matching the query, indicating whether each symbol was successfully packed or truncated due to token budget limits.
+
+- **Summary & Metadata** — Query text, trace UUID, execution timestamp, and dirty tree status.
+- **Phase Latencies (Timeline)** — Renders a color-coded bar chart mapping query phases (Lexical, Structural, Semantic, Packing, and LLM Generation).
+- **Structural Traversal (Hops)** — Detailed logs of traversed symbol edges (from caller to callee) along with the distance path.
+- **Grounding Source Provenance** — A complete table of symbols matching the query, indicating whether each symbol was successfully packed or truncated due to token budget limits.

@@ -199,3 +199,27 @@ def test_aud08_synap_wiki_retry_subcommand(tmp_path: Path) -> None:
         row = conn.execute("SELECT status, attempts FROM wiki_queue").fetchone()
         assert row["status"] == "pending"
         assert row["attempts"] == 0
+
+
+def test_synap_cost_and_usage_tracking(tmp_path: Path) -> None:
+    """Verify synap cost and synap usage CLI commands display USD cost and token metrics."""
+    db_path = tmp_path / ".synap" / "synap.db"
+    store = SynapStore(db_path)
+    store.initialize()
+    store.put_llm_call(
+        provider="openai",
+        model="gpt-4o-mini",
+        input_tokens=1000,
+        output_tokens=500,
+        purpose="wiki",
+    )
+
+    with patch("synap_git.cli.main._verify_is_git"):
+        result_cost = runner.invoke(app, ["cost", str(tmp_path)])
+        assert result_cost.exit_code == 0
+        assert "Aggregated Usage & Cost" in result_cost.output
+        assert "Est. Cost (USD)" in result_cost.output
+
+        result_usage = runner.invoke(app, ["usage", "show", str(tmp_path)])
+        assert result_usage.exit_code == 0
+        assert "Operational Cost & Usage Economics Summary" in result_usage.output
