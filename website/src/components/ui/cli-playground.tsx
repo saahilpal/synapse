@@ -59,7 +59,8 @@ const CLI_SPECS: CommandSpec[] = [
       { text: "  • Class: AuthService (lines 12-85) [sha256: 9f81a2e]", type: "success" },
       { text: "  • Method: AuthService.verify_token (lines 45-52)", type: "success" },
       { text: "  • Import: from jose import jwt (line 3)", type: "success" },
-      { text: "✔ Structural context packaged. Token count: 420.", type: "success" }
+        { text: "✔ Structural context packaged. Token count: 420.", type: "success" },
+        { text: "Total Estimated Cost: $0.0042 (est.) — 420 input + 120 output tokens", type: "info" }
     ]
   },
   {
@@ -180,11 +181,11 @@ export function CliPlayground() {
 
               {typedLogs.map((log, idx) => (
                 <div key={idx} className="leading-relaxed">
-                  {log.type === "cmd" && <span className="text-sky-400 font-bold">{log.text}</span>}
-                  {log.type === "title" && <span className="text-slate-100 font-bold underline">{log.text}</span>}
-                  {log.type === "info" && <span className="text-slate-400">{log.text}</span>}
-                  {log.type === "success" && <span className="text-emerald-400">{log.text}</span>}
-                  {log.type === "warning" && <span className="text-amber-400">{log.text}</span>}
+                  {log?.type === "cmd" && <span className="text-sky-400 font-bold">{log.text}</span>}
+                  {log?.type === "title" && <span className="text-slate-100 font-bold underline">{log.text}</span>}
+                  {log?.type === "info" && <span className="text-slate-400">{log.text}</span>}
+                  {log?.type === "success" && <span className="text-emerald-400">{log.text}</span>}
+                  {log?.type === "warning" && <span className="text-amber-400">{log.text}</span>}
                 </div>
               ))}
             </div>

@@ -253,11 +253,11 @@ export function SynapseHero() {
                             </span>
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                           </div>
-                          <h4 className="text-xs font-mono font-semibold text-slate-100 truncate">{node.name}</h4>
-                          <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">{node.file}</p>
+                            <h4 className="text-xs font-mono font-semibold text-slate-100 truncate">{node?.name}</h4>
+                              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">{node?.file}</p>
                           <div className="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
-                            <span>{node.type}</span>
-                            <span className="text-sky-400">{node.tokens} tok</span>
+                            <span>{node?.type}</span>
+                            <span className="text-sky-400">{node?.tokens} tok</span>
                           </div>
                         </div>
                       )
@@ -276,21 +276,21 @@ export function SynapseHero() {
                     <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-300">
                       <span className="font-semibold text-sky-400 flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                        Symbol Inspector: {selectedNode.name}
+                        Symbol Inspector: {selectedNode?.name}
                       </span>
                       <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded border border-slate-700">
-                        {selectedNode.layer} Layer
+                        {selectedNode?.layer} Layer
                       </span>
                     </div>
 
                     <div className="mt-4 space-y-2 text-slate-400 text-[11px]">
                       <div className="flex justify-between border-b border-slate-800/60 pb-1">
                         <span className="text-slate-500">File Path:</span>
-                        <span className="text-slate-200">{selectedNode.file}</span>
+                        <span className="text-slate-200">{selectedNode?.file}</span>
                       </div>
                       <div className="flex justify-between border-b border-slate-800/60 pb-1">
                         <span className="text-slate-500">AST Symbol Type:</span>
-                        <span className="text-sky-400">{selectedNode.type}</span>
+                        <span className="text-sky-400">{selectedNode?.type}</span>
                       </div>
                       <div className="flex justify-between border-b border-slate-800/60 pb-1">
                         <span className="text-slate-500">SHA256 Content Key:</span>
@@ -298,16 +298,16 @@ export function SynapseHero() {
                       </div>
                       <div className="flex justify-between border-b border-slate-800/60 pb-1">
                         <span className="text-slate-500">Token Weight:</span>
-                        <span className="text-amber-400">{selectedNode.tokens} tokens</span>
+                        <span className="text-amber-400">{selectedNode?.tokens} tokens</span>
                       </div>
                     </div>
 
                     <div className="mt-4 bg-slate-950 p-3 rounded-lg border border-slate-800 text-[11px] leading-relaxed text-slate-300">
                       <div className="text-slate-500 text-[10px] mb-1">{`// SQLite Recursive CTE Expansion`}</div>
                       <pre className="overflow-x-auto text-sky-300">
-{`WITH RECURSIVE graph_cte AS (
+                {`WITH RECURSIVE graph_cte AS (
   SELECT id, name, file_path, 0 AS depth
-  FROM symbols WHERE name = '${selectedNode.name}'
+  FROM symbols WHERE name = '${selectedNode?.name ?? ""}'
   UNION ALL
   SELECT s.id, s.name, s.file_path, g.depth + 1
   FROM symbols s JOIN edges e ON s.id = e.target_id
