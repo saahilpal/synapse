@@ -228,12 +228,27 @@ class SynapRuntime:
     def index_repository(
         self, *, git_state: GitState | None = None, force: bool = False
     ) -> str | None:
-        self.initialize_storage()
         git_state = git_state or self.git.state()
         branch = git_state.effective_branch
 
-        # Check active commit
-        existing_commit = self.store.get_active_commit(branch)
+        # If the current repository commit is already indexed, skip reindexing entirely.
+        if self.store.path.exists():
+            existing_commit = self.store.get_active_commit(branch)
+            if existing_commit == git_state.head_commit and not force:
+                self.logger.info(
+                    "index_repository_skipped",
+                    branch=branch,
+                    commit=existing_commit,
+                )
+                return existing_commit
+        else:
+            existing_commit = None
+
+        self.initialize_storage()
+
+        # Check active commit after storage initialization
+        if existing_commit is None:
+            existing_commit = self.store.get_active_commit(branch)
 
         # Determine if we should run first-run or incremental
         if (

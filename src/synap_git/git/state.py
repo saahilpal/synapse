@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 
 class GitIntegrationError(RuntimeError):
@@ -54,48 +54,72 @@ class GitRepository:
 
     def state(self) -> GitState:
         try:
-            from git import InvalidGitRepositoryError, NoSuchPathError, Repo
-        except ImportError as exc:
-            raise GitIntegrationError("GitPython is not installed") from exc
+            repository_path = self.path.resolve()
+            git_dir = repository_path / ".git"
+            if not git_dir.exists():
+                return GitState(repository_path=repository_path, is_repository=False)
 
-        try:
-            repo: Any = Repo(self.path, search_parent_directories=True)
-        except (InvalidGitRepositoryError, NoSuchPathError):
-            return GitState(repository_path=self.path.resolve(), is_repository=False)
-
-        repository_path = Path(repo.working_tree_dir or self.path).resolve()
-        git_dir = Path(repo.git_dir)
-        is_detached = bool(repo.head.is_detached)
-        branch: str | None
-        if is_detached:
+            is_detached = False
             branch = None
-        else:
-            branch = str(repo.active_branch.name)
+            head_commit = None
+            parent_hashes: tuple[str, ...] = ()
+            commit_message = None
 
-        head_commit: str | None = None
-        parent_hashes: tuple[str, ...] = ()
-        commit_message: str | None = None
-        try:
-            commit = repo.head.commit
-            head_commit = str(commit.hexsha)
-            parent_hashes = tuple(str(parent.hexsha) for parent in commit.parents)
-            commit_message = str(commit.message).strip()
-        except ValueError:
-            pass
+            try:
+                branch = subprocess.run(
+                    ["git", "symbolic-ref", "--short", "--quiet", "HEAD"],
+                    cwd=repository_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+            except subprocess.CalledProcessError:
+                is_detached = True
+                branch = None
 
-        return GitState(
-            repository_path=repository_path,
-            is_repository=True,
-            head_commit=head_commit,
-            branch=branch,
-            is_dirty=bool(repo.is_dirty(untracked_files=True)),
-            is_detached=is_detached,
-            merge_in_progress=(git_dir / "MERGE_HEAD").exists(),
-            rebase_in_progress=(git_dir / "rebase-merge").exists()
-            or (git_dir / "rebase-apply").exists(),
-            commit_parent_hashes=parent_hashes,
-            commit_message=commit_message,
-        )
+            if branch == "HEAD":
+                branch = None
+
+            try:
+                head_commit = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=repository_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+            except subprocess.CalledProcessError:
+                head_commit = None
+
+            try:
+                is_dirty = (
+                    subprocess.run(
+                        ["git", "status", "--porcelain", "--untracked-files"],
+                        cwd=repository_path,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout
+                    != ""
+                )
+            except subprocess.CalledProcessError:
+                is_dirty = False
+
+            return GitState(
+                repository_path=repository_path,
+                is_repository=True,
+                head_commit=head_commit,
+                branch=branch,
+                is_dirty=is_dirty,
+                is_detached=is_detached,
+                merge_in_progress=(git_dir / "MERGE_HEAD").exists(),
+                rebase_in_progress=(git_dir / "rebase-merge").exists()
+                or (git_dir / "rebase-apply").exists(),
+                commit_parent_hashes=parent_hashes,
+                commit_message=commit_message,
+            )
+        except Exception as exc:
+            raise GitIntegrationError("Git state could not be determined") from exc
 
     @staticmethod
     def classify(previous: GitState | None, current: GitState) -> GitChange:
