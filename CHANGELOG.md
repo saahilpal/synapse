@@ -10,16 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.3.0] - 2026-08-03
 
 ### Added
+
 - **CLI Cost & Usage Command**: Expose `synap cost` (alias `synap usage`) to show aggregated LLM calls, token counts, and estimated USD cost in the terminal.
 - **Web UI: CLI Cost Integration**: The website CLI playground now surfaces an estimated cost line for sample commands so visitors can see token/cost economics.
 
 ### Changed
+
 - **Frontend Defensive Rendering**: Guarded several UI paths against undefined symbol objects to prevent runtime errors in production (fixed `.type` property reads).
 
 ### Chore
+
 - **Bumped package version** to `2.3.0`.
 - **Release automation**: prepared changelog and release tag for GitHub release `v2.3.0`.
 
+## [2.2.0] - 2026-08-03
 
 ### Added
 
