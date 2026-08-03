@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-08-03
+
+### Added
+- **AST Symbol Parser Expansion (AUD-02)**: Implemented Tree-sitter AST symbol extraction handlers for C#, PHP, Kotlin, Scala, and C.
+- **Event-Driven File Watcher (AUD-03)**: Replaced continuous 2s subprocess polling with `watchdog` filesystem event tracking, reducing idle CPU usage to near-zero.
+- **Daemon REST API Diagnostic Checks (AUD-06)**: Added daemon port availability and REST API endpoint status checks to `synap doctor`.
+- **Wiki Task Requeue Subcommand (AUD-08)**: Added `synap wiki retry` CLI subcommand and `retry_failed_wiki_queue` storage method to requeue permanently failed wiki tasks back to pending state.
+
+### Changed
+- **CLI `synap start` Control Flow (AUD-01)**: Fixed `synap start` so it exits cleanly when a daemon is already running unless `--foreground` is explicitly passed.
+- **SQLite WAL Performance Rationale (AUD-07)**: Documented `PRAGMA synchronous=NORMAL` in WAL mode as an intentional architectural tradeoff balancing write throughput and self-healing index recovery.
+
+### Fixed
+- **Graceful Embedding Provider Fallback (AUD-04)**: Configured Anthropic and OpenRouter providers to log a warning and return empty embedding vectors instead of raising unhandled `NotImplementedError`.
+- **Symbol Preservation on File Renames (AUD-05)**: Added `-M` rename detection to `git diff-tree` in incremental indexing to preserve file symbol history and edges across renames.
+
 ## [2.1.7] - 2026-07-29
 
 ### Added

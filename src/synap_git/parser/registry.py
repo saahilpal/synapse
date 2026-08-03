@@ -217,6 +217,52 @@ class CodeParserRegistry:
                 if kind in ("class", "module", "method"):
                     name = extract_text(node.child_by_field_name("name"))
 
+            elif lang_name == "c_sharp":
+                if kind in (
+                    "class_declaration",
+                    "method_declaration",
+                    "interface_declaration",
+                    "struct_declaration",
+                    "enum_declaration",
+                ):
+                    name = extract_text(node.child_by_field_name("name"))
+
+            elif lang_name == "php":
+                if kind in (
+                    "class_declaration",
+                    "function_definition",
+                    "method_declaration",
+                    "interface_declaration",
+                    "trait_declaration",
+                ):
+                    name = extract_text(node.child_by_field_name("name"))
+
+            elif lang_name == "kotlin":
+                if kind in (
+                    "class_declaration",
+                    "function_declaration",
+                    "object_declaration",
+                    "interface_declaration",
+                ):
+                    name = extract_text(node.child_by_field_name("name"))
+
+            elif lang_name == "scala":
+                if kind in (
+                    "class_definition",
+                    "object_definition",
+                    "function_definition",
+                    "trait_definition",
+                ):
+                    name = extract_text(node.child_by_field_name("name"))
+
+            elif lang_name == "c":
+                if kind in ("function_definition", "struct_specifier", "enum_specifier"):
+                    name = extract_text(node.child_by_field_name("name"))
+                    if not name:
+                        declarator = node.child_by_field_name("declarator")
+                        if declarator:
+                            name = extract_text(declarator.child_by_field_name("declarator"))
+
             if name:
                 # Compute hash of the node's subtree for change detection
                 ast_content = extract_text(node) or ""

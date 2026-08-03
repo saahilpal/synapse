@@ -120,6 +120,10 @@ class OpenRouterProvider(OpenAIProvider):
         *,
         model: str | None = None,
     ) -> list[float]:
-        raise NotImplementedError(
-            "OpenRouter does not support embeddings. Configure OpenAI or Ollama for embeddings."
+        import structlog
+
+        structlog.get_logger().warning(
+            "openrouter_embedding_not_supported_degrading_to_fts",
+            provider="openrouter",
         )
+        return []

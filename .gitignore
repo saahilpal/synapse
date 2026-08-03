@@ -29,3 +29,6 @@ config.json
 status.json
 fix_exc.py
 test_embed.py
+.vscode/
+.idea/
+*.log

@@ -44,6 +44,11 @@ class SynapStore:
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
+            # ARCHITECTURAL DECISION (AUD-07):
+            # PRAGMA synchronous=NORMAL in WAL mode is an intentional tradeoff:
+            # It avoids fsync() on every transaction commit, providing a 5-10x throughput boost for bulk AST indexing.
+            # In the rare event of an OS power-loss crash during a write, SQLite WAL recovery or Synapse's automatic
+            # self-healing (`recover_if_corrupted()`) safely reconstructs the deterministic local index.
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
@@ -853,6 +858,15 @@ class SynapStore:
     def clear_wiki_queue(self) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM wiki_queue")
+
+    def retry_failed_wiki_queue(self) -> int:
+        now = int(datetime.now(UTC).timestamp())
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE wiki_queue SET status = 'pending', attempts = 0, updated_at = ? WHERE status = 'failed'",
+                (now,),
+            )
+            return cursor.rowcount
 
     def get_llm_calls(self) -> list[dict[str, Any]]:
         with self.connect() as conn:

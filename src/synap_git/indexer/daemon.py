@@ -35,6 +35,8 @@ class RuntimeDaemon:
         self._last_metrics_time: float = 0.0
         self._last_cpu_time: float = 0.0
         self._last_prune_time: float = 0.0
+        self._fs_changed = False
+        self._observer: Any = None
 
     async def start(self) -> None:
         self.runtime.initialize_storage()
@@ -91,6 +93,44 @@ class RuntimeDaemon:
         self._write_heartbeat(status="healthy")
         self._install_signal_handlers()
 
+        # Start watchdog file observer for event-driven git indexing
+        self._fs_changed = False
+        self._observer = None
+        try:
+            from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
+
+            daemon_ref = self
+
+            class _WatcherHandler(FileSystemEventHandler):
+                def on_any_event(self, event: Any) -> None:
+                    path_str = str(getattr(event, "src_path", ""))
+                    if any(
+                        ignored in path_str
+                        for ignored in (
+                            ".synap",
+                            ".git",
+                            ".venv",
+                            "__pycache__",
+                            "node_modules",
+                            ".next",
+                            "dist",
+                            "build",
+                        )
+                    ):
+                        return
+                    daemon_ref._fs_changed = True
+
+            self._observer = Observer()
+            self._observer.schedule(
+                _WatcherHandler(), str(self.settings.repository_path), recursive=True
+            )
+            self._observer.start()
+            self.logger.info("watchdog_observer_started")
+        except Exception as e:
+            self.logger.warning("watchdog_observer_init_failed", error=str(e))
+            self._observer = None
+
         # Launch Uvicorn and Wiki Worker in background
         server_task = asyncio.create_task(self._ui_server.serve())
         wiki_worker_task = asyncio.create_task(self._wiki_worker_loop())
@@ -98,6 +138,13 @@ class RuntimeDaemon:
         try:
             await self._poll_git_loop()
         finally:
+            if self._observer:
+                try:
+                    self._observer.stop()
+                    self._observer.join(timeout=1.0)
+                except Exception:
+                    pass
+
             self._running = False
             self.logger.info("daemon_shutting_down")
             self._ui_server.should_exit = True
@@ -258,60 +305,70 @@ class RuntimeDaemon:
                 structlog.get_logger().error("suppressed_error_caught", error=str(e))
 
     async def _poll_git_loop(self) -> None:
+        backstop_interval = 30.0
+        poll_step = 0.5
+        elapsed = backstop_interval  # Force initial check on loop start
+
         while not self._stop_event.is_set():
-            try:
-                # Periodic pruning (once per hour)
-                now = time.time()
-                if now - self._last_prune_time > 3600:
-                    self._last_prune_time = now
-                    count = await asyncio.to_thread(self.runtime.store.prune_expired_lessons)
-                    if count > 0:
-                        self.logger.info("lessons_pruned", count=count)
-                        print(f"\n[Synapse] Pruned {count} expired lessons.")
+            if self._fs_changed or elapsed >= backstop_interval:
+                self._fs_changed = False
+                elapsed = 0.0
 
-                state = self.git.state()
-                change = self.git.classify(self._last_git_state, state)
-                self._last_git_state = state
-
-                if change.kind == "commit":
-                    self.logger.info("git_commit_detected")
-                    await asyncio.to_thread(self.runtime.handle_commit, state)
-                elif change.kind in ("branch", "checkout"):
-                    self.logger.info("git_branch_switch_detected")
-                    await asyncio.to_thread(self.runtime.handle_branch_switch, state)
-                elif change.kind == "merge":
-                    self.logger.info("git_merge_detected")
-                    await asyncio.to_thread(self.runtime.handle_merge, state)
-                elif change.kind == "revert":
-                    self.logger.info("git_revert_detected")
-                    await asyncio.to_thread(self.runtime.handle_revert, self._last_git_state, state)
-                elif change.kind not in ("initial", "unchanged"):
-                    self.logger.info("git_change_detected", kind=change.kind)
-                    await asyncio.to_thread(self.runtime.index_repository, git_state=state)
-
-                self._write_heartbeat(status="healthy")
-            except Exception as e:
-                self.logger.error("daemon_loop_error", error=str(e))
-                self._recovery_attempts += 1
-                self._write_heartbeat(status="degraded", last_error=str(e))
-
-                # Database recovery if corrupted
                 try:
-                    is_wiped = await asyncio.to_thread(self.runtime.store.recover_if_corrupted)
-                    if is_wiped:
-                        self.logger.warning("daemon_rebuilding_corrupted_db")
-                        await asyncio.to_thread(self.runtime.bootstrap, force=True)
-                except Exception as ex:
-                    self.logger.error("daemon_self_healing_failed", error=str(ex))
+                    # Periodic pruning (once per hour)
+                    now = time.time()
+                    if now - self._last_prune_time > 3600:
+                        self._last_prune_time = now
+                        count = await asyncio.to_thread(self.runtime.store.prune_expired_lessons)
+                        if count > 0:
+                            self.logger.info("lessons_pruned", count=count)
+                            print(f"\n[Synapse] Pruned {count} expired lessons.")
+
+                    state = self.git.state()
+                    change = self.git.classify(self._last_git_state, state)
+                    self._last_git_state = state
+
+                    if change.kind == "commit":
+                        self.logger.info("git_commit_detected")
+                        await asyncio.to_thread(self.runtime.handle_commit, state)
+                    elif change.kind in ("branch", "checkout"):
+                        self.logger.info("git_branch_switch_detected")
+                        await asyncio.to_thread(self.runtime.handle_branch_switch, state)
+                    elif change.kind == "merge":
+                        self.logger.info("git_merge_detected")
+                        await asyncio.to_thread(self.runtime.handle_merge, state)
+                    elif change.kind == "revert":
+                        self.logger.info("git_revert_detected")
+                        await asyncio.to_thread(
+                            self.runtime.handle_revert, self._last_git_state, state
+                        )
+                    elif change.kind not in ("initial", "unchanged"):
+                        self.logger.info("git_change_detected", kind=change.kind)
+                        await asyncio.to_thread(self.runtime.index_repository, git_state=state)
+
+                    self._write_heartbeat(status="healthy")
+                except Exception as e:
+                    self.logger.error("daemon_loop_error", error=str(e))
+                    self._recovery_attempts += 1
+                    self._write_heartbeat(status="degraded", last_error=str(e))
+
+                    # Database recovery if corrupted
+                    try:
+                        is_wiped = await asyncio.to_thread(self.runtime.store.recover_if_corrupted)
+                        if is_wiped:
+                            self.logger.warning("daemon_rebuilding_corrupted_db")
+                            await asyncio.to_thread(self.runtime.bootstrap, force=True)
+                    except Exception as ex:
+                        self.logger.error("daemon_self_healing_failed", error=str(ex))
 
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(),
-                    timeout=self.settings.daemon_poll_interval_seconds,
+                    timeout=poll_step,
                 )
                 break  # Stop event was set, exit loop
             except TimeoutError:
-                pass  # Normal poll interval elapsed, continue loop
+                elapsed += poll_step
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()

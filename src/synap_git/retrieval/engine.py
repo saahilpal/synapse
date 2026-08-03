@@ -122,10 +122,15 @@ class HybridRetrievalEngine:
         if self.embed_provider:
             try:
                 query_vector = self.embed_provider.embed(query)
-                symbols = self.store.get_similar_symbols(query_vector, limit=50)
-                for rank, sym in enumerate(symbols):
-                    sid = sym["symbol_id"]
-                    semantic_candidates[sid] = {**sym, "reason": "semantic", "semantic_rank": rank}
+                if query_vector:
+                    symbols = self.store.get_similar_symbols(query_vector, limit=50)
+                    for rank, sym in enumerate(symbols):
+                        sid = sym["symbol_id"]
+                        semantic_candidates[sid] = {
+                            **sym,
+                            "reason": "semantic",
+                            "semantic_rank": rank,
+                        }
             except Exception as e:
                 import structlog
 

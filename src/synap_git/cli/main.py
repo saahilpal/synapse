@@ -652,6 +652,12 @@ def _detect_install_method() -> str:
 @app.command()
 def start(
     path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
+    foreground: Annotated[
+        bool,
+        typer.Option(
+            "--foreground", help="Run FastMCP stdio server in foreground after starting daemon."
+        ),
+    ] = False,
 ) -> None:
     """Start the Synap daemon in the background."""
     _verify_is_git(path)
@@ -676,6 +682,8 @@ def start(
                 if hb and "port" in hb:
                     console.print(f"[green]✓ UI available at http://127.0.0.1:{hb['port']}[/green]")
                 is_running = True
+                if not foreground:
+                    return
             else:
                 pid_file.unlink()
         except Exception as e:
@@ -739,7 +747,10 @@ def start(
             )
             raise typer.Exit(1)
 
-    # 3. Start MCP Server in the foreground
+        if not foreground:
+            return
+
+    # 3. Start MCP Server in the foreground if --foreground flag passed
     settings = _settings(path, json_output=True)
     runtime = SynapRuntime(settings)
     server = SynapMCPServer(runtime)
@@ -1496,40 +1507,52 @@ def doctor(
                 task_prov, completed=1, description=f"[red]✗ Unexpected error: {e}[/red]"
             )
 
-        task_daemon = progress.add_task("Checking Daemon Status...", total=1)
+        task_daemon = progress.add_task("Checking Daemon & REST API Status...", total=1)
         try:
+            import socket
+
+            import httpx
+
             daemon_info = _read_daemon_heartbeat(settings.repository_path)
-            if daemon_info:
-                status_str = daemon_info["status"].upper()
-                if status_str == "HEALTHY":
+            port = daemon_info.get("port", 9876) if daemon_info else 9876
+
+            # Test port availability
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                port_in_use = s.connect_ex(("127.0.0.1", port)) == 0
+
+            if daemon_info and port_in_use:
+                try:
+                    r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=2.0)
+                    if r.status_code == 200:
+                        progress.update(
+                            task_daemon,
+                            completed=1,
+                            description=f"[green]✓ Daemon active & REST API healthy (PID {daemon_info['pid']}, port {port})[/green]",
+                        )
+                    else:
+                        progress.update(
+                            task_daemon,
+                            completed=1,
+                            description=f"[yellow]⚠ Daemon running on port {port} but REST API returned HTTP {r.status_code}[/yellow]",
+                        )
+                except Exception as ex:
                     progress.update(
                         task_daemon,
                         completed=1,
-                        description=f"[green]✓ Daemon active and healthy (PID {daemon_info['pid']}, uptime {daemon_info['uptime_seconds']}s)[/green]",
+                        description=f"[yellow]⚠ Daemon running on port {port} but API check failed: {ex}[/yellow]",
                     )
-                elif status_str == "STARTING":
-                    progress.update(
-                        task_daemon,
-                        completed=1,
-                        description=f"[green]✓ Daemon is active and currently starting/indexing (PID {daemon_info['pid']})[/green]",
-                    )
-                elif status_str == "STALE":
-                    progress.update(
-                        task_daemon,
-                        completed=1,
-                        description="[yellow]⚠ Daemon heartbeat file exists but is stale (not running?)[/yellow]",
-                    )
-                else:
-                    progress.update(
-                        task_daemon,
-                        completed=1,
-                        description=f"[red]✗ Daemon degraded: {daemon_info.get('last_error')}[/red]",
-                    )
+            elif daemon_info:
+                progress.update(
+                    task_daemon,
+                    completed=1,
+                    description=f"[yellow]⚠ Heartbeat found for PID {daemon_info['pid']} but port {port} is not listening[/yellow]",
+                )
             else:
                 progress.update(
                     task_daemon,
                     completed=1,
-                    description="[yellow]⚠ Daemon inactive (not running). Start it using `synap start`[/yellow]",
+                    description=f"[yellow]⚠ Daemon inactive (port {port} available). Start using `synap start`[/yellow]",
                 )
         except Exception as e:
             progress.update(
@@ -2173,3 +2196,16 @@ def wiki_show(
 
     content = wiki_path.read_text(encoding="utf-8")
     console.print(Markdown(content))
+
+
+@wiki_app.command("retry")
+def wiki_retry(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Requeue all permanently failed wiki tasks back to pending state."""
+    runtime = SynapRuntime(_settings(path))
+    count = runtime.store.retry_failed_wiki_queue()
+    if count > 0:
+        console.print(f"[green]✓ Requeued {count} failed wiki tasks to pending state.[/green]")
+    else:
+        console.print("[yellow]No failed wiki tasks found in queue.[/yellow]")

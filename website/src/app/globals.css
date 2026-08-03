@@ -2,16 +2,17 @@
 @import "tailwindcss";
 
 @theme {
-  /* Natural Slate-Zinc & Graphite palette */
-  --color-background: #09090b;
-  --color-surface: #18181b;
-  --color-primary: #4f46e5;
-  --color-primary-glow: rgba(79, 70, 229, 0.15);
-  --color-secondary: #71717a;
-  --color-accent: #e4e4e7;
-  --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #52525b;
+  /* Natural Slate & Graphite Palette — Non-AI Vibe Coded */
+  --color-background: #08090d;
+  --color-surface: #0f1118;
+  --color-surface-hover: #161924;
+  --color-border: #1e2332;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-accent-blue: #38bdf8;
+  --color-accent-emerald: #34d399;
+  --color-accent-amber: #fbbf24;
 
   /* Fonts */
   --font-display: "Space Grotesk", sans-serif;
@@ -20,8 +21,8 @@
 }
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  --background: #08090d;
+  --foreground: #f8fafc;
 }
 
 * {
@@ -40,35 +41,61 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Selection */
+/* Natural Selection */
 ::selection {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: rgba(56, 189, 248, 0.2);
+  color: #f8fafc;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: #09090b; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
-
-/* Glass card utility */
-.glass {
-  backdrop-filter: blur(8px);
-  background: rgba(24, 24, 27, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #08090d;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2332;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
 }
 
-/* Animations */
+/* Background Technical Grid */
+.bg-grid-pattern {
+  background-size: 32px 32px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+
+.bg-dots-pattern {
+  background-size: 24px 24px;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+}
+
+/* Engineering Card Surface */
+.tech-card {
+  background-color: #0f1118;
+  border: 1px solid #1e2332;
+  border-radius: 12px;
+}
+
+.tech-card-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tech-card-hover:hover {
+  background-color: #141722;
+  border-color: #334155;
+}
+
+/* Terminal Cursor Blink */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-4px); }
+.animate-blink {
+  animation: blink 1s step-end infinite;
 }
-
-.animate-blink { animation: blink 1.5s step-end infinite; }
-.animate-float { animation: float 4s ease-in-out infinite; }

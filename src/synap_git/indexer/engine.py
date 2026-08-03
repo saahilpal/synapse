@@ -474,6 +474,7 @@ class SynapRuntime:
                     "git",
                     "diff-tree",
                     "-r",
+                    "-M",
                     "--no-commit-id",
                     "--name-status",
                     previous_commit,

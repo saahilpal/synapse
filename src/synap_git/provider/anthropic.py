@@ -123,12 +123,13 @@ class AnthropicProvider(LLMProvider):
         *,
         model: str | None = None,
     ) -> list[float]:
-        # Anthropic does not have a public embedding endpoint as of mid 2024.
-        # Typically developers use Voyage or OpenAI for embeddings when using Anthropic.
-        # We will throw a clear error.
-        raise NotImplementedError(
-            "Anthropic does not provide a native embeddings API. Please configure SYNAP_EMBED_PROVIDER=ollama or openai."
+        import structlog
+
+        structlog.get_logger().warning(
+            "anthropic_embedding_not_supported_degrading_to_fts",
+            provider="anthropic",
         )
+        return []
 
     def count_tokens(self, text: str) -> int:
         import tiktoken
