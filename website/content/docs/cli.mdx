@@ -300,6 +300,14 @@ Renders table showing token allocations and query purposes.
 synap usage show .
 ```
 
+### `synap cost`
+Shows aggregated LLM calls, token counts, and estimated USD cost. This command is an alias for `synap usage show` and prints the same aggregated table, including an estimated cost total.
+* **Usage:** `synap cost [PATH]`
+* **Example:**
+```bash
+synap cost .
+```
+
 ### `synap usage clear`
 Purges LLM calls database entries.
 * **Usage:** `synap usage clear [PATH]`

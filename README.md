@@ -335,6 +335,7 @@ All commands support target path arguments:
 * `synap checkpoint restore <ID> [PATH]` — Displays checkpoint records.
 * `synap usage show [PATH]` — Renders token metrics.
 * `synap usage clear [PATH]` — Clears LLM call logs.
+* `synap cost [PATH]` — Shows aggregated LLM calls, token counts, and estimated USD cost (alias for `synap usage show`).
 * `synap wiki list [PATH]` — Lists generated docs.
 * `synap wiki show <FILE> [PATH]` — Renders wiki files.
 
