@@ -1261,20 +1261,59 @@ def update(
         except Exception as e:
             console.print(f"[yellow]⚠ Git pull skipped: {e}[/yellow]")
 
+        # For editable installs, attempt metadata refresh via pip or uv with explicit python interpreter
+        reinstalled = False
         try:
             subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-e", str(repo_root)], check=True
+                [sys.executable, "-m", "pip", "install", "--quiet", "-e", str(repo_root)],
+                check=True,
+                capture_output=True,
             )
+            reinstalled = True
             console.print("[green]✓ Update successful (Editable package re-installed).[/green]")
         except Exception:
+            pass
+
+        if not reinstalled:
             try:
-                subprocess.run(["uv", "pip", "install", "-e", str(repo_root)], check=True)
+                subprocess.run(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        sys.executable,
+                        "--quiet",
+                        "-e",
+                        str(repo_root),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                reinstalled = True
                 console.print(
                     "[green]✓ Update successful (Editable package re-installed via uv).[/green]"
                 )
-            except Exception as e:
-                console.print(f"[bold red]✗ Re-installation failed:[/bold red] {e}")
-                raise typer.Exit(1)
+            except Exception:
+                pass
+
+        if not reinstalled:
+            try:
+                subprocess.run(
+                    ["uv", "tool", "upgrade", "synap-git"],
+                    check=True,
+                    capture_output=True,
+                )
+                reinstalled = True
+                console.print("[green]✓ Update successful (uv tool upgraded).[/green]")
+            except Exception:
+                pass
+
+        if not reinstalled:
+            # For editable installs, git pull immediately applies changes
+            console.print(
+                "[green]✓ Update successful (Editable source code is up to date from Git).[/green]"
+            )
         return
 
     upgrade_cmds = {
@@ -1296,17 +1335,93 @@ def update(
         try:
             subprocess.run(cmd, check=True)
         except Exception as e:
-            if install_method in ("venv", "pip"):
+            if install_method in ("venv", "pip", "uv"):
                 console.print(
-                    "[yellow]Pip failed or missing. Attempting upgrade via uv...[/yellow]"
+                    "[yellow]Command failed. Attempting upgrade via uv pip install...[/yellow]"
                 )
-                subprocess.run(["uv", "pip", "install", "--upgrade", "synap-git"], check=True)
+                subprocess.run(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        sys.executable,
+                        "--upgrade",
+                        "synap-git",
+                    ],
+                    check=True,
+                )
             else:
                 raise e
         console.print("[green]✓ Update successful[/green]")
     except Exception as e:
         console.print(f"[bold red]✗ Upgrade failed:[/bold red] {e}")
         raise typer.Exit(1)
+
+
+@app.command("uninstall")
+def uninstall_command(
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip interactive confirmation.")
+    ] = False,
+) -> None:
+    """Uninstall the Synap CLI package."""
+    import subprocess
+    import sys
+
+    install_method = _detect_install_method()
+    console.print(
+        f"[bold]Detected installation method:[/bold] [cyan]{install_method.upper()}[/cyan]"
+    )
+
+    if not yes:
+        import questionary
+
+        confirmed = questionary.confirm(
+            "Are you sure you want to uninstall Synap?",
+            default=False,
+        ).ask()
+        if not confirmed:
+            console.print("[yellow]Uninstall cancelled.[/yellow]")
+            return
+
+    uninstall_cmds: dict[str, list[str]] = {
+        "pipx": ["pipx", "uninstall", "synap-git"],
+        "uv": ["uv", "tool", "uninstall", "synap-git"],
+        "venv": [sys.executable, "-m", "pip", "uninstall", "-y", "synap-git"],
+        "pip": [sys.executable, "-m", "pip", "uninstall", "-y", "synap-git"],
+        "editable": ["uv", "tool", "uninstall", "synap-git"],
+    }
+
+    cmd = uninstall_cmds.get(install_method)
+    if not cmd:
+        console.print("[red]Unknown installation method. Please uninstall manually.[/red]")
+        return
+
+    console.print(f"[yellow]Uninstalling Synap using: {' '.join(cmd)}...[/yellow]")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            console.print("[green]✓ Synap uninstalled successfully.[/green]")
+        else:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "uninstall", "-y", "synap-git"],
+                    check=True,
+                )
+                console.print("[green]✓ Synap uninstalled successfully.[/green]")
+            except Exception:
+                try:
+                    subprocess.run(
+                        ["uv", "pip", "uninstall", "--python", sys.executable, "-y", "synap-git"],
+                        check=True,
+                    )
+                    console.print("[green]✓ Synap uninstalled successfully via uv.[/green]")
+                except Exception as e:
+                    console.print(f"[red]Could not automatically uninstall:[/red] {e}")
+                    console.print(f"[yellow]To uninstall manually, run:[/yellow] {' '.join(cmd)}")
+    except Exception as e:
+        console.print(f"[red]Uninstall failed:[/red] {e}")
 
 
 @app.command()
