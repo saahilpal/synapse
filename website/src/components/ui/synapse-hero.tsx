@@ -14,79 +14,142 @@ import {
   Layers,
   Database,
   Search,
-  Sparkles,
   GitCommit,
   RefreshCw,
-  Code2
+  Code2,
+  Lock,
+  Box
 } from "lucide-react"
 
 interface GraphNode {
   id: string
   name: string
-  type: "class" | "function" | "import" | "wiki"
+  type: "class" | "function" | "table" | "wiki"
   layer: "L1" | "L2" | "L3"
   connections: string[]
   tokens: number
   file: string
-  status: "active" | "idle"
+  detail: string
 }
 
-const INITIAL_NODES: GraphNode[] = [
-  { id: "node-1", name: "SynapRuntime", type: "class", layer: "L1", connections: ["node-2", "node-3"], tokens: 180, file: "indexer/engine.py", status: "active" },
-  { id: "node-2", name: "query_hybrid()", type: "function", layer: "L1", connections: ["node-4", "node-5"], tokens: 145, file: "retrieval/engine.py", status: "active" },
-  { id: "node-3", name: "TreeSitterRegistry", type: "class", layer: "L1", connections: ["node-6"], tokens: 210, file: "parser/registry.py", status: "idle" },
-  { id: "node-4", name: "SQLiteStorage (WAL)", type: "class", layer: "L1", connections: [], tokens: 320, file: "storage/sqlite.py", status: "active" },
-  { id: "node-5", name: "WikiWorkerTask", type: "function", layer: "L2", connections: ["node-7"], tokens: 190, file: "indexer/wiki.py", status: "idle" },
-  { id: "node-6", name: "RevertLessonDetector", type: "class", layer: "L3", connections: [], tokens: 160, file: "git/state.py", status: "idle" },
-  { id: "node-7", name: "FastMCPFacade", type: "class", layer: "L1", connections: ["node-2"], tokens: 175, file: "mcp/server.py", status: "active" }
+const GRAPH_NODES: GraphNode[] = [
+  {
+    id: "node-1",
+    name: "SynapRuntime",
+    type: "class",
+    layer: "L1",
+    connections: ["node-2", "node-4"],
+    tokens: 180,
+    file: "src/synap_git/indexer/engine.py",
+    detail: "Core AST orchestrator & Tree-sitter coordinator"
+  },
+  {
+    id: "node-2",
+    name: "query_hybrid()",
+    type: "function",
+    layer: "L1",
+    connections: ["node-3", "node-5"],
+    tokens: 140,
+    file: "src/synap_git/retrieval/engine.py",
+    detail: "Deterministic sub-10ms intent & symbol resolver"
+  },
+  {
+    id: "node-3",
+    name: "sqlite_vec (WAL)",
+    type: "table",
+    layer: "L1",
+    connections: [],
+    tokens: 310,
+    file: ".synap/synap.db",
+    detail: "Cosine similarity with precalculated Euclidean norms"
+  },
+  {
+    id: "node-4",
+    name: "GitStateWatcher",
+    type: "class",
+    layer: "L1",
+    connections: ["node-6"],
+    tokens: 165,
+    file: "src/synap_git/git/state.py",
+    detail: "Filesystem mtime fingerprint invalidation"
+  },
+  {
+    id: "node-5",
+    name: "WikiEngine",
+    type: "wiki",
+    layer: "L2",
+    connections: [],
+    tokens: 220,
+    file: ".synap/wiki/overview.md",
+    detail: "Git-synced markdown architectural digests"
+  },
+  {
+    id: "node-6",
+    name: "BehavioralMemory",
+    type: "class",
+    layer: "L3",
+    connections: [],
+    tokens: 195,
+    file: ".synap/synap.db:lessons",
+    detail: "Revert lessons, checkpoints, & active constraints"
+  }
 ]
 
 export function SynapseHero() {
-  const [copied, setCopied] = useState(false)
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
+  const [installMethod, setInstallMethod] = useState<"pip" | "uv" | "cli">("pip")
   const [activeBranch, setActiveBranch] = useState("main")
-  const [isCommitShifting, setIsCommitShifting] = useState(false)
-  const [selectedNode, setSelectedNode] = useState<GraphNode>(INITIAL_NODES[0])
-  const [activeTab, setActiveTab] = useState<"graph" | "diff" | "mcp">("graph")
+  const [isSimulating, setIsSimulating] = useState(false)
+  const [selectedNode, setSelectedNode] = useState<GraphNode>(GRAPH_NODES[0])
+  const [activeView, setActiveView] = useState<"graph" | "mcp" | "savings">("graph")
 
-  const copyInstallCommand = () => {
-    navigator.clipboard.writeText("pip install synap-git")
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const copyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedCmd(id)
+    setTimeout(() => setCopiedCmd(null), 2000)
   }
 
-  const triggerBranchSwap = () => {
-    setIsCommitShifting(true)
+  const simulateBranchChange = () => {
+    setIsSimulating(true)
     setTimeout(() => {
-      setActiveBranch(prev => prev === "main" ? "feature/ast-cte-v2" : "main")
-      setIsCommitShifting(false)
-    }, 500)
+      setActiveBranch(prev => prev === "main" ? "feature/ast-vector-cache" : "main")
+      setIsSimulating(false)
+    }, 450)
+  }
+
+  const getCommand = () => {
+    switch (installMethod) {
+      case "pip": return "pip install synap-git"
+      case "uv": return "uv tool install synap-git"
+      case "cli": return "synap init && synap start"
+    }
   }
 
   return (
-    <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 border-b border-slate-800/80 bg-grid-pattern">
+    <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 border-b border-border-subtle bg-grid-pattern subtle-glow">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
 
-        {/* Top Git Projection Indicator */}
+        {/* Status Pill Badge */}
         <div className="flex justify-center mb-8">
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-700/80 text-xs font-mono text-slate-300 shadow-sm hover:border-slate-600 transition-all cursor-pointer"
-            onClick={triggerBranchSwap}
+            transition={{ duration: 0.35 }}
+            className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-surface border border-border text-xs font-mono text-text-secondary shadow-sm hover:border-border-strong transition-all cursor-pointer"
+            onClick={simulateBranchChange}
           >
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-emerald"></span>
             </span>
-            <span className="text-slate-400">Git OID Projection:</span>
-            <span className="text-emerald-400 font-semibold flex items-center gap-1">
+            <span className="text-text-muted">Git OID Track:</span>
+            <span className="text-accent-emerald font-medium flex items-center gap-1">
               <GitCommit className="w-3 h-3" /> {activeBranch}
             </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-sky-400 flex items-center gap-1 hover:underline">
-              <RefreshCw className={`w-3 h-3 ${isCommitShifting ? "animate-spin text-sky-300" : ""}`} />
-              Simulate Commit Shift (4.8ms)
+            <span className="text-border">|</span>
+            <span className="text-accent-blue flex items-center gap-1 hover:underline">
+              <RefreshCw className={`w-3 h-3 ${isSimulating ? "animate-spin" : ""}`} />
+              Simulate Commit (9.2ms)
             </span>
           </motion.div>
         </div>
@@ -94,309 +157,283 @@ export function SynapseHero() {
         {/* Hero Title & Value Proposition */}
         <div className="text-center max-w-4xl mx-auto">
           <motion.h1
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-4xl sm:text-6xl lg:text-7xl font-display font-bold tracking-tight text-slate-100 leading-[1.1]"
+            transition={{ duration: 0.45, delay: 0.1 }}
+            className="text-4xl sm:text-6xl lg:text-7xl font-display font-bold tracking-tight text-text-primary leading-[1.08]"
           >
-            Deterministic Git-Aware <br className="hidden sm:inline" />
-            <span className="text-sky-400">Structural Context Engine</span>
+            Git-Aware Structural Context for AI Coding Agents.
           </motion.h1>
 
           <motion.p
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="mt-6 text-base sm:text-lg text-slate-400 max-w-3xl mx-auto leading-relaxed font-sans"
+            transition={{ duration: 0.45, delay: 0.2 }}
+            className="mt-6 text-base sm:text-lg text-text-secondary max-w-2xl mx-auto font-sans leading-relaxed"
           >
-            Stop burning 100k tokens dumping raw source files into AI context windows.
-            <strong className="text-slate-200 font-semibold"> Synapse</strong> projects Git repository commits into an SQLite AST code graph and serves token-budgeted context via stdio MCP.
+            Maps your repository into a local SQLite Tree-sitter graph, asynchronous semantic wiki, and long-term behavioral memory. Zero cloud lock-in. Sub-10ms FastMCP retrieval for Cursor, Claude Code, and Windsurf.
           </motion.p>
 
-          {/* Action Buttons */}
+          {/* Interactive Install Box */}
           <motion.div
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="mt-8 flex flex-wrap items-center justify-center gap-4"
+            transition={{ duration: 0.45, delay: 0.3 }}
+            className="mt-8 flex flex-col items-center gap-3"
           >
-            <div className="flex items-center bg-slate-900 border border-slate-700/90 rounded-xl p-1.5 shadow-md font-mono text-sm">
-              <div className="flex items-center gap-2 px-3 py-1 text-slate-300">
-                <Terminal className="w-4 h-4 text-sky-400" />
-                <span className="text-slate-500">$</span>
-                <span className="text-slate-100 font-semibold">pip install synap-git</span>
-              </div>
+            {/* Install Method Switcher */}
+            <div className="flex items-center p-1 rounded-lg bg-surface border border-border text-xs font-mono">
               <button
-                onClick={copyInstallCommand}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg px-3 py-1.5 transition-all text-xs font-sans font-medium"
+                onClick={() => setInstallMethod("pip")}
+                className={`px-3 py-1 rounded-md transition-all ${installMethod === "pip" ? "bg-text-primary text-background font-medium" : "text-text-muted hover:text-text-primary"}`}
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? "Copied" : "Copy"}</span>
+                pip
+              </button>
+              <button
+                onClick={() => setInstallMethod("uv")}
+                className={`px-3 py-1 rounded-md transition-all ${installMethod === "uv" ? "bg-text-primary text-background font-medium" : "text-text-muted hover:text-text-primary"}`}
+              >
+                uv tool
+              </button>
+              <button
+                onClick={() => setInstallMethod("cli")}
+                className={`px-3 py-1 rounded-md transition-all ${installMethod === "cli" ? "bg-text-primary text-background font-medium" : "text-text-muted hover:text-text-primary"}`}
+              >
+                quickstart
               </button>
             </div>
 
-            <a
-              href="#architecture"
-              className="inline-flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl px-5 py-3 font-medium text-sm transition-all"
-            >
-              <span>Explore HLD Architecture</span>
-              <ArrowRight className="w-4 h-4 text-slate-400" />
-            </a>
+            {/* Command Bar */}
+            <div className="flex items-center gap-3 bg-surface border border-border rounded-xl px-4 py-2.5 shadow-lg w-full max-w-md justify-between group hover:border-border-strong transition-all">
+              <div className="flex items-center gap-2.5 font-mono text-xs text-text-primary overflow-x-auto">
+                <span className="text-accent-blue select-none">$</span>
+                <span>{getCommand()}</span>
+              </div>
+              <button
+                onClick={() => copyText(getCommand(), "install-hero")}
+                className="text-text-muted hover:text-text-primary transition-colors p-1"
+                aria-label="Copy install command"
+              >
+                {copiedCmd === "install-hero" ? (
+                  <Check className="w-4 h-4 text-accent-emerald" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </motion.div>
 
-          {/* Feature Badges */}
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs font-mono text-slate-400">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>100% Local SQLite WAL Engine</span>
+          {/* Value Feature Highlights */}
+          <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto pt-6 border-t border-border-subtle">
+            <div className="flex flex-col items-center">
+              <span className="text-xl sm:text-2xl font-bold font-mono text-text-primary">9.2ms</span>
+              <span className="text-xs text-text-muted mt-0.5">MCP Search Latency</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-sky-400" />
-              <span>4.8ms Graph CTE Traversal</span>
+            <div className="flex flex-col items-center">
+              <span className="text-xl sm:text-2xl font-bold font-mono text-accent-emerald">99.3%</span>
+              <span className="text-xs text-text-muted mt-0.5">Token Reduction</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <GitBranch className="w-4 h-4 text-slate-300" />
-              <span>Zero-Disk Rescan on Commit Shift</span>
+            <div className="flex flex-col items-center">
+              <span className="text-xl sm:text-2xl font-bold font-mono text-text-primary">3 Layers</span>
+              <span className="text-xs text-text-muted mt-0.5">Graph + Wiki + Memory</span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-xl sm:text-2xl font-bold font-mono text-accent-blue">100% Local</span>
+              <span className="text-xs text-text-muted mt-0.5">SQLite & Tree-sitter</span>
             </div>
           </div>
         </div>
 
-        {/* Interactive Neural AST Graph Demo */}
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="mt-12 lg:mt-14 tech-card overflow-hidden shadow-xl"
-        >
-          {/* Header */}
-          <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
+        {/* Live Interactive Dual-Engine Sandbox */}
+        <div className="mt-14 max-w-5xl mx-auto">
+          <div className="minimal-card overflow-hidden shadow-2xl">
+            {/* Sandbox Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]/60"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]/60"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#10b981]/60"></div>
+                </div>
+                <span className="text-xs font-mono text-text-muted ml-2">synap://runtime-inspector</span>
               </div>
-              <span className="text-xs font-mono text-slate-400 border-l border-slate-800 pl-3 flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5 text-sky-400" />
-                synap-daemon // commit: {isCommitShifting ? "shifting..." : "a4f8e91"}
-              </span>
+
+              {/* View Switcher Tabs */}
+              <div className="flex items-center bg-surface border border-border rounded-lg p-0.5 text-xs font-mono">
+                <button
+                  onClick={() => setActiveView("graph")}
+                  className={`px-3 py-1 rounded-md transition-all ${activeView === "graph" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                >
+                  AST Graph (L1)
+                </button>
+                <button
+                  onClick={() => setActiveView("mcp")}
+                  className={`px-3 py-1 rounded-md transition-all ${activeView === "mcp" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                >
+                  FastMCP Protocol
+                </button>
+                <button
+                  onClick={() => setActiveView("savings")}
+                  className={`px-3 py-1 rounded-md transition-all ${activeView === "savings" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                >
+                  Token Economics
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-xs font-mono">
-              <button
-                onClick={() => setActiveTab("graph")}
-                className={`px-3 py-1 rounded-md flex items-center gap-1.5 transition-all ${
-                  activeTab === "graph" ? "bg-slate-800 text-sky-400 font-medium" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                L1 AST Graph
-              </button>
-              <button
-                onClick={() => setActiveTab("diff")}
-                className={`px-3 py-1 rounded-md flex items-center gap-1.5 transition-all ${
-                  activeTab === "diff" ? "bg-slate-800 text-emerald-400 font-medium" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <GitCommit className="w-3.5 h-3.5" />
-                Git Delta Engine
-              </button>
-              <button
-                onClick={() => setActiveTab("mcp")}
-                className={`px-3 py-1 rounded-md flex items-center gap-1.5 transition-all ${
-                  activeTab === "mcp" ? "bg-slate-800 text-amber-400 font-medium" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                MCP Stdio Packet
-              </button>
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="p-6 bg-slate-950 min-h-[380px] grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-
-            {activeTab === "graph" && (
-              <>
-                {/* Left: AST Nodes */}
-                <div className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-xl p-5 relative overflow-hidden min-h-[320px] flex flex-col justify-between">
-                  <div className="absolute inset-0 bg-dots-pattern opacity-40 pointer-events-none" />
-
-                  <div className="relative z-10 flex items-center justify-between text-xs font-mono mb-4 pb-2 border-b border-slate-800">
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                      <Search className="w-3.5 h-3.5 text-sky-400" />
-                      Query Target: &quot;SynapRuntime&quot;
-                    </span>
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <Database className="w-3.5 h-3.5" /> SQLite CTE Traversal
-                    </span>
+            {/* Sandbox Content Area */}
+            <div className="p-6 bg-[#0B0D14]">
+              {activeView === "graph" && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Left: Node Selector */}
+                  <div className="space-y-2 font-mono text-xs">
+                    <div className="text-[11px] font-semibold text-text-muted tracking-wider uppercase mb-3">
+                      Discovered AST Symbol Entities
+                    </div>
+                    {GRAPH_NODES.map(node => (
+                      <button
+                        key={node.id}
+                        onClick={() => setSelectedNode(node)}
+                        className={`w-full text-left p-3 rounded-lg border transition-all flex items-center justify-between ${selectedNode.id === node.id ? "bg-surface-hover border-accent-blue/50 text-text-primary" : "bg-surface/50 border-border text-text-secondary hover:border-border-strong"}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${node.layer === "L1" ? "bg-accent-blue/15 text-accent-blue" : node.layer === "L2" ? "bg-accent-emerald/15 text-accent-emerald" : "bg-accent-amber/15 text-accent-amber"}`}>
+                            {node.layer}
+                          </span>
+                          <span className="font-medium">{node.name}</span>
+                        </div>
+                        <span className="text-[11px] text-text-muted">{node.tokens} tok</span>
+                      </button>
+                    ))}
                   </div>
 
-                  <div className="relative z-10 grid grid-cols-2 sm:grid-cols-3 gap-3 my-auto">
-                    {INITIAL_NODES.map((node) => {
-                      const isSelected = selectedNode.id === node.id
-                      return (
-                        <div
-                          key={node.id}
-                          onClick={() => setSelectedNode(node)}
-                          className={`cursor-pointer p-3 rounded-xl border text-left transition-all ${
-                            isSelected
-                              ? "bg-slate-800/90 border-sky-500 text-slate-100 ring-1 ring-sky-500/30"
-                              : "bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                              node.layer === "L1" ? "bg-sky-950 text-sky-300 border border-sky-800" : node.layer === "L2" ? "bg-emerald-950 text-emerald-300 border border-emerald-800" : "bg-amber-950 text-amber-300 border border-amber-800"
-                            }`}>
-                              {node.layer}
-                            </span>
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                          </div>
-                            <h4 className="text-xs font-mono font-semibold text-slate-100 truncate">{node?.name}</h4>
-                              <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">{node?.file}</p>
-                          <div className="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between text-[10px] font-mono text-slate-400">
-                            <span>{node?.type}</span>
-                            <span className="text-sky-400">{node?.tokens} tok</span>
+                  {/* Center & Right: Node Inspector Details */}
+                  <div className="md:col-span-2 bg-surface rounded-xl border border-border p-5 font-mono text-xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between pb-3 border-b border-border">
+                        <div className="flex items-center gap-2">
+                          <Code2 className="w-4 h-4 text-accent-blue" />
+                          <span className="font-bold text-text-primary text-sm">{selectedNode.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-subtle border border-border text-text-muted">
+                            {selectedNode.type}
+                          </span>
+                        </div>
+                        <span className="text-text-muted">{selectedNode.file}</span>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <span className="text-text-muted block text-[11px]">Purpose / Description:</span>
+                          <p className="text-text-secondary mt-1 font-sans">{selectedNode.detail}</p>
+                        </div>
+
+                        <div>
+                          <span className="text-text-muted block text-[11px]">Symbol Graph References:</span>
+                          <div className="flex flex-wrap gap-2 mt-1.5">
+                            {selectedNode.connections.length > 0 ? (
+                              selectedNode.connections.map(connId => {
+                                const target = GRAPH_NODES.find(n => n.id === connId)
+                                return (
+                                  <span key={connId} className="px-2 py-1 rounded bg-surface-subtle border border-border text-accent-blue flex items-center gap-1">
+                                    → {target?.name}
+                                  </span>
+                                )
+                              })
+                            ) : (
+                              <span className="text-text-muted">Terminal edge (Leaf entity)</span>
+                            )}
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
 
-                  <div className="relative z-10 mt-4 text-[11px] font-mono text-slate-400 flex items-center justify-between">
-                    <span>Click symbol node to inspect primary keys</span>
-                    <span className="text-sky-400">7 AST symbols active</span>
+                        <div className="pt-3 border-t border-border/60">
+                          <span className="text-text-muted block text-[11px]">SQLite Graph Query Representation:</span>
+                          <pre className="mt-2 p-2.5 rounded bg-[#090A0F] border border-border text-[11px] text-text-secondary overflow-x-auto">
+{`SELECT s.symbol_id, s.name, s.kind, e.target_symbol_id
+FROM symbols s
+JOIN edges e ON s.symbol_id = e.source_symbol_id
+WHERE s.file_id = hash('${selectedNode.file}')
+AND s.git_oid = '${activeBranch === "main" ? "a14f9bc" : "d820ef1"}';`}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-text-muted text-[11px]">
+                      <span>Indexed via Tree-sitter in 0.4ms</span>
+                      <span className="text-accent-emerald flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Grounded Context Ready
+                      </span>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* Right: Symbol Inspector */}
-                <div className="lg:col-span-5 flex flex-col justify-between bg-slate-900 border border-slate-800 rounded-xl p-5 font-mono text-xs min-h-[320px]">
-                  <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-slate-300">
-                      <span className="font-semibold text-sky-400 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                        Symbol Inspector: {selectedNode?.name}
-                      </span>
-                      <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-[10px] rounded border border-slate-700">
-                        {selectedNode?.layer} Layer
-                      </span>
-                    </div>
-
-                    <div className="mt-4 space-y-2 text-slate-400 text-[11px]">
-                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                        <span className="text-slate-500">File Path:</span>
-                        <span className="text-slate-200">{selectedNode?.file}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                        <span className="text-slate-500">AST Symbol Type:</span>
-                        <span className="text-sky-400">{selectedNode?.type}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                        <span className="text-slate-500">SHA256 Content Key:</span>
-                        <span className="text-emerald-400">sha256(path + content_hash)</span>
-                      </div>
-                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                        <span className="text-slate-500">Token Weight:</span>
-                        <span className="text-amber-400">{selectedNode?.tokens} tokens</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 bg-slate-950 p-3 rounded-lg border border-slate-800 text-[11px] leading-relaxed text-slate-300">
-                      <div className="text-slate-500 text-[10px] mb-1">{`// SQLite Recursive CTE Expansion`}</div>
-                      <pre className="overflow-x-auto text-sky-300">
-                {`WITH RECURSIVE graph_cte AS (
-  SELECT id, name, file_path, 0 AS depth
-  FROM symbols WHERE name = '${selectedNode?.name ?? ""}'
-  UNION ALL
-  SELECT s.id, s.name, s.file_path, g.depth + 1
-  FROM symbols s JOIN edges e ON s.id = e.target_id
-  JOIN graph_cte g ON e.source_id = g.id
-  WHERE g.depth < 2
-) SELECT * FROM graph_cte;`}
-                      </pre>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                    <span className="flex items-center gap-1 text-emerald-400">
-                      <ShieldCheck className="w-3.5 h-3.5" /> Grounded Context Engine
+              {activeView === "mcp" && (
+                <div className="space-y-4 font-mono text-xs">
+                  <div className="flex items-center justify-between text-text-muted pb-2 border-b border-border">
+                    <span className="text-accent-emerald flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5" /> MCP Tool Invocation: search(query="resolve_imports")
                     </span>
-                    <span className="text-slate-400">tiktoken budget: 4,000</span>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeTab === "diff" && (
-              <div className="lg:col-span-12 bg-slate-900 border border-slate-800 rounded-xl p-6 font-mono text-xs text-slate-300 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-emerald-400 font-semibold flex items-center gap-2">
-                    <GitCommit className="w-4 h-4" /> Git Delta Classification — Commit {activeBranch === "main" ? "a4f8e91" : "c72b109"}
-                  </span>
-                  <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-md border border-slate-700">
-                    watchdog event-driven
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Modified & Renamed Files (git diff-tree -M)</div>
-                    <div className="text-emerald-400 flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 bg-emerald-950 border border-emerald-800 text-[10px] rounded">R100</span>
-                      <span>src/synap_git/parser/old_registry.py → registry.py</span>
-                    </div>
-                    <div className="text-sky-400 flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 bg-sky-950 border border-sky-800 text-[10px] rounded">M</span>
-                      <span>src/synap_git/indexer/daemon.py</span>
-                    </div>
-                    <div className="text-amber-400 flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 bg-amber-950 border border-amber-800 text-[10px] rounded">A</span>
-                      <span>tests/test_audit_fixes_aug2026.py</span>
-                    </div>
+                    <span className="text-text-muted">Latency: 9.2ms (Deterministic Intent Routing)</span>
                   </div>
 
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Symbol Edge Migration</div>
-                    <p className="text-slate-400 text-[11px]">
-                      File renames preserve primary keys and edge records in SQLite without executing cascading deletions.
-                    </p>
-                    <div className="mt-3 p-2 bg-slate-900 rounded border border-slate-800 text-[10px] text-slate-300">
-                      UPDATE files SET file_id = &apos;new_sha&apos;, path = &apos;new_path&apos; WHERE file_id = &apos;old_sha&apos;
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "mcp" && (
-              <div className="lg:col-span-12 bg-slate-900 border border-slate-800 rounded-xl p-6 font-mono text-xs text-slate-300 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-amber-400 font-semibold flex items-center gap-2">
-                    <Layers className="w-4 h-4" /> FastMCP Stdio Packet Protocol
-                  </span>
-                  <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-md border border-slate-700">
-                    stdio transport
-                  </span>
-                </div>
-
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-amber-300 space-y-2">
-                  <div className="text-slate-500">{`// FastMCP JSON-RPC 2.0 stdio stream`}</div>
-                  <pre>{`{
+                  <pre className="p-4 rounded-xl bg-[#090A0F] border border-border text-text-secondary overflow-x-auto text-[11px] leading-relaxed">
+{`{
   "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "synap_search",
-    "arguments": { "query": "TreeSitterRegistry", "max_tokens": 4000 }
+  "result": {
+    "grounded_context": {
+      "symbols": [
+        { "name": "resolve_imports", "kind": "function", "file": "src/synap_git/parser/registry.py", "lines": "125-145" },
+        { "name": "TreeSitterRegistry", "kind": "class", "file": "src/synap_git/parser/registry.py", "lines": "30-180" }
+      ],
+      "dependencies": [
+        "src/synap_git/storage/sqlite.py",
+        "src/synap_git/indexer/engine.py"
+      ],
+      "wiki_summary": "Registry dynamically resolves multi-language Tree-sitter grammars (py, ts, rs, go, c, cpp) into unified edge tables."
+    },
+    "tokens_provided": 420,
+    "tokens_raw_files_avoided": 48500,
+    "synthesized_answer": false
   }
-}`}</pre>
+}`}
+                  </pre>
                 </div>
-              </div>
-            )}
+              )}
 
+              {activeView === "savings" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
+                  <div className="p-4 rounded-xl bg-surface border border-border flex flex-col justify-between">
+                    <span className="text-text-muted uppercase text-[10px] tracking-wider">Raw File Dump Method</span>
+                    <div className="my-3">
+                      <span className="text-2xl font-bold text-[#ef4444]">182,000</span>
+                      <span className="text-xs text-text-muted block mt-1">tokens / query</span>
+                    </div>
+                    <span className="text-[11px] text-text-muted">Bloats context, risks hallucinations, slow response times</span>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-surface border border-border flex flex-col justify-between">
+                    <span className="text-text-muted uppercase text-[10px] tracking-wider">Vector-Only RAG</span>
+                    <div className="my-3">
+                      <span className="text-2xl font-bold text-accent-amber">12,400</span>
+                      <span className="text-xs text-text-muted block mt-1">tokens / query</span>
+                    </div>
+                    <span className="text-[11px] text-text-muted">Misses call-hierarchies and AST class relationships</span>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-surface border border-accent-emerald/40 bg-accent-emerald/5 flex flex-col justify-between">
+                    <span className="text-accent-emerald uppercase text-[10px] tracking-wider font-bold">Synapse 3-Layer Engine</span>
+                    <div className="my-3">
+                      <span className="text-2xl font-bold text-accent-emerald">1,240</span>
+                      <span className="text-xs text-accent-emerald/80 block mt-1">tokens / query (99.3% savings)</span>
+                    </div>
+                    <span className="text-[11px] text-text-secondary">Exact AST caller/callee context, instant 9.2ms retrieval</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </motion.div>
+        </div>
 
       </div>
     </section>

@@ -1,27 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
-  /* Natural Slate & Graphite Palette — Non-AI Vibe Coded */
-  --color-background: #08090d;
+  /* Minimalist Deep Obsidian & Zinc Palette */
+  --color-background: #090a0f;
   --color-surface: #0f1118;
-  --color-surface-hover: #161924;
-  --color-border: #1e2332;
+  --color-surface-subtle: #141722;
+  --color-surface-hover: #1a1e2d;
+  --color-border: #1e2333;
+  --color-border-subtle: rgba(255, 255, 255, 0.07);
+  --color-border-strong: #2a3147;
+
   --color-text-primary: #f8fafc;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
-  --color-accent-blue: #38bdf8;
-  --color-accent-emerald: #34d399;
-  --color-accent-amber: #fbbf24;
 
-  /* Fonts */
+  --color-accent-blue: #38bdf8;
+  --color-accent-emerald: #10b981;
+  --color-accent-amber: #f59e0b;
+  --color-accent-rose: #f43f5e;
+
+  /* Typography */
   --font-display: "Space Grotesk", sans-serif;
   --font-body: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 
 :root {
-  --background: #08090d;
+  --background: #090a0f;
   --foreground: #f8fafc;
 }
 
@@ -31,6 +37,7 @@
 
 html {
   scroll-behavior: smooth;
+  color-scheme: dark;
 }
 
 body {
@@ -39,56 +46,77 @@ body {
   font-family: var(--font-body);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Natural Selection */
+/* Subtle Text Selection */
 ::selection {
-  background: rgba(56, 189, 248, 0.2);
-  color: #f8fafc;
+  background: rgba(56, 189, 248, 0.25);
+  color: #ffffff;
 }
 
-/* Custom Scrollbar */
+/* Minimalist Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #08090d;
+  background: #090a0f;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2332;
+  background: #1e2333;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
 
-/* Background Technical Grid */
+/* Engineering Technical Patterns */
 .bg-grid-pattern {
   background-size: 32px 32px;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
 }
 
 .bg-dots-pattern {
   background-size: 24px 24px;
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
 }
 
-/* Engineering Card Surface */
-.tech-card {
-  background-color: #0f1118;
-  border: 1px solid #1e2332;
+/* Radial Glow Backdrops (Subtle & Crisp, Non-Saturated) */
+.subtle-glow {
+  background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.05) 0%, transparent 70%);
+}
+
+.subtle-emerald-glow {
+  background: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.04) 0%, transparent 70%);
+}
+
+/* Minimalist Cards */
+.minimal-card {
+  background: #0f1118;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.tech-card-hover {
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+.minimal-card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #131620;
 }
-.tech-card-hover:hover {
-  background-color: #141722;
-  border-color: #334155;
+
+.minimal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
 }
 
 /* Terminal Cursor Blink */

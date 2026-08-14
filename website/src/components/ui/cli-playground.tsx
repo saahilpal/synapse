@@ -1,11 +1,7 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
-import {
-  Terminal as TerminalIcon,
-  Check,
-  Copy
-} from "lucide-react"
+import React, { useState } from "react"
+import { Terminal as TerminalIcon, Check, Copy, Play } from "lucide-react"
 
 interface CommandSpec {
   id: string
@@ -17,95 +13,114 @@ interface CommandSpec {
 
 const CLI_SPECS: CommandSpec[] = [
   {
-    id: "setup",
-    cmd: "synap setup .",
-    label: "synap setup",
-    description: "Interactive first-run configuration and onboarding.",
+    id: "init",
+    cmd: "synap init .",
+    label: "synap init",
+    description: "Initializes SQLite schema, extracts AST symbol definitions, and seeds documentation.",
     logs: [
-      { text: "❯ synap setup .", type: "cmd" },
-      { text: "Synap AI Engine Setup & Onboarding", type: "title" },
-      { text: "✔ Verifying Git repository root...", type: "success" },
-      { text: "✔ Loaded 25+ language grammar parsers (Tree-sitter)", type: "info" },
-      { text: "✔ Created .synap/ configuration directory", type: "info" },
-      { text: "✔ Initialized SQLite WAL database at .synap/synap.db", type: "success" },
-      { text: "✔ Environment ready. Run `synap start` to launch daemon.", type: "success" }
+      { text: "❯ synap init .", type: "cmd" },
+      { text: "Synapse: Initializing Repository Context Engine", type: "title" },
+      { text: "✔ Git root verified: /workspace/synapse (branch: main)", type: "success" },
+      { text: "✔ Tree-sitter parsers initialized (25+ grammar definitions)", type: "info" },
+      { text: "✔ Database schema created: .synap/synap.db (WAL Mode)", type: "success" },
+      { text: "› Pass 1: Parsing AST symbol graphs across 1,120 files... (380ms)", type: "info" },
+      { text: "› Pass 2: Resolving caller/callee dependency edges... (120ms)", type: "info" },
+      { text: "✔ Indexed 8,421 symbols and 14,290 dependency edges.", type: "success" },
+      { text: "✔ Structural context engine initialized successfully.", type: "success" }
     ]
   },
   {
-    id: "start",
-    cmd: "synap start .",
-    label: "synap start",
-    description: "Spawn detached background runtime daemon process.",
+    id: "index",
+    cmd: "synap index .",
+    label: "synap index",
+    description: "Explicitly re-indexes all AST symbols, dependencies, and vector embeddings into SQLite.",
     logs: [
-      { text: "❯ synap start .", type: "cmd" },
-      { text: "✔ Spawning detached background daemon process...", type: "success" },
-      { text: "✔ Synap daemon started (PID 22926)", type: "success" },
-      { text: "› Scanning workspace: 1,120 source files found", type: "info" },
-      { text: "› Parsing structures with Tree-sitter [████████████████] 100% (452ms)", type: "info" },
-      { text: "› Building symbol graph & database edges...", type: "info" },
-      { text: "✔ Local-first index successfully built. 8,421 symbols resolved.", type: "success" },
-      { text: "✔ REST API & Dashboard active at http://127.0.0.1:9876", type: "success" }
+      { text: "❯ synap index .", type: "cmd" },
+      { text: "› Scanning modified files against Git HEAD...", type: "info" },
+      { text: "› AST parsing [████████████████████] 100% (1,120/1,120 files)", type: "info" },
+      { text: "› Generating vector embeddings with nomic-embed-text (Ollama localhost)...", type: "info" },
+      { text: "✔ Vector indexing completed in 1.4s (0 tokens spent / 100% local)", type: "success" },
+      { text: "✔ SQLite database updated: 8,421 symbols, 1,120 files fresh.", type: "success" }
+    ]
+  },
+  {
+    id: "sync",
+    cmd: "synap sync .",
+    label: "synap sync",
+    description: "Incrementally synchronizes the SQLite index with recent Git commits in under 5ms.",
+    logs: [
+      { text: "❯ synap sync .", type: "cmd" },
+      { text: "› Git OID detected: d91a4b (3 commits ahead)", type: "info" },
+      { text: "› Analyzing diff delta (2 modified files, 0 deleted)...", type: "info" },
+      { text: "  • Updated: src/synap_git/retrieval/engine.py (+14 symbols)", type: "success" },
+      { text: "  • Updated: src/synap_git/storage/sqlite.py (+3 symbols)", type: "success" },
+      { text: "✔ Incremental sync completed in 4.8ms.", type: "success" }
     ]
   },
   {
     id: "search",
-    cmd: "synap search . \"AuthService\"",
+    cmd: 'synap search "AuthService" .',
     label: "synap search",
-    description: "Execute hybrid CTE & FTS5 structural search locally.",
+    description: "Executes hybrid lexical, structural, and semantic code retrieval in 9.2ms.",
     logs: [
-      { text: "❯ synap search . \"AuthService\"", type: "cmd" },
-      { text: "› Query resolved in 4.8ms via SQLite FTS5 + Recursive CTE index", type: "info" },
-      { text: "★ Matches found in src/auth/service.py:", type: "info" },
-      { text: "  • Class: AuthService (lines 12-85) [sha256: 9f81a2e]", type: "success" },
-      { text: "  • Method: AuthService.verify_token (lines 45-52)", type: "success" },
-      { text: "  • Import: from jose import jwt (line 3)", type: "success" },
-        { text: "✔ Structural context packaged. Token count: 420.", type: "success" },
-        { text: "Total Estimated Cost: $0.0042 (est.) — 420 input + 120 output tokens", type: "info" }
+      { text: '❯ synap search "AuthService" .', type: "cmd" },
+      { text: "› Intent: EXACT_SYMBOL | Latency: 9.2ms", type: "info" },
+      { text: "★ AST Matches in src/auth/service.py:", type: "title" },
+      { text: "  • class AuthService (lines 14-92) [sha256: e82f1b]", type: "success" },
+      { text: "  • def verify_jwt(token: str) -> Claims (lines 45-56)", type: "success" },
+      { text: "› Inbound Callers (3): api/routes/login.py, middleware/auth.py", type: "info" },
+      { text: "› Grounded tokens provided: 340 (avoided 45,000 raw tokens)", type: "success" }
+    ]
+  },
+  {
+    id: "watch",
+    cmd: "synap status --watch",
+    label: "synap status -w",
+    description: "Live terminal dashboard monitoring indexing state and daemon parameters in real-time.",
+    logs: [
+      { text: "❯ synap status --watch", type: "cmd" },
+      { text: "Synapse Live Runtime Monitor (Press 'q' to exit)", type: "title" },
+      { text: "  Daemon Status: ACTIVE (PID 14455, Port 9876)", type: "success" },
+      { text: "  Active Branch: main | Commit: 40cba4b", type: "info" },
+      { text: "  Indexed Files: 1,120 | Total Symbols: 8,421 | Edges: 14,290", type: "info" },
+      { text: "  Wiki Pages: 14 Fresh (0 Stale, 0 Pending)", type: "success" },
+      { text: "  Avg Retrieval Latency: 9.2ms | SQLite WAL Size: 1.8 MB", type: "success" }
     ]
   },
   {
     id: "doctor",
     cmd: "synap doctor .",
     label: "synap doctor",
-    description: "Diagnose system health, database integrity, and daemon status.",
+    description: "Runs system diagnostics on database integrity, parsers, and provider health.",
     logs: [
       { text: "❯ synap doctor .", type: "cmd" },
-      { text: "Synap Doctor: System Diagnostics", type: "title" },
-      { text: "  ✔ Database integrity (WAL mode): OK", type: "success" },
-      { text: "  ✔ Tree-sitter parsers (25 languages): FUNCTIONAL", type: "success" },
-      { text: "  ✔ Tokenizer (tiktoken budgeter): READY", type: "success" },
-      { text: "  ✔ Git repository state: VALID (HEAD: a4f8e91)", type: "success" },
-      { text: "  ✔ Daemon process status: ACTIVE & HEALTHY (PID 22926)", type: "success" },
-      { text: "✔ All checks complete. Environment is perfectly stable.", type: "success" }
+      { text: "Synap Doctor: System Health Check", type: "title" },
+      { text: "  ✓ Database integrity: ok (.synap/synap.db WAL)", type: "success" },
+      { text: "  ✓ Tree-sitter parsers functional (py, ts, rs, go, c, cpp)", type: "success" },
+      { text: "  ✓ Tokenizer (tiktoken) ready", type: "success" },
+      { text: "  ✓ Git and GitHub CLI installed", type: "success" },
+      { text: "  ✓ Provider (ollama) connectivity verified on 127.0.0.1:11434", type: "success" },
+      { text: "All checks complete.", type: "success" }
+    ]
+  },
+  {
+    id: "cost",
+    cmd: "synap cost .",
+    label: "synap cost",
+    description: "Renders aggregated LLM token usage, call logs, and estimated USD cost.",
+    logs: [
+      { text: "❯ synap cost .", type: "cmd" },
+      { text: "LLM Call Aggregated Usage & Cost Summary", type: "title" },
+      { text: "  Provider: ollama | Model: qwen2.5-coder:14b | Purpose: wiki", type: "info" },
+      { text: "  Calls: 48 | Input Tokens: 64,200 | Output Tokens: 12,400", type: "info" },
+      { text: "  Total Estimated Cost: $0.0000 (100% Localhost Savings)", type: "success" }
     ]
   }
 ]
 
 export function CliPlayground() {
-  const [selectedId, setSelectedId] = useState<string>("start")
-  const [typedLogs, setTypedLogs] = useState<CommandSpec["logs"]>(CLI_SPECS[1].logs)
+  const [activeSpec, setActiveSpec] = useState<CommandSpec>(CLI_SPECS[0])
   const [copied, setCopied] = useState(false)
-
-  const activeSpec = CLI_SPECS.find(s => s.id === selectedId) || CLI_SPECS[1]
-
-  useEffect(() => {
-    let currentIdx = 0
-    const targetLogs = activeSpec.logs
-    const timer = setTimeout(() => {
-      setTypedLogs([])
-      const interval = setInterval(() => {
-        if (currentIdx < targetLogs.length) {
-          const item = targetLogs[currentIdx]
-          setTypedLogs(prev => [...prev, item])
-          currentIdx++
-        } else {
-          clearInterval(interval)
-        }
-      }, 90)
-    }, 10)
-
-    return () => clearTimeout(timer)
-  }, [selectedId, activeSpec])
 
   const copyCommand = () => {
     navigator.clipboard.writeText(activeSpec.cmd)
@@ -114,88 +129,96 @@ export function CliPlayground() {
   }
 
   return (
-    <section id="cli" className="py-20 bg-slate-950 border-b border-slate-800/80 relative">
+    <section id="cli" className="py-20 bg-surface-subtle/20 border-b border-border-subtle">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* Section Header */}
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300 mb-3">
-            <TerminalIcon className="w-3.5 h-3.5 text-sky-400" />
-            <span>Developer CLI Tooling</span>
+        <div className="max-w-3xl mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-border text-text-secondary text-xs font-mono mb-4">
+            <TerminalIcon className="w-3.5 h-3.5 text-accent-blue" />
+            <span>Interactive CLI Reference</span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-display font-bold text-slate-100 tracking-tight">
-            Clean Typer Subcommands
+          <h2 className="text-3xl sm:text-4xl font-display font-bold text-text-primary tracking-tight">
+            Designed for Developers & Daemons.
           </h2>
-          <p className="mt-4 text-slate-400 text-base sm:text-lg font-sans">
-            Manage repository indexing, daemon processes, and diagnostic health checks directly from your terminal.
+          <p className="mt-3 text-text-secondary font-sans text-sm sm:text-base leading-relaxed">
+            Every feature in Synapse is accessible through a high-performance Typer CLI. Test the subcommands below to inspect actual terminal output.
           </p>
         </div>
 
-        {/* Terminal Sandbox */}
-        <div className="max-w-4xl mx-auto tech-card overflow-hidden shadow-xl">
+        {/* Command Browser & Terminal Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-          {/* Terminal Top Bar */}
-          <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
-                <div className="w-3 h-3 rounded-full bg-slate-700" />
-              </div>
-              <span className="text-xs font-mono text-slate-400 border-l border-slate-800 pl-3">
-                zsh — synap CLI Simulator
-              </span>
-            </div>
-
-            {/* Command Subcommand Selector Tabs */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {CLI_SPECS.map(spec => (
-                <button
-                  key={spec.id}
-                  onClick={() => setSelectedId(spec.id)}
-                  className={`px-3 py-1 rounded-lg text-xs font-mono transition-all ${
-                    selectedId === spec.id
-                      ? "bg-slate-800 text-sky-400 font-semibold border border-slate-700"
-                      : "bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800"
-                  }`}
-                >
-                  {spec.label}
-                </button>
-              ))}
-            </div>
+          {/* Left Command List */}
+          <div className="lg:col-span-4 space-y-2 font-mono text-xs">
+            {CLI_SPECS.map(spec => (
+              <button
+                key={spec.id}
+                onClick={() => setActiveSpec(spec)}
+                className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                  activeSpec.id === spec.id
+                    ? "bg-surface-hover border-accent-blue/50 text-text-primary font-medium shadow-md"
+                    : "bg-surface/50 border-border text-text-secondary hover:border-border-strong hover:bg-surface"
+                }`}
+              >
+                <div>
+                  <span className="font-semibold">{spec.label}</span>
+                  <p className="text-[11px] text-text-muted mt-0.5 line-clamp-1 font-sans">
+                    {spec.description}
+                  </p>
+                </div>
+                <Play className={`w-3 h-3 ${activeSpec.id === spec.id ? "text-accent-blue fill-accent-blue" : "text-text-muted"}`} />
+              </button>
+            ))}
           </div>
 
-          {/* Terminal Console Output Body */}
-          <div className="p-6 bg-slate-950 font-mono text-xs text-slate-300 min-h-[300px] flex flex-col justify-between">
-            <div className="space-y-2">
-              <div className="text-slate-500 text-[11px] pb-2 border-b border-slate-900 flex items-center justify-between">
-                <span>{activeSpec.description}</span>
-                <button
-                  onClick={copyCommand}
-                  className="flex items-center gap-1 text-sky-400 hover:underline"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? "Copied" : "Copy Command"}</span>
-                </button>
+          {/* Right Terminal Window */}
+          <div className="lg:col-span-8 minimal-card overflow-hidden font-mono text-xs shadow-2xl">
+            {/* Terminal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]/60"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]/60"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#10b981]/60"></div>
+                </div>
+                <span className="text-xs text-text-muted ml-2">zsh — {activeSpec.cmd}</span>
               </div>
 
-              {typedLogs.map((log, idx) => (
-                <div key={idx} className="leading-relaxed">
-                  {log?.type === "cmd" && <span className="text-sky-400 font-bold">{log.text}</span>}
-                  {log?.type === "title" && <span className="text-slate-100 font-bold underline">{log.text}</span>}
-                  {log?.type === "info" && <span className="text-slate-400">{log.text}</span>}
-                  {log?.type === "success" && <span className="text-emerald-400">{log.text}</span>}
-                  {log?.type === "warning" && <span className="text-amber-400">{log.text}</span>}
+              <button
+                onClick={copyCommand}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface border border-border text-text-muted hover:text-text-primary transition-all cursor-pointer text-[11px]"
+              >
+                {copied ? <Check className="w-3 h-3 text-accent-emerald" /> : <Copy className="w-3 h-3" />}
+                <span>{copied ? "Copied" : "Copy Command"}</span>
+              </button>
+            </div>
+
+            {/* Terminal Log Output */}
+            <div className="p-5 bg-[#08090D] min-h-[300px] flex flex-col justify-start space-y-2 text-[12px] leading-relaxed">
+              {activeSpec.logs.map((log, i) => (
+                <div
+                  key={i}
+                  className={`${
+                    log.type === "cmd"
+                      ? "text-accent-blue font-bold pb-1"
+                      : log.type === "title"
+                      ? "text-text-primary font-bold pt-1"
+                      : log.type === "success"
+                      ? "text-accent-emerald"
+                      : log.type === "warning"
+                      ? "text-accent-amber"
+                      : "text-text-secondary"
+                  }`}
+                >
+                  {log.text}
                 </div>
               ))}
+              <div className="flex items-center gap-2 text-text-muted pt-2">
+                <span className="text-accent-blue">❯</span>
+                <span className="w-2 h-4 bg-accent-blue animate-blink inline-block"></span>
+              </div>
             </div>
-
-            {/* Terminal Cursor Prompt line */}
-            <div className="mt-4 pt-3 border-t border-slate-900 flex items-center gap-2 text-slate-400 text-[11px]">
-              <span className="text-sky-400 font-bold">❯</span>
-              <span className="w-2 h-4 bg-sky-400 animate-blink" />
-            </div>
-
           </div>
 
         </div>

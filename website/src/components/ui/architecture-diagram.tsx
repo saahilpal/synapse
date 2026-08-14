@@ -1,12 +1,19 @@
 "use client"
 
 import React, { useState } from "react"
+import { motion } from "framer-motion"
 import {
   Cpu,
   GitBranch,
   Database,
   Server,
-  CheckCircle2
+  CheckCircle2,
+  Code2,
+  FileText,
+  Brain,
+  Zap,
+  Layers,
+  ArrowRight
 } from "lucide-react"
 
 interface ArchitectureComponent {
@@ -25,46 +32,35 @@ const ARCH_COMPONENTS: ArchitectureComponent[] = [
   {
     id: "cli",
     module: "synap_git.cli",
-    name: "Typer CLI Interface",
+    name: "Typer CLI & Commands",
     category: "interface",
-    description: "Command line entrypoint managing runtime daemons, setup onboarding, and doctor diagnostics.",
-    techDetails: "Built with Typer & Rich. Mounts subcommands setup, start, stop, status, doctor, search, wiki, mcp.",
-    inputData: "User CLI args & repository flag",
-    outputData: "JSON / Human formatted stdout & daemon controls",
+    description: "Command line entrypoint managing daemons, full indexation, doctor health checks, and live status monitoring.",
+    techDetails: "Built with Typer & Rich. Subcommands: init, index, sync, search, status --watch, doctor, wiki, mcp.",
+    inputData: "User CLI flags & target repository path",
+    outputData: "JSON / Terminal UI stdout & background daemon control",
     fileLocation: "src/synap_git/cli/main.py"
   },
   {
-    id: "daemon",
-    module: "synap_git.indexer.daemon",
-    name: "Runtime Daemon Process",
-    category: "core",
-    description: "Asynchronous background process hosting the Git commit watcher loop, Uvicorn API server, and wiki worker queue.",
-    techDetails: "Asyncio event loop with SIGINT/SIGTERM signal handlers. Manages .synap/daemon.pid lockfile.",
-    inputData: "Git repository filesystem polling (every 2s)",
-    outputData: "Background index refreshes & worker tasks",
-    fileLocation: "src/synap_git/indexer/daemon.py"
+    id: "mcp",
+    module: "synap_git.mcp.server",
+    name: "FastMCP Stdio Server",
+    category: "interface",
+    description: "Low-latency Model Context Protocol bridge communicating directly with AI agent editors via standard I/O.",
+    techDetails: "Exposes search, log_decision, get_context, checkpoint tools with sub-10ms intent routing.",
+    inputData: "MCP JSON-RPC agent tool calls",
+    outputData: "Grounded structural AST symbols & markdown context",
+    fileLocation: "src/synap_git/mcp/server.py"
   },
   {
     id: "git_state",
     module: "synap_git.git.state",
-    name: "Git OID Delta Engine",
+    name: "Git State Fingerprinter",
     category: "core",
-    description: "Detects active commit shifts, branch checkouts, merges, and reverts via raw Git subprocess calls.",
-    techDetails: "Uses git diff-tree to compute file deltas without scanning unchanged filesystem trees.",
-    inputData: "Local .git HEAD pointer & working tree",
-    outputData: "Commit OIDs, untracked changes, diff deltas",
+    description: "Detects commit shifts, branch checkouts, and uncommitted edits via mtime fingerprinting with zero latency.",
+    techDetails: "Checks .git/HEAD, .git/index, and .git/refs timestamps. Subprocess fallback only on invalidation.",
+    inputData: "Local .git HEAD & index timestamps",
+    outputData: "GitState (OID, branch, dirty, change kind)",
     fileLocation: "src/synap_git/git/state.py"
-  },
-  {
-    id: "indexer_engine",
-    module: "synap_git.indexer.engine",
-    name: "Parallel Indexer Engine",
-    category: "core",
-    description: "Orchestrates multi-threaded file reading, Tree-sitter AST symbol parsing, and database transactions.",
-    techDetails: "SynapRuntime coordinates AST traversal and SQLite WAL bulk upserts inside isolated transactions.",
-    inputData: "Modified code files & diff deltas",
-    outputData: "Symbol graph nodes & dependency edges",
-    fileLocation: "src/synap_git/indexer/engine.py"
   },
   {
     id: "parser_registry",
@@ -72,19 +68,19 @@ const ARCH_COMPONENTS: ArchitectureComponent[] = [
     name: "Tree-sitter Parser Registry",
     category: "core",
     description: "High-fidelity AST symbol parser extracting functions, classes, methods, and import dependency edges.",
-    techDetails: "Tree-sitter bindings supporting Python, TypeScript, JavaScript, Rust, Go, C++, Java, C#.",
+    techDetails: "Native Tree-sitter grammars: Python, TypeScript, JavaScript, Rust, Go, C, C++, Java, Kotlin, Swift.",
     inputData: "Raw source code AST grammar nodes",
-    outputData: "SHA256 content-hashed symbols & edges",
+    outputData: "Deterministic SHA256 content-hashed symbols & edges",
     fileLocation: "src/synap_git/parser/registry.py"
   },
   {
     id: "sqlite_storage",
     module: "synap_git.storage.sqlite",
-    name: "SQLite Engine (WAL + FTS5)",
+    name: "SQLite Storage (WAL + FTS5)",
     category: "storage",
-    description: "Single-file local relational database persisting structural code graphs, FTS5 lexical indexes, and L3 memories.",
-    techDetails: "PRAGMA journal_mode=WAL & synchronous=NORMAL. Supports SQLite Recursive CTE graph traversals.",
-    inputData: "Parsed AST symbols, dependency edges & memories",
+    description: "Single-file local relational database persisting structural code graphs, FTS5 lexical indexes, and vector embeddings.",
+    techDetails: "PRAGMA journal_mode=WAL & synchronous=NORMAL. Supports SQLite Recursive CTE graph traversals & LRU vector cache.",
+    inputData: "Parsed AST symbols, dependency edges, vector arrays",
     outputData: ".synap/synap.db relational tables",
     fileLocation: "src/synap_git/storage/sqlite.py"
   },
@@ -94,203 +90,130 @@ const ARCH_COMPONENTS: ArchitectureComponent[] = [
     name: "Async Semantic Wiki Worker",
     category: "worker",
     description: "Generates asynchronous markdown summaries of files and modules stored under .synap/wiki/.",
-    techDetails: "Listens to background wiki_queue. Updates status from 'stale' to 'fresh' asynchronously.",
+    techDetails: "Listens to background wiki_queue. Updates status from 'stale' to 'fresh' asynchronously using local or remote LLMs.",
     inputData: "Modified file contents & symbol schemas",
     outputData: "Markdown documentation summaries under .synap/wiki/",
     fileLocation: "src/synap_git/indexer/wiki.py"
-  },
-  {
-    id: "retrieval_engine",
-    module: "synap_git.retrieval.engine",
-    name: "Hybrid Retrieval Engine",
-    category: "core",
-    description: "Combines FTS5 keyword matching with SQLite CTE graph expansion and tiktoken context budget enforcement.",
-    techDetails: "4-stage pipeline: Filter -> CTE Expansion -> FTS5 Match -> Ranking & Token Budgeting.",
-    inputData: "Agent query string & max_tokens budget (e.g. 4000)",
-    outputData: "Token-bounded structural context package",
-    fileLocation: "src/synap_git/retrieval/engine.py"
-  },
-  {
-    id: "mcp_server",
-    module: "synap_git.mcp.server",
-    name: "FastMCP Stdio Server",
-    category: "interface",
-    description: "Serves Model Context Protocol (MCP) commands over stdio to AI agents (Cursor, Windsurf, Claude, Antigravity).",
-    techDetails: "Exposes synap_search, synap_create_checkpoint, synap_log_decision, synap_get_approved_memory.",
-    inputData: "Agent JSON-RPC tool calls over stdio",
-    outputData: "Structured context packages & memory IDs",
-    fileLocation: "src/synap_git/mcp/server.py"
   }
 ]
 
 export function ArchitectureDiagram() {
-  const [selectedId, setSelectedId] = useState<string>("indexer_engine")
-  const selectedComp = ARCH_COMPONENTS.find(c => c.id === selectedId) || ARCH_COMPONENTS[3]
+  const [selectedComp, setSelectedComp] = useState<ArchitectureComponent>(ARCH_COMPONENTS[0])
 
   return (
-    <section id="architecture" className="py-20 bg-slate-950 border-b border-slate-800/80 relative">
-
+    <section id="architecture" className="py-20 border-b border-border-subtle bg-[#090A0F]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* Section Header */}
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-mono text-blue-400 mb-3">
-            <Cpu className="w-3.5 h-3.5" />
-            <span>High-Level Design (HLD)</span>
+        <div className="max-w-3xl mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-border text-text-secondary text-xs font-mono mb-4">
+            <Layers className="w-3.5 h-3.5 text-accent-blue" />
+            <span>High-Level Design & Topology</span>
           </div>
-          <h2 className="text-3xl sm:text-5xl font-display font-bold text-slate-50 tracking-tight">
-            Built as a Pure Projection Engine
+          <h2 className="text-3xl sm:text-4xl font-display font-bold text-text-primary tracking-tight">
+            Designed for Instant Local Execution.
           </h2>
-          <p className="mt-4 text-slate-400 text-base sm:text-lg font-sans">
-            Synapse does not synthesize code structure using AI; it extracts it deterministically using
-            <strong className="text-slate-200"> Tree-sitter parsers</strong> and <strong className="text-slate-200">Recursive SQL CTE traversals</strong>.
+          <p className="mt-3 text-text-secondary font-sans text-sm sm:text-base leading-relaxed">
+            Synapse runs as a lightweight, zero-dependency local daemon. It couples Tree-sitter AST parsers with SQLite WAL concurrency, delivering microsecond graph queries to AI agents without bogging down your machine.
           </p>
         </div>
 
-        {/* Component Topology Map */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Architecture Pipeline Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
 
-          {/* HLD Interactive Grid (Left 7 Cols) */}
-          <div className="lg:col-span-7 space-y-6">
-
-            {/* Top Ingestion Flow Card */}
-            <div className="glass-card rounded-2xl p-5 border border-slate-800">
-              <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-4 pb-2 border-b border-slate-800/60">
-                <span className="flex items-center gap-1.5 text-blue-400 font-semibold">
-                  <GitBranch className="w-4 h-4" /> 1. Ingestion Pipeline & Git State Engine
-                </span>
-                <span className="text-slate-500">HEAD OID Projection</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {ARCH_COMPONENTS.filter(c => ["git_state", "parser_registry", "indexer_engine"].includes(c.id)).map(comp => (
-                  <button
-                    key={comp.id}
-                    onClick={() => setSelectedId(comp.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all ${
-                      selectedId === comp.id
-                        ? "bg-blue-950/60 border-blue-500 text-slate-100 ring-1 ring-blue-500/50 shadow-lg shadow-blue-500/10"
-                        : "bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850"
-                    }`}
-                  >
-                    <div className="text-[10px] font-mono text-blue-400 mb-1">{comp.module}</div>
-                    <div className="text-xs font-mono font-semibold truncate">{comp.name}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Middle Storage & Worker Flow Card */}
-            <div className="glass-card rounded-2xl p-5 border border-slate-800">
-              <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-4 pb-2 border-b border-slate-800/60">
-                <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                  <Database className="w-4 h-4" /> 2. Storage & Async Documentation Engine
-                </span>
-                <span className="text-slate-500">SQLite WAL + FTS5</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {ARCH_COMPONENTS.filter(c => ["sqlite_storage", "wiki_worker", "retrieval_engine"].includes(c.id)).map(comp => (
-                  <button
-                    key={comp.id}
-                    onClick={() => setSelectedId(comp.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all ${
-                      selectedId === comp.id
-                        ? "bg-emerald-950/60 border-emerald-500 text-slate-100 ring-1 ring-emerald-500/50 shadow-lg shadow-emerald-500/10"
-                        : "bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850"
-                    }`}
-                  >
-                    <div className="text-[10px] font-mono text-emerald-400 mb-1">{comp.module}</div>
-                    <div className="text-xs font-mono font-semibold truncate">{comp.name}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Bottom Interface & MCP Protocol Flow Card */}
-            <div className="glass-card rounded-2xl p-5 border border-slate-800">
-              <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-4 pb-2 border-b border-slate-800/60">
-                <span className="flex items-center gap-1.5 text-purple-400 font-semibold">
-                  <Server className="w-4 h-4" /> 3. Agent Interfaces & Stdio Protocol
-                </span>
-                <span className="text-slate-500">FastMCP Stdio Server</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {ARCH_COMPONENTS.filter(c => ["cli", "daemon", "mcp_server"].includes(c.id)).map(comp => (
-                  <button
-                    key={comp.id}
-                    onClick={() => setSelectedId(comp.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all ${
-                      selectedId === comp.id
-                        ? "bg-purple-950/60 border-purple-500 text-slate-100 ring-1 ring-purple-500/50 shadow-lg shadow-purple-500/10"
-                        : "bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850"
-                    }`}
-                  >
-                    <div className="text-[10px] font-mono text-purple-400 mb-1">{comp.module}</div>
-                    <div className="text-xs font-mono font-semibold truncate">{comp.name}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
+          {/* Component Selection Cards */}
+          <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+            {ARCH_COMPONENTS.map(comp => (
+              <button
+                key={comp.id}
+                onClick={() => setSelectedComp(comp)}
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
+                  selectedComp.id === comp.id
+                    ? "bg-surface-hover border-accent-blue/50 text-text-primary shadow-md"
+                    : "bg-surface/60 border-border text-text-secondary hover:border-border-strong hover:bg-surface"
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] uppercase font-bold text-text-muted">
+                      {comp.category}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-subtle border border-border text-text-muted">
+                      {comp.module.split(".").pop()}
+                    </span>
+                  </div>
+                  <div className="font-semibold text-text-primary text-sm">
+                    {comp.name}
+                  </div>
+                </div>
+                <div className="mt-3 text-[11px] text-text-muted truncate">
+                  {comp.fileLocation}
+                </div>
+              </button>
+            ))}
           </div>
 
-          {/* Component Deep Inspector Panel (Right 5 Cols) */}
-          <div className="lg:col-span-5 glass-card rounded-2xl p-6 border border-slate-800 min-h-[440px] flex flex-col justify-between">
+          {/* Detailed Inspector Panel */}
+          <div className="lg:col-span-6 minimal-card p-6 flex flex-col justify-between font-mono text-xs">
             <div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                <div>
-                  <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest">{selectedComp.module}</span>
-                  <h3 className="text-xl font-mono font-bold text-slate-100 mt-0.5">{selectedComp.name}</h3>
+              <div className="flex items-center justify-between pb-4 border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-surface border border-border flex items-center justify-center">
+                    <Cpu className="w-3.5 h-3.5 text-accent-blue" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-text-primary text-sm">{selectedComp.name}</span>
+                    <span className="text-[11px] text-text-muted block">{selectedComp.module}</span>
+                  </div>
                 </div>
-                <span className="px-2.5 py-1 bg-slate-800 text-slate-300 text-xs font-mono rounded-lg border border-slate-700">
-                  {selectedComp.category}
+                <span className="text-[11px] text-accent-emerald bg-accent-emerald/10 px-2 py-0.5 rounded border border-accent-emerald/20">
+                  Active in v2.4.0
                 </span>
               </div>
 
-              <p className="mt-4 text-sm text-slate-300 font-sans leading-relaxed">
-                {selectedComp.description}
-              </p>
-
-              {/* Technical Specifications */}
-              <div className="mt-6 space-y-3 font-mono text-xs">
-                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80">
-                  <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Architecture Implementation</div>
-                  <div className="text-slate-200">{selectedComp.techDetails}</div>
+              <div className="mt-5 space-y-4">
+                <div>
+                  <span className="text-text-muted block text-[11px] uppercase tracking-wider">Functional Role</span>
+                  <p className="text-text-secondary mt-1 font-sans text-xs sm:text-sm leading-relaxed">
+                    {selectedComp.description}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Input Stream</div>
-                    <div className="text-cyan-400 truncate">{selectedComp.inputData}</div>
-                  </div>
-                  <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Output Stream</div>
-                    <div className="text-emerald-400 truncate">{selectedComp.outputData}</div>
-                  </div>
+                <div>
+                  <span className="text-text-muted block text-[11px] uppercase tracking-wider">Implementation Mechanics</span>
+                  <p className="text-text-secondary mt-1 font-sans text-xs sm:text-sm leading-relaxed">
+                    {selectedComp.techDetails}
+                  </p>
                 </div>
 
-                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                  <span className="text-slate-500 text-[10px]">Source File:</span>
-                  <span className="text-slate-300">{selectedComp.fileLocation}</span>
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="p-3 rounded-lg bg-[#08090D] border border-border">
+                    <span className="text-text-muted block text-[10px] uppercase">Input Stream</span>
+                    <span className="text-text-secondary mt-1 block text-[11px] font-sans">
+                      {selectedComp.inputData}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#08090D] border border-border">
+                    <span className="text-text-muted block text-[10px] uppercase">Output Payload</span>
+                    <span className="text-text-secondary mt-1 block text-[11px] font-sans">
+                      {selectedComp.outputData}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
-              <span className="flex items-center gap-1.5 text-blue-400">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Grounded in synap_git
+            <div className="mt-6 pt-4 border-t border-border flex items-center justify-between text-text-muted text-[11px]">
+              <span>Source: <code className="text-text-primary">{selectedComp.fileLocation}</code></span>
+              <span className="text-accent-blue flex items-center gap-1">
+                Zero Blocking I/O <CheckCircle2 className="w-3.5 h-3.5 text-accent-emerald" />
               </span>
-              <span className="text-slate-500">Pure Python 3.12+</span>
             </div>
-
           </div>
 
         </div>
 
       </div>
-
     </section>
   )
 }
