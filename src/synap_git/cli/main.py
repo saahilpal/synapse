@@ -2209,10 +2209,11 @@ def checkpoint_restore(
 @usage_app.callback(invoke_without_command=True)
 def usage_callback(
     ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """View AI Usage Tracking and Cost Metrics."""
     if ctx.invoked_subcommand is None:
-        usage_show(".")
+        usage_show(path)
 
 
 @app.command("cost")
