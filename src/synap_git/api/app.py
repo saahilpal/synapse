@@ -43,6 +43,9 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
         return "<h1>Synap Diagnostic UI is ready.</h1>"
 
     @app.get("/api/v1/status")
+    @app.get("/api/status")
+    @app.get("/health")
+    @app.get("/healthz")
     async def get_status() -> dict[str, Any]:
         try:
             status = await asyncio.to_thread(runtime.status)
@@ -79,8 +82,11 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
 
         async def event_generator() -> AsyncGenerator[str, None]:
             while True:
-                status = await asyncio.to_thread(runtime.status)
-                yield f"data: {json.dumps(status.__dict__)}\n\n"
+                try:
+                    status = await asyncio.to_thread(runtime.status)
+                    yield f"data: {json.dumps(status.__dict__)}\n\n"
+                except Exception:
+                    pass
                 await asyncio.sleep(2)
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -115,14 +121,22 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
 
     @app.get("/api/v1/memory")
     async def get_memory_page() -> dict[str, Any]:
-        approved = await asyncio.to_thread(runtime.store.get_lessons, "approved")
-        pending = await asyncio.to_thread(runtime.store.get_lessons, "pending")
-        return {"status": "ok", "approved": approved, "pending": pending}
+        try:
+            await asyncio.to_thread(runtime.initialize_storage)
+            approved = await asyncio.to_thread(runtime.store.get_lessons, "approved")
+            pending = await asyncio.to_thread(runtime.store.get_lessons, "pending")
+            return {"status": "ok", "approved": approved, "pending": pending}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "approved": [], "pending": []}
 
     def _fetch_calls() -> list[dict[str, Any]]:
-        with runtime.store.connect() as conn:
-            rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
-            return [dict(r) for r in rows]
+        try:
+            runtime.initialize_storage()
+            with runtime.store.connect() as conn:
+                rows = conn.execute("SELECT * FROM llm_calls ORDER BY created_at DESC").fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
 
     @app.get("/api/v1/usage")
     async def get_usage_page() -> dict[str, Any]:
@@ -130,11 +144,15 @@ def create_app(runtime: SynapRuntime) -> FastAPI:
         return {"status": "ok", "calls": calls}
 
     def _fetch_checkpoints() -> list[dict[str, Any]]:
-        with runtime.store.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT 20"
-            ).fetchall()
-            return [dict(r) for r in rows]
+        try:
+            runtime.initialize_storage()
+            with runtime.store.connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT 20"
+                ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception:
+            return []
 
     @app.get("/api/v1/checkpoints")
     async def get_checkpoints_page() -> dict[str, Any]:

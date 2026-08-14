@@ -51,6 +51,47 @@ def _get_full_file(repo_path: Path, rel_path: str) -> str:
     return "\n".join(lines)
 
 
+def _classify_intent_fast(query: str) -> str:
+    q_lower = query.lower()
+    structural_tokens = (
+        "def ",
+        "class ",
+        "fn ",
+        "func ",
+        "import ",
+        "from ",
+        "()",
+        "::",
+        "->",
+        ".py",
+        ".ts",
+        ".js",
+        ".rs",
+        ".go",
+        "/",
+        "\\",
+        "_",
+    )
+    if any(tok in q_lower for tok in structural_tokens):
+        return "structural"
+    conceptual_words = (
+        "what is",
+        "why",
+        "how does",
+        "how to",
+        "overview",
+        "explain",
+        "architecture",
+        "design",
+        "concept",
+        "summary",
+        "pattern",
+    )
+    if any(cw in q_lower for cw in conceptual_words):
+        return "conceptual"
+    return "logic"
+
+
 class HybridRetrievalEngine:
     """Production-grade hybrid retrieval with exact token budgeting and traces."""
 
@@ -77,6 +118,7 @@ class HybridRetrievalEngine:
         *,
         max_tokens: int = 4000,
         is_dirty: bool = False,
+        synthesize_answer: bool = True,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Perform deterministic 4-stage retrieval: Temporal -> Structural -> Lexical -> Semantic."""
         import time
@@ -85,22 +127,8 @@ class HybridRetrievalEngine:
         trace_id = str(uuid4())
         start_time = datetime.now(UTC)
 
-        # M1: Query Intent Classification
-        intent = "logic"
-        if self.llm_provider:
-            try:
-                system_prompt = "You are a retrieval router. Classify the user query intent as one of: 'structural', 'logic', 'conceptual'. Output ONLY the single word."
-                user_prompt = f"Query: {query}"
-                resp = self.llm_provider.generate(system_prompt, user_prompt, max_tokens=10)
-                result = resp.content.lower().strip()
-                if "structural" in result:
-                    intent = "structural"
-                elif "conceptual" in result:
-                    intent = "conceptual"
-            except Exception as e:
-                import structlog
-
-                structlog.get_logger().warning("intent_classification_failed", error=str(e))
+        # M1: Fast Deterministic Query Intent Classification (sub-millisecond)
+        intent = _classify_intent_fast(query)
 
         # 2. Lexical Matches (BM25)
         query_words = {word.lower().strip() for word in query.split() if len(word) > 2}
@@ -261,7 +289,7 @@ class HybridRetrievalEngine:
 
         t_packing = time.perf_counter()
 
-        if self.llm_provider:
+        if self.llm_provider and synthesize_answer:
             import time
 
             attempts = 2
@@ -312,10 +340,12 @@ class HybridRetrievalEngine:
                     "Mode A (Structural Only): Context retrieved, but LLM generation is disabled.\n\n"
                     f"Repository Context:\n{context_str}"
                 )
-        else:
+        elif not self.llm_provider:
             answer_content = (
                 "Mode A (Structural Only): Context retrieved, but LLM generation is disabled."
             )
+        else:
+            answer_content = context_str
 
         t_llm = time.perf_counter()
 

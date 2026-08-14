@@ -44,8 +44,12 @@ class RateLimitedProvider(LLMProvider):
         return self._provider.count_tokens(text)
 
 
-def _wrap(provider: LLMProvider) -> LLMProvider:
-    return RateLimitedProvider(provider, calls_per_second=3.0)
+def _wrap(provider: LLMProvider, calls_per_second: float | None = None) -> LLMProvider:
+    if isinstance(provider, OllamaProvider):
+        # Local Ollama provider running on localhost does not need artificial rate limiting
+        return provider
+    rate = calls_per_second if calls_per_second is not None else 15.0
+    return RateLimitedProvider(provider, calls_per_second=rate)
 
 
 def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
@@ -131,7 +135,6 @@ def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
         return None
 
     provider_name = str(provider_val).lower().strip()
-    model = settings.embedding_model or settings.llm_model or ""
 
     if provider_name == "openai":
         if not settings.openai_api_key:
@@ -139,7 +142,7 @@ def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
         return _wrap(
             OpenAIProvider(
                 api_key=settings.openai_api_key,
-                default_model=model,
+                default_model=settings.embedding_model or "text-embedding-3-small",
             )
         )
 
@@ -149,16 +152,39 @@ def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
         return _wrap(
             GeminiProvider(
                 api_key=settings.gemini_api_key,
-                default_model=model,
+                default_model=settings.embedding_model or "text-embedding-004",
             )
         )
 
     if provider_name == "ollama":
         base_url = settings.embedding_url or settings.ollama_url
+        model = settings.embedding_model or "nomic-embed-text"
         return _wrap(
             OllamaProvider(
                 base_url=base_url,
                 default_model=model,
+            )
+        )
+
+    if provider_name == "anthropic":
+        if not settings.anthropic_api_key:
+            raise ValueError("Anthropic API key missing for embeddings.")
+        return _wrap(
+            AnthropicProvider(
+                api_key=settings.anthropic_api_key,
+                default_model=settings.llm_model or "",
+            )
+        )
+
+    if provider_name == "openrouter":
+        if not settings.openrouter_api_key:
+            raise ValueError("OpenRouter API key missing for embeddings.")
+        from synap_git.provider.openrouter import OpenRouterProvider
+
+        return _wrap(
+            OpenRouterProvider(
+                api_key=settings.openrouter_api_key,
+                default_model=settings.llm_model or "",
             )
         )
 

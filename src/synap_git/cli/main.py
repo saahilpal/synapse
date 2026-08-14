@@ -474,10 +474,20 @@ def setup(
     if provider != "ollama" and key:
         keyring.set_password("synap", f"{provider}_api_key", key)
 
+    embed_provider = provider if provider in ("ollama", "openai", "gemini") else "ollama"
+    default_embed_models = {
+        "ollama": "nomic-embed-text",
+        "openai": "text-embedding-3-small",
+        "gemini": "text-embedding-004",
+    }
+    embed_model = default_embed_models.get(embed_provider, "nomic-embed-text")
+
     config_content = f"""[llm]
 llm_provider = "{provider}"
 llm_model = "{llm_model}"
 ollama_url = "{ollama_url}"
+embedding_provider = "{embed_provider}"
+embedding_model = "{embed_model}"
 """
     config_file.write_text(config_content)
     console.print("[green]✓ Configuration saved[/green]")
@@ -490,6 +500,10 @@ ollama_url = "{ollama_url}"
         runtime.bootstrap(force=True)
     console.print("[green]✓ Storage initialized[/green]")
     console.print("\n[bold green]✓ Setup complete[/bold green]")
+    if provider == "ollama":
+        console.print(
+            "\n[dim]Tip: Ensure [bold]ollama pull nomic-embed-text[/bold] has been run for local vector embeddings.[/dim]"
+        )
     console.print(
         "\n[dim]Tip: Run [bold]synap --install-completion[/bold] to set up shell command autocomplete.[/dim]"
     )
@@ -557,11 +571,83 @@ def init(
     elif not quiet:
         console.print(f"[green]✓ Initialized repository at {commit}[/green]")
         console.print("\n[bold cyan]Next Steps:[/bold cyan]")
-        console.print(f"  1. [bold]synap start {path}[/bold] - Start the background daemon.")
         console.print(
-            "  2. [bold]synap mcp config[/bold]  - Get JSON config for your IDE (Cursor/Windsurf)."
+            f"  1. [bold]synap index {path}[/bold] - Index/update all symbols into the database."
         )
-        console.print("  3. Connect your AI agent using the MCP config.")
+        console.print(f"  2. [bold]synap start {path}[/bold] - Start the background daemon.")
+        console.print(
+            "  3. [bold]synap mcp config[/bold]  - Get JSON config for your IDE (Cursor/Windsurf)."
+        )
+        console.print("  4. Connect your AI agent using the MCP config.")
+
+
+@app.command()
+def index(
+    path: Annotated[str, typer.Argument(help="Repository path to index.")] = ".",
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Force reindexing of all files.")
+    ] = False,
+    skip_llm: Annotated[
+        bool, typer.Option("--skip-llm", help="Run in Mode A (structural AST only, no embeddings).")
+    ] = False,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output.")] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """
+    Index and map code symbols, caller/callee relationships, and embeddings into the local database.
+
+    Examples:
+        synap index
+        synap index /path/to/repo --force
+        synap index --skip-llm
+    """
+    _verify_is_git(path)
+    settings = _settings(path, json_output=json_output)
+    if skip_llm:
+        settings.llm_provider = None
+        settings.embedding_provider = None
+
+    _auto_protect_synap(settings.repository_path)
+    runtime = SynapRuntime(settings)
+
+    if not quiet and not json_output:
+        console.print(
+            f"[bold cyan]Indexing repository: [white]{settings.repository_path.resolve().as_posix()}[/white][/bold cyan]"
+        )
+
+    commit = runtime.bootstrap(force=force)
+    status_info = runtime.status()
+
+    if json_output:
+        _emit(
+            {
+                "active_commit": commit,
+                "files": status_info.files,
+                "symbols": status_info.symbols,
+                "branch": status_info.branch,
+                "state": "indexed",
+            },
+            json_output=True,
+        )
+    elif not quiet:
+        console.print(
+            f"[bold green]✓ Indexing complete at commit {commit}[/bold green] "
+            f"({status_info.files} files, {status_info.symbols} symbols mapped)"
+        )
+
+
+@app.command()
+def sync(
+    path: Annotated[str, typer.Argument(help="Repository path to synchronize.")] = ".",
+    force: Annotated[bool, typer.Option("--force", "-f", help="Force reindexing.")] = False,
+    skip_llm: Annotated[
+        bool, typer.Option("--skip-llm", help="Run in Mode A (structural only).")
+    ] = False,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output.")] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Synchronize database index with latest Git state and working tree changes."""
+    index(path=path, force=force, skip_llm=skip_llm, quiet=quiet, json_output=json_output)
 
 
 @app.command()
@@ -716,6 +802,9 @@ def start(
             raise typer.Exit(1)
 
         success = False
+        port = 9876
+        pid = 0
+        status_val = None
         with console.status(
             "[yellow]Starting Synap daemon and awaiting health check...[/yellow]", spinner="dots"
         ):
@@ -724,24 +813,23 @@ def start(
                 if pid_file.exists():
                     hb = _read_daemon_heartbeat(abs_path)
                     if hb:
-                        status = hb.get("status")
-                        if status in ("healthy", "degraded", "starting"):
+                        status_val = hb.get("status")
+                        if status_val in ("healthy", "degraded", "starting"):
                             success = True
                             port = hb.get("port", 9876)
                             pid = int(hb.get("pid", 0))
-                            console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
-                            if status == "starting":
-                                console.print(
-                                    "[yellow]ℹ Daemon is currently indexing in the background...[/yellow]"
-                                )
-                            else:
-                                console.print("[green]✓ Runtime healthy[/green]")
-                            console.print(
-                                f"[green]✓ UI available at http://127.0.0.1:{port}[/green]"
-                            )
                             break
 
-        if not success:
+        if success:
+            console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
+            if status_val == "starting":
+                console.print(
+                    "[yellow]ℹ Daemon is currently indexing in the background...[/yellow]"
+                )
+            else:
+                console.print("[green]✓ Runtime healthy[/green]")
+            console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
+        else:
             console.print(
                 "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
             )
@@ -895,33 +983,17 @@ def restart(
     start(path)
 
 
-@app.command()
-def status(
-    path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
-    json_output: Annotated[bool, JSON_OPTION] = False,
-) -> None:
-    """Show current repository context status."""
-    abs_path = Path(path).resolve()
-    settings = _settings(abs_path.as_posix(), json_output=json_output)
-    runtime = SynapRuntime(settings)
-    status_info = runtime.status()
+def _render_status_content(abs_path: Path, settings: SynapSettings, runtime: SynapRuntime) -> Any:
+    from rich.console import Group
+    from rich.table import Table
 
+    status_info = runtime.status()
     hb = _read_daemon_heartbeat(abs_path)
     daemon_running = False
     if hb:
         pid = hb.get("pid", 0)
         if _is_process_running(pid):
             daemon_running = True
-
-    if json_output:
-        out = _jsonable(status_info)
-        out["daemon"] = hb if daemon_running else None
-        _emit(out, json_output=True)
-        return
-
-    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
-    console.print("[bold cyan]          Synap Runtime Status          [/bold cyan]")
-    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
 
     daemon_status = (
         "[bold green]Running[/bold green]" if daemon_running else "[bold red]Stopped[/bold red]"
@@ -948,8 +1020,6 @@ def status(
     provider = settings.llm_provider or "None (Mode A)"
     model = settings.llm_model or "None"
 
-    from rich.table import Table
-
     table = Table.grid(padding=(0, 2))
     table.add_column("Property", style="bold cyan")
     table.add_column("Value")
@@ -964,13 +1034,66 @@ def status(
     table.add_row("CPU:", cpu_val)
     table.add_row("RAM:", ram_val)
 
-    console.print(table)
-    console.print()
+    elements: list[Any] = [
+        "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]",
+        "[bold cyan]          Synap Runtime Status          [/bold cyan]",
+        "[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n",
+        table,
+        "",
+    ]
 
     if status_info.is_dirty:
-        console.print(
+        elements.append(
             "[bold yellow]⚠ Warning: Working tree has uncommitted changes. Run git commit to index them.[/bold yellow]"
         )
+
+    return Group(*elements)
+
+
+@app.command()
+def status(
+    path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
+    watch: Annotated[
+        bool, typer.Option("--watch", "-w", help="Continuously monitor status in real-time.")
+    ] = False,
+    interval: Annotated[
+        float, typer.Option("--interval", "-i", help="Refresh interval in seconds for watch mode.")
+    ] = 2.0,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Show current repository context status."""
+    import time
+
+    abs_path = Path(path).resolve()
+    settings = _settings(abs_path.as_posix(), json_output=json_output)
+    runtime = SynapRuntime(settings)
+
+    if json_output:
+        status_info = runtime.status()
+        hb = _read_daemon_heartbeat(abs_path)
+        daemon_running = bool(hb and _is_process_running(hb.get("pid", 0)))
+        out = _jsonable(status_info)
+        out["daemon"] = hb if daemon_running else None
+        _emit(out, json_output=True)
+        return
+
+    if not watch:
+        console.print(_render_status_content(abs_path, settings, runtime))
+        return
+
+    from rich.live import Live
+
+    with Live(
+        _render_status_content(abs_path, settings, runtime),
+        console=console,
+        refresh_per_second=4,
+    ) as live:
+        try:
+            while True:
+                time.sleep(interval)
+                live.update(_render_status_content(abs_path, settings, runtime))
+        except KeyboardInterrupt:
+            pass
 
 
 @app.command()
@@ -1054,10 +1177,15 @@ def search(
 
 
 @app.command()
-def update() -> None:
+def update(
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Force upgrade even if already at latest version.")
+    ] = False,
+) -> None:
     """Check for updates and upgrade the Synap runtime."""
     import subprocess
     import sys
+    from pathlib import Path
 
     import httpx
 
@@ -1076,23 +1204,18 @@ def update() -> None:
         try:
             resp = httpx.get("https://pypi.org/pypi/synap-git/json", timeout=5.0)
             if resp.status_code == 200:
-                latest_version = resp.json()["info"]["version"]
+                latest_version = resp.json().get("info", {}).get("version", current_version)
         except Exception as e:
-            console.print(
-                f"[yellow]⚠ Failed to reach PyPI: {e}. Cannot check for updates.[/yellow]"
-            )
-            return
+            console.print(f"[yellow]⚠ Note: Unable to check PyPI for updates ({e}).[/yellow]")
 
     console.print(f"Latest version on PyPI: [bold]{latest_version}[/bold]")
 
     def is_newer(v_remote: str, v_local: str) -> bool:
         try:
-            # Attempt to use packaging if available
             from packaging.version import Version
 
             return Version(v_remote) > Version(v_local)
         except (ImportError, Exception):
-            # Fallback to simple semver tuple comparison
             try:
 
                 def _to_tuple(v: str) -> tuple[int, ...]:
@@ -1102,25 +1225,56 @@ def update() -> None:
             except Exception:
                 return v_remote != v_local
 
-    if not is_newer(latest_version, current_version) and install_method != "editable":
+    if not force and not is_newer(latest_version, current_version) and install_method != "editable":
         console.print("[green]✓ Synap is already up to date.[/green]")
         return
 
     if install_method == "editable":
-        console.print("\n[yellow]Editable installation detected. Updating via git pull...[/yellow]")
+        console.print("\n[yellow]Editable installation detected. Updating environment...[/yellow]")
+        import synap_git
+
+        pkg_file = Path(synap_git.__file__).resolve()
+        repo_root = pkg_file.parent.parent.parent
+
         try:
-            subprocess.run(["git", "pull", "origin", "main"], check=True)
-            # Try pip, then uv
-            try:
-                subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
-            except Exception:
-                subprocess.run(["uv", "pip", "install", "-e", "."], check=True)
-            console.print(
-                "[green]✓ Update successful (Git repository pulled and re-installed)[/green]"
+            # Dynamically determine the current checked out git branch
+            branch_res = subprocess.run(
+                ["git", "symbolic-ref", "--short", "--quiet", "HEAD"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
             )
+            curr_branch = branch_res.stdout.strip() if branch_res.returncode == 0 else "main"
+
+            pull_res = subprocess.run(
+                ["git", "pull", "--rebase", "origin", curr_branch],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            if pull_res.returncode == 0:
+                console.print(f"[green]✓ Git branch '{curr_branch}' pulled successfully.[/green]")
+            else:
+                console.print(
+                    f"[yellow]⚠ Git pull skipped or uncommitted changes detected on '{curr_branch}'.[/yellow]"
+                )
         except Exception as e:
-            console.print(f"[bold red]✗ Git update failed:[/bold red] {e}")
-            raise typer.Exit(1)
+            console.print(f"[yellow]⚠ Git pull skipped: {e}[/yellow]")
+
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-e", str(repo_root)], check=True
+            )
+            console.print("[green]✓ Update successful (Editable package re-installed).[/green]")
+        except Exception:
+            try:
+                subprocess.run(["uv", "pip", "install", "-e", str(repo_root)], check=True)
+                console.print(
+                    "[green]✓ Update successful (Editable package re-installed via uv).[/green]"
+                )
+            except Exception as e:
+                console.print(f"[bold red]✗ Re-installation failed:[/bold red] {e}")
+                raise typer.Exit(1)
         return
 
     upgrade_cmds = {
@@ -1142,8 +1296,7 @@ def update() -> None:
         try:
             subprocess.run(cmd, check=True)
         except Exception as e:
-            if install_method == "venv" or install_method == "pip":
-                # Fallback to uv if pip fails/is missing
+            if install_method in ("venv", "pip"):
                 console.print(
                     "[yellow]Pip failed or missing. Attempting upgrade via uv...[/yellow]"
                 )
@@ -1523,7 +1676,7 @@ def doctor(
 
             if daemon_info and port_in_use:
                 try:
-                    r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=2.0)
+                    r = httpx.get(f"http://127.0.0.1:{port}/api/v1/status", timeout=2.0)
                     if r.status_code == 200:
                         progress.update(
                             task_daemon,

@@ -94,7 +94,6 @@ class OllamaProvider(LLMProvider):
         )
         yield res.content
 
-    @_with_retries
     def embed(
         self,
         text: str,
@@ -106,11 +105,21 @@ class OllamaProvider(LLMProvider):
         headers = {"Content-Type": "application/json"}
         payload = {"model": model_name, "prompt": text}
 
-        resp = self.client.post(url, json=payload, headers=headers, timeout=60.0)
-        resp.raise_for_status()
-        data = resp.json()
-        embedding = data["embedding"]
-        return [float(x) for x in embedding]
+        try:
+            resp = self.client.post(url, json=payload, headers=headers, timeout=60.0)
+            resp.raise_for_status()
+            data = resp.json()
+            embedding = data["embedding"]
+            return [float(x) for x in embedding]
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (400, 404, 500):
+                # Likely model does not support embeddings or model not found
+                raise NotImplementedError(
+                    f"Ollama model '{model_name}' does not support embeddings: {e}"
+                ) from e
+            raise RuntimeError(f"Ollama embedding request failed: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"Ollama embedding request failed: {e}") from e
 
     def count_tokens(self, text: str) -> int:
         import tiktoken

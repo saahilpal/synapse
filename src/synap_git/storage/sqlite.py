@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 from collections.abc import Iterator
@@ -12,18 +13,23 @@ from typing import Any
 from synap_git.utils.serialization import stable_hash
 
 
-def _cosine_similarity(vec1_json: str, vec2_json: str) -> float:
+@functools.lru_cache(maxsize=4096)
+def _parse_cached_vec(vec_json: str) -> tuple[tuple[float, ...], float]:
     try:
-        v1 = json.loads(vec1_json)
-        v2 = json.loads(vec2_json)
-        dot = sum(a * b for a, b in zip(v1, v2, strict=False))
-        norm_a = sum(a * a for a in v1) ** 0.5
-        norm_b = sum(b * b for b in v2) ** 0.5
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return float(dot / (norm_a * norm_b))
+        v = tuple(float(x) for x in json.loads(vec_json))
+        norm = sum(x * x for x in v) ** 0.5
+        return v, norm
     except Exception:
+        return (), 0.0
+
+
+def _cosine_similarity(vec1_json: str, vec2_json: str) -> float:
+    v1, norm_a = _parse_cached_vec(vec1_json)
+    v2, norm_b = _parse_cached_vec(vec2_json)
+    if norm_a == 0.0 or norm_b == 0.0 or len(v1) != len(v2):
         return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2, strict=False))
+    return float(dot / (norm_a * norm_b))
 
 
 class LessonStatus(str, Enum):

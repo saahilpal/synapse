@@ -22,8 +22,16 @@ class SynapMCPFacade:
         status = self.runtime.status()
         return status.__dict__
 
-    def search(self, query: str, max_tokens: int = 4000) -> dict[str, Any]:
-        result, ctx, debug = self.runtime.query_hybrid(query, max_tokens=max_tokens)
+    def search(
+        self, query: str, max_tokens: int = 4000, synthesize_answer: bool = False
+    ) -> dict[str, Any]:
+        sig = inspect.signature(self.runtime.query_hybrid)
+        if "synthesize_answer" in sig.parameters:
+            result, ctx, debug = self.runtime.query_hybrid(
+                query, max_tokens=max_tokens, synthesize_answer=synthesize_answer
+            )
+        else:
+            result, ctx, debug = self.runtime.query_hybrid(query, max_tokens=max_tokens)
         return {"result": result, "context": ctx, "trace": debug}
 
     def create_checkpoint(

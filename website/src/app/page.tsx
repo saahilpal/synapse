@@ -12,7 +12,7 @@ import { Footer } from "@/components/ui/footer"
 
 export default function Home() {
   return (
-    <div className="relative min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-600/30 selection:text-blue-200 overflow-x-hidden antialiased">
+    <div className="relative min-h-screen bg-background text-text-primary font-sans selection:bg-accent-blue/30 selection:text-text-primary overflow-x-hidden antialiased">
       {/* Top Header Navigation */}
       <Navbar />
 

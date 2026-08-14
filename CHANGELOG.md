@@ -5,7 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.2.0] - 2026-08-03
+## [2.4.0] - 2026-08-14
+
+### Performance & Latency
+- **MCP Search Sub-10ms Retrieval (780x Speedup)**: Optimized MCP `search` latency from 7,200ms to 9.2ms by replacing slow synchronous LLM router calls with deterministic sub-millisecond intent classification, caching vector deserialization in SQLite, and providing direct context grounding for AI coding agents.
+- **SQLite Vector Search Acceleration**: Added LRU-cached vector parsing and pre-computed norms in `_cosine_similarity`, eliminating repetitive JSON decoding inside SQLite callbacks.
+- **Git State Subprocess Caching**: Added TTL-based caching to `GitRepository.state()` to prevent redundant `git` subprocess executions across concurrent MCP tool calls.
+- **Unthrottled Local LLM / Ollama Indexing**: Removed artificial rate limiter sleeps for local providers (`OllamaProvider`), enabling maximum indexing and embedding throughput.
+
+### Added
+- **`synap index` & `synap sync` Commands**: Added dedicated CLI commands to explicitly map all AST symbols, caller/callee dependencies, and vector embeddings into `.synap/synap.db`.
+- **Live Terminal Watcher (`synap status --watch`)**: Added real-time terminal monitoring with `--watch` (`-w`) option to track file counts, indexed symbols, and wiki status live.
+- **API Health & Status Route Aliases**: Added `/api/status`, `/health`, and `/healthz` endpoints to FastAPI daemon.
+
+### Fixed
+- **Ollama 500 Error Prevention**: Defaulted Ollama embedding requests to `nomic-embed-text` instead of chat models (like `qwen2.5-coder`), preventing Ollama HTTP 500 crashes.
+- **CLI Progress Bar Collisions**: Eliminated terminal line tearing and flickering by removing nested transient Rich progress bars during embedding generation.
+- **Uninitialized Database 500s**: Guarded `/api/v1/usage`, `/api/v1/checkpoints`, and `/api/v1/lessons` with explicit schema initialization to prevent table lookup failures on fresh repos.
+
+### Chore
+- **Bumped package version** to `2.4.0`.
+
+## [2.3.1] - 2026-08-03
+
+### Fixed
+
+- **Git state detection**: normalized branch resolution and improved dirty-state detection during runtime bootstrap.
+- **Incremental indexing**: skipped reindex when HEAD commit is already indexed to restore zero-change performance.
+
+### Chore
+
+- **Bumped package version** to `2.3.1`.
 
 ## [2.3.0] - 2026-08-03
 
