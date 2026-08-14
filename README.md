@@ -328,23 +328,26 @@ synap mcp config .
 
 All commands support target path arguments:
 
-- `synap setup [PATH]` — Runs provider configuration wizard.
+- `synap setup [PATH]` — Runs interactive provider and embedding configuration wizard.
 - `synap init [PATH]` — Performs initial structural indexing. Supports `--skip-llm`, `--skip-wiki`.
+- `synap index [PATH]` — Explicitly indexes all AST symbols, dependencies, and vector embeddings into SQLite. Supports `--force` (`-f`), `--skip-llm`, `--quiet` (`-q`), `--json`.
+- `synap sync [PATH]` — Incrementally synchronizes SQLite database with recent Git commits.
+- `synap search <QUERY> [PATH]` — Performs hybrid lexical, structural, and semantic code search with optional LLM answer synthesis.
 - `synap wipe [PATH]` — Purges SQLite index.
 - `synap start [PATH]` — Launches background daemon.
-- `synap stop [PATH]` — Terminate background daemon.
+- `synap stop [PATH]` — Terminates background daemon.
 - `synap restart [PATH]` — Restarts background daemon.
-- `synap status [PATH]` — Prints active indexing parameters. Supports `--json`.
+- `synap status [PATH]` — Prints active indexing parameters. Supports `--watch` (`-w`) for real-time live monitoring and `--json`.
 - `synap logs` — Views system logs. Supports `-t`, `-n`, `-d`.
 - `synap update` — Upgrades Synap installation.
 - `synap version` — Prints version.
 - `synap rollback [PATH]` — Restores index state to previous commit. Supports `-c`, `-y`.
 - `synap repair [PATH]` — Wipes index and rebuilds from HEAD. Supports `-y`.
-- `synap doctor [PATH]` — Verifies database integrity and parsers.
+- `synap doctor [PATH]` — Verifies database integrity, port binding, and REST API health.
 - `synap run [PATH]` — Runs daemon in foreground.
 - `synap ui [PATH]` — Launches HTML dashboard.
-- `synap mcp config [PATH]` — Outputs Cursor connection blocks.
-- `synap mcp verify [PATH]` — Asserts MCP server stability.
+- `synap mcp config [PATH]` — Outputs Cursor / IDE connection blocks.
+- `synap mcp verify [PATH]` — Asserts MCP server stability and benchmarks tool latencies.
 - `synap memory status [PATH]` — Lists lesson counts.
 - `synap memory prune [PATH]` — Evaluates and deletes expired lessons.
 - `synap memory verify [PATH]` — Checks lessons for missing files. Supports `--json`.
@@ -359,6 +362,7 @@ All commands support target path arguments:
 - `synap cost [PATH]` — Shows aggregated LLM calls, token counts, and estimated USD cost (alias for `synap usage show`).
 - `synap wiki list [PATH]` — Lists generated docs.
 - `synap wiki show <FILE> [PATH]` — Renders wiki files.
+- `synap wiki retry [PATH]` — Retries generation of failed or stale wiki documentation pages.
 
 ---
 

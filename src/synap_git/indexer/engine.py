@@ -141,7 +141,7 @@ class SynapRuntime:
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
         self._auto_protect_synap()
-        git_state = self.git.state()
+        git_state = self.git.state(force=True)
         branch = git_state.effective_branch
         existing_commit = self.store.get_active_commit(branch)
 
@@ -228,7 +228,7 @@ class SynapRuntime:
     def index_repository(
         self, *, git_state: GitState | None = None, force: bool = False
     ) -> str | None:
-        git_state = git_state or self.git.state()
+        git_state = git_state or self.git.state(force=True)
         branch = git_state.effective_branch
 
         # If the current repository commit is already indexed, skip reindexing entirely.
@@ -290,39 +290,27 @@ class SynapRuntime:
 
         model_name = getattr(provider, "default_model", "unknown")
 
-        from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            transient=True,
-        ) as progress:
-            task = progress.add_task("[cyan]Generating Embeddings...", total=total_symbols)
-
-            for file_id, symbols, content_hash in symbols_to_embed:
-                for sym in symbols:
-                    try:
-                        text = sym["name"] + " " + (sym.get("metadata") or {}).get("docstring", "")
-                        vector = provider.embed(text)
+        for file_id, symbols, content_hash in symbols_to_embed:
+            for sym in symbols:
+                try:
+                    text = sym["name"] + " " + (sym.get("metadata") or {}).get("docstring", "")
+                    vector = provider.embed(text)
+                    if vector:
                         self.store.put_embedding(
                             sym["symbol_id"], model_name, "1.0", "1.0", vector, content_hash
                         )
-                    except KeyboardInterrupt:
-                        self.logger.warning("embedding_interrupted_by_user")
-                        raise
-                    except NotImplementedError:
-                        self.logger.warning(
-                            "embedding_not_supported", provider=provider.__class__.__name__
-                        )
-                        return
-                    except Exception as e:
-                        self.logger.debug(
-                            "embedding_failed_for_symbol", symbol=sym["name"], error=str(e)
-                        )
-                    finally:
-                        progress.advance(task)
+                except KeyboardInterrupt:
+                    self.logger.warning("embedding_interrupted_by_user")
+                    raise
+                except NotImplementedError:
+                    self.logger.warning(
+                        "embedding_not_supported", provider=provider.__class__.__name__
+                    )
+                    return
+                except Exception as e:
+                    self.logger.debug(
+                        "embedding_failed_for_symbol", symbol=sym["name"], error=str(e)
+                    )
 
     def _first_run_index(self, git_state: GitState) -> str | None:
         self.logger.info("first_run_indexing_started", branch=git_state.effective_branch)
@@ -986,6 +974,7 @@ class SynapRuntime:
         query: str,
         *,
         max_tokens: int = 4000,
+        synthesize_answer: bool = True,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         self.initialize_storage()
         is_dirty = False
@@ -993,7 +982,12 @@ class SynapRuntime:
             is_dirty = self.git.state().is_dirty
         except Exception as e:
             structlog.get_logger().error("suppressed_error_caught", error=str(e))
-        return self.retrieval_engine.retrieve(query, max_tokens=max_tokens, is_dirty=is_dirty)
+        return self.retrieval_engine.retrieve(
+            query,
+            max_tokens=max_tokens,
+            is_dirty=is_dirty,
+            synthesize_answer=synthesize_answer,
+        )
 
     def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:
         self.initialize_storage(auto_recover=auto_recover)

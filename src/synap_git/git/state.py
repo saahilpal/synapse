@@ -51,13 +51,39 @@ class GitRepository:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._cached_fingerprint: tuple[float, float, float] | None = None
+        self._cached_state: GitState | None = None
 
-    def state(self) -> GitState:
+    def invalidate_cache(self) -> None:
+        self._cached_fingerprint = None
+        self._cached_state = None
+
+    def _get_git_fingerprint(self, git_dir: Path) -> tuple[float, float, float]:
+        try:
+            head_mtime = (git_dir / "HEAD").stat().st_mtime
+        except OSError:
+            head_mtime = 0.0
+        try:
+            index_mtime = (git_dir / "index").stat().st_mtime
+        except OSError:
+            index_mtime = 0.0
+        try:
+            refs_mtime = (git_dir / "refs").stat().st_mtime
+        except OSError:
+            refs_mtime = 0.0
+        return (head_mtime, index_mtime, refs_mtime)
+
+    def state(self, *, force: bool = False) -> GitState:
         try:
             repository_path = self.path.resolve()
             git_dir = repository_path / ".git"
             if not git_dir.exists():
                 return GitState(repository_path=repository_path, is_repository=False)
+
+            if not force and self._cached_state is not None:
+                fp = self._get_git_fingerprint(git_dir)
+                if fp == self._cached_fingerprint:
+                    return self._cached_state
 
             is_detached = False
             branch = None
@@ -105,7 +131,7 @@ class GitRepository:
             except subprocess.CalledProcessError:
                 is_dirty = False
 
-            return GitState(
+            state_obj = GitState(
                 repository_path=repository_path,
                 is_repository=True,
                 head_commit=head_commit,
@@ -118,6 +144,9 @@ class GitRepository:
                 commit_parent_hashes=parent_hashes,
                 commit_message=commit_message,
             )
+            self._cached_fingerprint = self._get_git_fingerprint(git_dir)
+            self._cached_state = state_obj
+            return state_obj
         except Exception as exc:
             raise GitIntegrationError("Git state could not be determined") from exc
 
