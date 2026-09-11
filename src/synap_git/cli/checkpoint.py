@@ -19,15 +19,29 @@ app = typer.Typer(help="Checkpoint commands.", no_args_is_help=True)
 
 @app.command("create")
 def checkpoint_create(
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
     doing: Annotated[
-        str, typer.Option(help="What the agent is currently doing.")
+        str,
+        typer.Argument(
+            help="What the agent is currently doing / checkpoint description.",
+            show_default=True,
+        ),
     ] = "Manual snapshot",
+    path: Annotated[
+        str,
+        typer.Option("--path", "-p", help="Repository path."),
+    ] = ".",
     files: Annotated[str, typer.Option(help="Comma-separated list of changed files.")] = "",
     next_step: Annotated[str, typer.Option(help="The next step to be taken.")] = "",
     blockers: Annotated[str, typer.Option(help="Current blockers or obstacles.")] = "",
 ) -> None:
     """Create a new context checkpoint."""
+    from pathlib import Path as FilePath
+
+    # Backward compatibility: if doing is an existing directory path and not a message
+    if path == "." and FilePath(doing).is_dir() and doing != "Manual snapshot":
+        path = doing
+        doing = "Manual snapshot"
+
     runtime = SynapRuntime(_settings(path))
 
     checkpoint_id = str(uuid.uuid4())

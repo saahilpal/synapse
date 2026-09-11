@@ -105,7 +105,17 @@ class RuntimeDaemon:
             class _WatcherHandler(FileSystemEventHandler):
                 def on_any_event(self, event: Any) -> None:
                     path_str = str(getattr(event, "src_path", ""))
-                    if any(
+                    is_git_ref = any(
+                        ref_marker in path_str
+                        for ref_marker in (
+                            ".git/HEAD",
+                            ".git/refs/heads",
+                            ".git/MERGE_HEAD",
+                            ".git/rebase-apply",
+                            ".git/rebase-merge",
+                        )
+                    )
+                    if not is_git_ref and any(
                         ignored in path_str
                         for ignored in (
                             ".synap",

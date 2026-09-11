@@ -852,6 +852,31 @@ class SynapStore:
     def enqueue_wiki(self, file_path: str) -> None:
         import uuid
 
+        # Skip non-documentable assets, lockfiles, and minified bundles
+        ignored_suffixes = (
+            ".svg",
+            ".lock",
+            ".xml",
+            ".typed",
+            ".min.js",
+            ".min.css",
+            ".map",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".ico",
+            ".wasm",
+            ".pyc",
+        )
+        lower = file_path.lower()
+        if (
+            any(lower.endswith(sfx) for sfx in ignored_suffixes)
+            or lower.endswith("package-lock.json")
+            or lower.endswith("yarn.lock")
+        ):
+            return
+
         now = int(datetime.now(UTC).timestamp())
         task_id = str(uuid.uuid4())
         with self.connect() as conn:

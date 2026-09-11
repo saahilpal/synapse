@@ -1024,11 +1024,23 @@ def _render_status_content(abs_path: Path, settings: SynapSettings, runtime: Syn
     table.add_column("Property", style="bold cyan")
     table.add_column("Value")
 
+    approved_lessons = 0
+    try:
+        with runtime.store.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM lessons WHERE status = 'approved'"
+            ).fetchone()
+            if row:
+                approved_lessons = row["cnt"]
+    except Exception:
+        pass
+
     table.add_row("Daemon:", daemon_status)
     table.add_row("Repository:", abs_path.name)
     table.add_row("Branch:", status_info.branch)
     table.add_row("Indexed:", indexed_files)
-    table.add_row("Memory:", memory_nodes)
+    table.add_row("Symbols:", memory_nodes)
+    table.add_row("Approved Lessons:", str(approved_lessons))
     table.add_row("LLM Provider:", provider.capitalize())
     table.add_row("Model:", model)
     table.add_row("CPU:", cpu_val)
@@ -1467,6 +1479,13 @@ def rollback(
             help="Commit hash or reference to rollback to directly.",
         ),
     ] = None,
+    git_checkout: Annotated[
+        bool,
+        typer.Option(
+            "--git-checkout",
+            help="Also check out working tree files to that commit (WARNING: modifies local working tree).",
+        ),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option(
@@ -1548,7 +1567,14 @@ def rollback(
         selected_commit = commits[choice_idx][0]
 
     console.print(f"\n[bold yellow]⚠ Rolling back to {selected_commit} will:[/bold yellow]")
-    console.print("    - Restore index to that commit's state (via git checkout)")
+    if git_checkout:
+        console.print(
+            "    - Restore index and check out working tree files to that commit (via git checkout)"
+        )
+    else:
+        console.print(
+            "    - Restore context index state to match that commit (working tree untouched)"
+        )
     console.print("    - Preserve all approved lessons (they survive rollbacks)")
     console.print("    - Clear current checkpoint")
 
@@ -1562,23 +1588,25 @@ def rollback(
         if not typer.confirm("\nProceed?", default=False):
             raise typer.Abort()
 
-    # git checkout
-    try:
-        subprocess.check_call(  # noqa: S603
-            ["git", "checkout", selected_commit],  # noqa: S607
-            cwd=settings.repository_path,
-        )
-    except Exception as e:
-        console.print(f"[red]✗ Git checkout failed: {e}[/red]")
-        raise typer.Abort()
+    # git checkout only if explicitly requested
+    if git_checkout:
+        try:
+            subprocess.check_call(  # noqa: S603
+                ["git", "checkout", selected_commit],  # noqa: S607
+                cwd=settings.repository_path,
+            )
+        except Exception as e:
+            console.print(f"[red]✗ Git checkout failed: {e}[/red]")
+            raise typer.Abort()
 
-    # Clear current checkpoint
+    # Clear current checkpoint and update active commit
     try:
         with runtime.store.connect() as conn:
             conn.execute(
                 "DELETE FROM checkpoints WHERE branch = ?",
                 (runtime.git.state().effective_branch,),
             )
+            runtime.store.set_active_commit(runtime.git.state().effective_branch, selected_commit)
     except Exception as e:
         import structlog
 
@@ -1633,6 +1661,20 @@ def repair(
 
     console.print("Rebuilding from git history...")
     console.print("[1/3] Restoring file structure from HEAD")
+
+    saved_lessons = []
+    saved_checkpoints = []
+    saved_memory = []
+    try:
+        with runtime.store.connect() as conn:
+            saved_lessons = [dict(r) for r in conn.execute("SELECT * FROM lessons").fetchall()]
+            saved_checkpoints = [
+                dict(r) for r in conn.execute("SELECT * FROM checkpoints").fetchall()
+            ]
+            saved_memory = [dict(r) for r in conn.execute("SELECT * FROM agent_memory").fetchall()]
+    except Exception:
+        pass
+
     try:
         runtime.wipe_index()
     except Exception:
@@ -1646,6 +1688,63 @@ def repair(
                         pass
 
     runtime.initialize_storage()
+
+    restored_count = 0
+    if saved_lessons or saved_checkpoints or saved_memory:
+        try:
+            with runtime.store.connect() as conn:
+                for l_item in saved_lessons:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO lessons
+                        (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            l_item["lesson_id"],
+                            l_item["branch"],
+                            l_item["revert_commit"],
+                            l_item["reverted_from"],
+                            l_item["what_failed"],
+                            l_item["why_failed"],
+                            l_item["files_affected"],
+                            l_item["status"],
+                            l_item["created_at"],
+                            l_item["expires_at"],
+                        ),
+                    )
+                for cp in saved_checkpoints:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO checkpoints
+                        (checkpoint_id, branch, commit_hash, doing, changed_files, next_step, blockers, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            cp["checkpoint_id"],
+                            cp["branch"],
+                            cp["commit_hash"],
+                            cp["doing"],
+                            cp["changed_files"],
+                            cp["next_step"],
+                            cp["blockers"],
+                            cp["created_at"],
+                        ),
+                    )
+                for m in saved_memory:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO agent_memory (id, timestamp, context_key, payload, summary)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (m["id"], m["timestamp"], m["context_key"], m["payload"], m["summary"]),
+                    )
+            restored_count = len(saved_lessons) + len(saved_checkpoints) + len(saved_memory)
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().error("failed_restoring_memory", error=str(e))
+
     console.print("[2/3] Reindexing all symbols")
     with console.status("[yellow]Reindexing repository...[/yellow]", spinner="dots"):
         runtime.bootstrap(force=True)
@@ -1661,7 +1760,14 @@ def repair(
 
     status_info = runtime.status()
     console.print(f"\n[green]✓ Recovery complete. {status_info.files} files restored.[/green]")
-    console.print("[yellow]⚠ Agent memory (L3) could not be recovered — starting fresh.[/yellow]")
+    if restored_count > 0:
+        console.print(
+            f"[green]✓ Agent memory (L3) successfully preserved ({len(saved_lessons)} lessons, {len(saved_checkpoints)} checkpoints, {len(saved_memory)} memories).[/green]"
+        )
+    else:
+        console.print(
+            "[yellow]⚠ Agent memory (L3) could not be recovered — starting fresh.[/yellow]"
+        )
 
 
 @app.command()

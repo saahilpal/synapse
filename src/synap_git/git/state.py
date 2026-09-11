@@ -117,6 +117,31 @@ class GitRepository:
             except subprocess.CalledProcessError:
                 head_commit = None
 
+            if head_commit:
+                try:
+                    commit_message = subprocess.run(
+                        ["git", "log", "-1", "--format=%B", "HEAD"],
+                        cwd=repository_path,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout.strip()
+                except subprocess.CalledProcessError:
+                    commit_message = None
+
+                try:
+                    parents_raw = subprocess.run(
+                        ["git", "rev-parse", "HEAD^@"],
+                        cwd=repository_path,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    ).stdout.strip()
+                    if parents_raw:
+                        parent_hashes = tuple(parents_raw.splitlines())
+                except subprocess.CalledProcessError:
+                    parent_hashes = ()
+
             try:
                 is_dirty = (
                     subprocess.run(

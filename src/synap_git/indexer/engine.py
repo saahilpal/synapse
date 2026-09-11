@@ -318,6 +318,22 @@ class SynapRuntime:
         except Exception:
             affected = []
 
+        revert_msg = current_state.commit_message or ""
+        prev_ref = reverted_from[:8] if reverted_from else "unknown"
+        what_failed = revert_msg.splitlines()[0] if revert_msg else f"Revert of commit {prev_ref}"
+
+        try:
+            stat_out = subprocess.check_output(  # noqa: S603
+                ["git", "diff", "--stat", f"{revert_commit}^!"],  # noqa: S607
+                cwd=self.settings.repository_path,
+                text=True,
+            ).strip()
+            summary = stat_out if stat_out else "Clean revert"
+        except Exception:
+            summary = f"Reverted changes affecting {len(affected)} files"
+
+        why_failed = f"Automated revert analysis: {summary}"
+
         now = int(datetime.now(UTC).timestamp())
 
         with self.store.connect() as conn:
@@ -331,8 +347,8 @@ class SynapRuntime:
                     current_state.effective_branch,
                     revert_commit,
                     reverted_from,
-                    "Revert detected automatically",
-                    "Awaiting analysis from LLM or User",
+                    what_failed,
+                    why_failed,
                     json.dumps(affected),
                     now,
                     now + (86400 * self.settings.lesson_expiry_days),
