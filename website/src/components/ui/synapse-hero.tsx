@@ -101,7 +101,7 @@ export function SynapseHero() {
   const [activeBranch, setActiveBranch] = useState("main")
   const [isSimulating, setIsSimulating] = useState(false)
   const [selectedNode, setSelectedNode] = useState<GraphNode>(GRAPH_NODES[0])
-  const [activeView, setActiveView] = useState<"graph" | "mcp" | "savings">("graph")
+  const [activeView, setActiveView] = useState<"graph" | "visual" | "mcp" | "savings">("graph")
 
   const copyText = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
@@ -155,7 +155,10 @@ export function SynapseHero() {
         </div>
 
         {/* Hero Title & Value Proposition */}
-        <div className="text-center max-w-4xl mx-auto">
+        <div className="text-center max-w-4xl mx-auto relative">
+          {/* Subtle Ambient Radial Glow */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-gradient-to-r from-accent-blue/15 via-accent-emerald/10 to-transparent blur-[120px] pointer-events-none -z-10" />
+
           <motion.h1
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
@@ -174,12 +177,12 @@ export function SynapseHero() {
             Maps your repository into a local SQLite Tree-sitter graph, asynchronous semantic wiki, and long-term behavioral memory. Zero cloud lock-in. Sub-10ms FastMCP retrieval for Cursor, Claude Code, and Windsurf.
           </motion.p>
 
-          {/* Interactive Install Box */}
+          {/* Interactive Install Box & Quick Links */}
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, delay: 0.3 }}
-            className="mt-8 flex flex-col items-center gap-3"
+            className="mt-8 flex flex-col items-center gap-3.5"
           >
             {/* Install Method Switcher */}
             <div className="flex items-center p-1 rounded-lg bg-surface border border-border text-xs font-mono">
@@ -204,10 +207,10 @@ export function SynapseHero() {
             </div>
 
             {/* Command Bar */}
-            <div className="flex items-center gap-3 bg-surface border border-border rounded-xl px-4 py-2.5 shadow-lg w-full max-w-md justify-between group hover:border-border-strong transition-all">
+            <div className="flex items-center gap-3 bg-surface/90 backdrop-blur-md border border-white/10 rounded-xl px-4 py-2.5 shadow-2xl w-full max-w-md justify-between group hover:border-accent-blue/40 transition-all">
               <div className="flex items-center gap-2.5 font-mono text-xs text-text-primary overflow-x-auto">
-                <span className="text-accent-blue select-none">$</span>
-                <span>{getCommand()}</span>
+                <span className="text-accent-blue select-none font-bold">$</span>
+                <span className="tracking-wide">{getCommand()}</span>
               </div>
               <button
                 onClick={() => copyText(getCommand(), "install-hero")}
@@ -220,6 +223,23 @@ export function SynapseHero() {
                   <Copy className="w-4 h-4" />
                 )}
               </button>
+            </div>
+
+            {/* Quick Action Links */}
+            <div className="flex items-center gap-4 text-xs font-mono text-text-muted mt-2">
+              <a href="#ide-setup" className="hover:text-text-primary flex items-center gap-1 transition-colors">
+                <span>IDE Setup Guide</span>
+                <ArrowRight className="w-3 h-3 text-accent-blue" />
+              </a>
+              <span>•</span>
+              <a href="#benchmark" className="hover:text-accent-emerald flex items-center gap-1 transition-colors">
+                <span>780x Speedup Profile</span>
+                <Zap className="w-3 h-3 text-accent-emerald" />
+              </a>
+              <span>•</span>
+              <a href="/docs" className="hover:text-text-primary transition-colors">
+                Full Docs →
+              </a>
             </div>
           </motion.div>
 
@@ -267,6 +287,12 @@ export function SynapseHero() {
                   AST Graph (L1)
                 </button>
                 <button
+                  onClick={() => setActiveView("visual")}
+                  className={`px-3 py-1 rounded-md transition-all ${activeView === "visual" ? "bg-surface-hover text-accent-blue font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                >
+                  Visual Architecture
+                </button>
+                <button
                   onClick={() => setActiveView("mcp")}
                   className={`px-3 py-1 rounded-md transition-all ${activeView === "mcp" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
                 >
@@ -283,6 +309,23 @@ export function SynapseHero() {
 
             {/* Sandbox Content Area */}
             <div className="p-6 bg-[#0B0D14]">
+              {activeView === "visual" && (
+                <div className="relative rounded-xl overflow-hidden border border-border/80 shadow-2xl group">
+                  <img
+                    src="/synapse_hero_preview.jpg"
+                    alt="Synapse Structural Context Architecture Visualizer"
+                    className="w-full h-auto object-cover max-h-[460px] rounded-lg group-hover:scale-[1.01] transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#090A0F] via-transparent to-transparent opacity-80 pointer-events-none" />
+                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between p-3 rounded-lg bg-surface/90 backdrop-blur-md border border-white/10 text-xs font-mono">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-accent-emerald animate-pulse"></span>
+                      <span className="text-text-primary font-semibold">Deterministic Codebase Projection Active</span>
+                    </div>
+                    <span className="text-text-muted">Tree-sitter AST & Git Commit DAG synchronized</span>
+                  </div>
+                </div>
+              )}
               {activeView === "graph" && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   {/* Left: Node Selector */}
