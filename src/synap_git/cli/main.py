@@ -2230,6 +2230,119 @@ def memory_verify(
         console.print("\n[green]✓ All approved memory references are valid.[/green]")
 
 
+@memory_app.command("decisions")
+def memory_decisions(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    branch: Annotated[
+        str,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Branch name or 'all' to search all branches.",
+        ),
+    ] = "",
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum decisions to display.",
+        ),
+    ] = 10,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """List logged architectural decisions."""
+    runtime = SynapRuntime(_settings(path, json_output=json_output))
+    active_branch = branch if branch else runtime.status().branch
+    decisions = runtime.store.get_decisions(branch=active_branch if branch else None, limit=limit)
+
+    if json_output:
+        _emit({"decisions": decisions}, json_output=True)
+        return
+
+    if not decisions:
+        console.print(
+            f"[yellow]No logged decisions found for branch '{active_branch or 'all'}'.[/yellow]"
+        )
+        return
+
+    table = Table(
+        title=f"Logged Decisions ({active_branch or 'all branches'})",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Decision ID", style="dim")
+    table.add_column("Commit", style="dim")
+    table.add_column("Content")
+    table.add_column("Context")
+
+    for item in decisions:
+        table.add_row(
+            item.get("decision_id", "")[:12] + "…",
+            (item.get("commit_hash") or "")[:8],
+            (item.get("content") or "")[:45] + ("…" if len(item.get("content") or "") > 45 else ""),
+            (item.get("context") or "")[:35] + ("…" if len(item.get("context") or "") > 35 else ""),
+        )
+
+    console.print(table)
+
+
+@lessons_app.command("list")
+def lessons_list(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    status: Annotated[
+        str,
+        typer.Option(
+            "--status",
+            "-s",
+            help="Filter by status: pending, approved, rejected, or all.",
+        ),
+    ] = "all",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """List recorded architectural lessons."""
+    runtime = SynapRuntime(_settings(path, json_output=json_output))
+    lessons = runtime.store.get_lessons(status)
+
+    if json_output:
+        _emit({"lessons": lessons}, json_output=True)
+        return
+
+    if not lessons:
+        console.print(f"[yellow]No lessons found matching status '{status}'.[/yellow]")
+        return
+
+    table = Table(title=f"Synap Lessons ({status})", show_header=True, header_style="bold cyan")
+    table.add_column("Lesson ID", style="dim")
+    table.add_column("Status")
+    table.add_column("What Failed")
+    table.add_column("Why / Lesson")
+    table.add_column("Revert Commit", style="dim")
+
+    for item in lessons:
+        item_status = item.get("status", "unknown")
+        if item_status == "approved":
+            status_style = "[green]approved[/green]"
+        elif item_status == "pending":
+            status_style = "[yellow]pending[/yellow]"
+        elif item_status == "rejected":
+            status_style = "[red]rejected[/red]"
+        else:
+            status_style = item_status
+
+        table.add_row(
+            item.get("lesson_id", "")[:12] + "…",
+            status_style,
+            (item.get("what_failed") or "")[:40]
+            + ("…" if len(item.get("what_failed") or "") > 40 else ""),
+            (item.get("why_failed") or "")[:45]
+            + ("…" if len(item.get("why_failed") or "") > 45 else ""),
+            (item.get("revert_commit") or "")[:8],
+        )
+
+    console.print(table)
+
+
 @lessons_app.command("approve")
 def lessons_approve(
     lesson_id: Annotated[str, typer.Argument(help="The ID of the lesson to approve.")],

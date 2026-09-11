@@ -112,3 +112,60 @@ def memory_verify(
         console.print("[dim]Run `synap lessons reject <id>` to clean up stale memory.[/dim]")
     else:
         console.print("\n[green]✓ All approved memory references are valid.[/green]")
+
+
+@app.command("decisions")
+def memory_decisions(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    branch: Annotated[
+        str,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Branch name or 'all' to search all branches.",
+        ),
+    ] = "",
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum decisions to display.",
+        ),
+    ] = 10,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """List logged architectural decisions."""
+    runtime = SynapRuntime(_settings(path, json_output=json_output))
+    active_branch = branch if branch else runtime.status().branch
+    decisions = runtime.store.get_decisions(branch=active_branch if branch else None, limit=limit)
+
+    if json_output:
+        _emit({"decisions": decisions}, json_output=True)
+        return
+
+    if not decisions:
+        console.print(
+            f"[yellow]No logged decisions found for branch '{active_branch or 'all'}'.[/yellow]"
+        )
+        return
+
+    table = Table(
+        title=f"Logged Decisions ({active_branch or 'all branches'})",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Decision ID", style="dim")
+    table.add_column("Commit", style="dim")
+    table.add_column("Content")
+    table.add_column("Context")
+
+    for item in decisions:
+        table.add_row(
+            item.get("decision_id", "")[:12] + "…",
+            (item.get("commit_hash") or "")[:8],
+            (item.get("content") or "")[:45] + ("…" if len(item.get("content") or "") > 45 else ""),
+            (item.get("context") or "")[:35] + ("…" if len(item.get("context") or "") > 35 else ""),
+        )
+
+    console.print(table)

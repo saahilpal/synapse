@@ -658,12 +658,18 @@ class SynapStore:
             )
             return cursor.rowcount
 
-    def get_decisions(self, branch: str, limit: int = 10) -> list[dict[str, Any]]:
+    def get_decisions(self, branch: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM decisions WHERE branch = ? ORDER BY created_at DESC LIMIT ?",
-                (branch, limit),
-            ).fetchall()
+            if not branch or branch == "all":
+                rows = conn.execute(
+                    "SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM decisions WHERE branch = ? ORDER BY created_at DESC LIMIT ?",
+                    (branch, limit),
+                ).fetchall()
         return [dict(row) for row in rows]
 
     def get_latest_checkpoint(self, branch: str) -> dict[str, Any] | None:
@@ -730,10 +736,16 @@ class SynapStore:
     def get_lessons(self, status: str) -> list[dict[str, Any]]:
         now = int(datetime.now(UTC).timestamp())
         with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM lessons WHERE status = ? AND expires_at >= ? ORDER BY created_at DESC",
-                (status, now),
-            ).fetchall()
+            if status == "all":
+                rows = conn.execute(
+                    "SELECT * FROM lessons WHERE expires_at >= ? ORDER BY created_at DESC",
+                    (now,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM lessons WHERE status = ? AND expires_at >= ? ORDER BY created_at DESC",
+                    (status, now),
+                ).fetchall()
         return [dict(row) for row in rows]
 
     def get_activity(self, branch: str, limit: int = 50) -> list[dict[str, Any]]:

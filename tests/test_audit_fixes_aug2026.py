@@ -223,3 +223,80 @@ def test_synap_cost_and_usage_tracking(tmp_path: Path) -> None:
         result_usage = runner.invoke(app, ["usage", "show", str(tmp_path)])
         assert result_usage.exit_code == 0
         assert "Operational Cost & Usage Economics Summary" in result_usage.output
+
+
+def test_synap_lessons_list_command(tmp_path: Path) -> None:
+    """Verify synap lessons list outputs table and json."""
+    db_path = tmp_path / ".synap" / "synap.db"
+    store = SynapStore(db_path)
+    store.initialize()
+    from datetime import UTC, datetime
+
+    now = int(datetime.now(UTC).timestamp())
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from,
+                                 what_failed, why_failed, files_affected, status,
+                                 created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "les_test12345",
+                "main",
+                "abcdef12",
+                "12345678",
+                "Test failure description",
+                "Test reason and lesson",
+                json.dumps(["src/test.py"]),
+                "pending",
+                now,
+                now + 86400 * 30,
+            ),
+        )
+
+    with patch("synap_git.cli.main._verify_is_git"):
+        # Human table output
+        res = runner.invoke(app, ["lessons", "list", str(tmp_path)])
+        assert res.exit_code == 0
+        assert "Synap Lessons" in res.output
+        assert "les_test1234" in res.output
+        assert "Test failure" in res.output
+
+        # JSON output
+        res_json = runner.invoke(app, ["lessons", "list", str(tmp_path), "--json"])
+        assert res_json.exit_code == 0
+        data = json.loads(res_json.output)
+        assert "lessons" in data
+        assert len(data["lessons"]) == 1
+        assert data["lessons"][0]["lesson_id"] == "les_test12345"
+
+
+def test_synap_memory_decisions_command(tmp_path: Path) -> None:
+    """Verify synap memory decisions lists decisions in human table and json."""
+    db_path = tmp_path / ".synap" / "synap.db"
+    store = SynapStore(db_path)
+    store.initialize()
+    store.put_decision(
+        decision_id="dec_test98765",
+        branch="main",
+        commit_hash="c0ffee11",
+        content="Adopt SQLite WAL mode",
+        context_info="Ensures high concurrency",
+    )
+
+    with patch("synap_git.cli.main._verify_is_git"):
+        # Human table output
+        res = runner.invoke(app, ["memory", "decisions", str(tmp_path)])
+        assert res.exit_code == 0
+        assert "Logged Decisions" in res.output
+        assert "dec_test987" in res.output
+        assert "Adopt SQLite WAL mode" in res.output
+
+        # JSON output
+        res_json = runner.invoke(app, ["memory", "decisions", str(tmp_path), "--json"])
+        assert res_json.exit_code == 0
+        data = json.loads(res_json.output)
+        assert "decisions" in data
+        assert len(data["decisions"]) == 1
+        assert data["decisions"][0]["content"] == "Adopt SQLite WAL mode"
