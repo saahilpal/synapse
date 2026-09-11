@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.4.0] - 2026-08-14
+## [2.4.0] - 2026-09-11
+
+### Security, Protocol & Architecture Hardening (Audit Remediation)
+- **MCP Stdio Transport Isolation**: Added dedicated `synap mcp serve` command operating cleanly over stdio with zero logging pollution, error JSON-RPC handling, and clean SIGTERM/EOF exits.
+- **Structural Graph & Position-Independent Symbols**: Added stable symbol IDs unaffected by blank lines or docstrings, extended cross-file AST imports to 11 Tree-sitter grammars (TS/JS, Go, Rust, Java, C++, Ruby, PHP, C#), and hardened recursive CTE cycle handling with deduplication.
+- **Data Integrity & Memory**: Fixed Git revert detection via tree-delta comparisons, secured `synap rollback` against dirty working tree overwrites, and introduced persistent mid-repair backups (`.synap/repair_backup.json`).
+- **CLI Commands**: Added `synap lessons list [--json]` and `synap memory decisions [--json]`, with clean empty JSON array returns on uninitialized databases.
+- **Documentation & Website Parity**: Aligned documentation and landing page with exact 10 MCP tools, methodology-backed benchmarks, and comprehensive web architecture guides.
 
 ### Performance & Latency
 - **MCP Search Sub-10ms Retrieval (780x Speedup)**: Optimized MCP `search` latency from 7,200ms to 9.2ms by replacing slow synchronous LLM router calls with deterministic sub-millisecond intent classification, caching vector deserialization in SQLite, and providing direct context grounding for AI coding agents.
