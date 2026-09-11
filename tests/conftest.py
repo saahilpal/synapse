@@ -7,6 +7,7 @@ import traceback
 
 os.environ["SYNAP_PROFILE"] = "test"
 os.environ["SYNAP_LLM_PROVIDER"] = ""
+os.environ["SYNAP_EMBEDDING_PROVIDER"] = ""
 from typing import TYPE_CHECKING, Any
 
 import keyring
