@@ -1,64 +1,105 @@
-# L2 Wiki Engine
+---
+title: L2 Wiki Engine
+description: How Synapse asynchronously generates and maintains markdown documentation for your codebase.
+---
 
-The L2 Semantic layer provides human-readable markdown documentation for files, modules, and overall project structure under `.synap/wiki/`.
+The L2 layer maintains human-readable markdown summaries of files and modules under `.synap/wiki/`. Generation is fully **asynchronous** — it never blocks CLI commands, MCP responses, or AST indexing.
 
 ---
 
-## Architecture & Lifecycle
-
-Wiki documentation generation is decoupled from structural indexing to prevent slow LLM API calls from blocking CLI tools or AST traversals.
+## Architecture
 
 ```
-                  ┌──────────────────────────────┐
-                  │    Index File or Project     │
-                  └──────────────┬───────────────┘
-                                 │
-                            (Enqueues)
-                                 ▼
-                     ┌──────────────────────┐
-                     │ SQLite wiki_queue    │
-                     └───────────┬──────────┘
-                                 │
-                   (Processed asynchronously by)
-                                 ▼
-                    ┌────────────────────────┐
-                    │  Daemon Wiki Worker    │
-                    └────────────┬───────────┘
-                                 │
-                            (Generates)
-                                 ▼
-                       ┌──────────────────┐
-                       │  Markdown file   │
-                       │  (.synap/wiki/)  │
-                       └──────────────────┘
+  File Parsed / Project Initialized
+              │
+              ▼
+  wiki_queue table (SQLite)
+  ┌─────────────────────────────────┐
+  │ status=pending                  │
+  │ path=src/auth/service.py        │
+  │ attempts=0                      │
+  └─────────────────────────────────┘
+              │
+              │  Background worker polls every 5s
+              ▼
+  ┌─────────────────────────────────┐
+  │  Wiki Worker (_wiki_worker_loop)│
+  │                                 │
+  │  1. Pull pending job            │
+  │  2. Read symbol context (L1)    │
+  │  3. Call LLM provider           │
+  │  4. Write .synap/wiki/<file>.md │
+  │  5. Delete queue record         │
+  └─────────────────────────────────┘
+              │
+              ▼
+  .synap/wiki/src/auth/service.md
+  ┌─────────────────────────────────┐
+  │ # src/auth/service.py           │
+  │ ## AuthService                  │
+  │ Handles JWT issuance and        │
+  │ verification for API sessions.  │
+  │ ...                             │
+  └─────────────────────────────────┘
 ```
 
-### 1. Asynchronous Queue Worker (`_wiki_worker_loop`)
-When a file is parsed or project initialization runs, tasks are enqueued into the `wiki_queue` database table:
-* **Polling:** The daemon worker polls the database queue every 5 seconds for new `"pending"` jobs.
-* **Worker Execution:** Pulls a task, queries details, and invokes the configured LLM provider to draft technical details.
-* **Cleanup:** Once completed, the queue record is deleted.
+---
 
-### 2. Exponential Backoff & Failures
-If LLM generation fails (e.g. rate limit, connection timeout):
-* **Retries:** The task is re-inserted into the queue with status `"pending"` and increments the `attempts` count.
-* **Backoff delay:** Before retrying a previously failed task, the worker sleeps for an exponential duration:
-  ```python
-  delay = min(30, 2 ** attempts)
-  ```
-* **Permanent Failure:** After 3 failed attempts, the task is marked as `"failed"`. permanently failed wiki pages are not automatically retried and warning alerts are output on daemon start.
+## Retry & Failure Handling
 
-### 3. Lazy Caching Fallback
-If a developer requests a wiki page via the CLI (`synap wiki show`), the REST API endpoint (`/wiki/{filepath}`), or the MCP server, and the file is missing or marked stale:
-* Synap intercepts the call and runs `ensure_wiki_page` synchronously.
-* The LLM provider is invoked immediately, and the generated markdown is written to disk before returning the response.
+If an LLM call fails (rate limit, timeout, provider error):
 
-### 4. Structural Fallback Placeholder
-If no LLM provider is configured (running in structural Mode A):
-* `ensure_wiki_page` checks if the target markdown page exists.
-* If missing, it writes a lightweight placeholder:
-  ```markdown
-  # <filepath>
-  Structural mode only. No LLM configured.
-  ```
-* This prevents errors and ensures the client receives structured documentation output.
+| Attempt | Backoff Delay |
+|---|---|
+| 1st retry | 2 seconds |
+| 2nd retry | 4 seconds |
+| 3rd retry | 8 seconds |
+| After 3 failures | Marked `status=failed`, warning logged on next daemon start |
+
+Failed wiki jobs do not block other queue items. They are retried on next daemon start.
+
+---
+
+## Lazy On-Demand Generation
+
+When an agent calls `synap wiki show <file>` or an MCP tool requests a wiki page that doesn't exist yet, Synapse runs **synchronous generation** (`ensure_wiki_page`) — blocking until the page is written to disk, then returning it.
+
+---
+
+## Structural Mode (No LLM)
+
+If no LLM provider is configured (`synap init . --skip-llm`), Synapse writes placeholder files:
+
+```markdown
+# src/auth/service.py
+Structural mode only. Configure an LLM provider with `synap setup` to generate documentation.
+```
+
+This ensures the MCP `get_wiki` tool always returns a response rather than erroring.
+
+---
+
+## Wiki CLI Commands
+
+```bash
+# List all generated wiki pages
+synap wiki list .
+
+# View a specific wiki page in the terminal
+synap wiki show src/auth/service.py .
+```
+
+---
+
+## LLM Providers for Wiki
+
+Wiki generation uses the `llm_provider` and `llm_model` set during `synap setup`. Recommended providers:
+
+| Provider | Model | Cost |
+|---|---|---|
+| **Ollama** (recommended) | `qwen2.5-coder:14b` | Free (local) |
+| OpenAI | `gpt-4o-mini` | ~$0.0015/page |
+| Anthropic | `claude-3-haiku` | ~$0.0025/page |
+| Gemini | `gemini-2.0-flash-lite` | ~$0.0005/page |
+
+See [LLM Providers](/docs/providers) for full setup instructions.

@@ -2,6 +2,7 @@
   "title": "Synap Documentation",
   "pages": [
     "index",
+    "architecture",
     "cli",
     "configuration",
     "mcp",

@@ -1,74 +1,170 @@
-# L3 Behavioral Memory
+---
+title: L3 Memory System
+description: Checkpoints, decision logs, and behavioral lessons that persist across agent sessions.
+---
 
-The L3 layer represents stateful memory that allows AI coding agents to preserve progress across context refreshes and prevent repeating past development failures.
+The L3 layer provides stateful memory that survives context resets, branch switches, and session restarts. It prevents agents from repeating past mistakes and preserves progress across long-running tasks.
 
 ---
 
-## 1. Context Checkpoints
+## Three Memory Primitives
 
-Checkpoints store the state of active agent tasks to resume context without losing progress.
+### 1. Checkpoints
 
-* **Checkpoints Fields:**
-  * `checkpoint_id` (UUID string) — Primary key.
-  * `branch` (string) — Active Git branch.
-  * `commit_hash` (string) — Active Git OID.
-  * `doing` (string) — Description of the active agent task.
-  * `changed_files` (JSON array of strings) — File paths modified during the task.
-  * `next_step` (string) — Intent or planned next step.
-  * `blockers` (string) — Obstacles or errors encountered.
-  * `created_at` (integer timestamp) — Creation time.
-* **Periodic Checkpointing:** In addition to manual creation via the `checkpoint create` CLI command or MCP server, the runtime automatically generates a checkpoint every 10 commits to capture history.
+Snapshots of the current agent work state, scoped to the active Git branch and commit.
 
----
-
-## 2. Decision Log
-
-Decisions allow agents to document design choices and architectural details.
-
-* **Decisions Fields:**
-  * `decision_id` (UUID string) — Primary key.
-  * `branch` (string) — Active Git branch.
-  * `commit_hash` (string) — Active Git OID.
-  * `content` (string) — Rationale or description of the choice.
-  * `context` (string) — File context or logs leading to the decision.
-  * `agent_id` (string) — Identifier of the agent making the decision.
-  * `created_at` (integer timestamp) — Logged time.
-
----
-
-## 3. Agent Lessons (Trust & Lifecycle)
-
-Lessons prevent agents from repeating mistakes. If a commit made by an agent breaks the build or tests, and the developer runs `git revert`, Synap detects the event and prompts a review.
-
-### Lifecycle Diagram
 ```
-        git revert
-            │
-            ▼
-    ┌───────────────┐
-    │    PENDING    │
-    └───────┬───────┘
-            │
-      Human Review (Approve/Reject)
-            ├──────────────────────┐
-            ▼                      ▼
-    ┌───────────────┐      ┌───────────────┐
-    │   APPROVED    │      │   REJECTED    │
-    └───────┬───────┘      └───────────────┘
-            │
-      Expiry Reached (Pruned hourly/manually)
-            ▼
-    ┌───────────────┐
-    │    EXPIRED    │
-    └───────────────┘
+Agent starts working
+       │
+       │  every ~10 changes (or manually)
+       ▼
+synap checkpoint create . \
+  --doing "Refactoring JWT auth" \
+  --files "src/auth/service.py,tests/test_auth.py" \
+  --next-step "Run pytest" \
+  --blockers "None"
+       │
+       ▼
+ SQLite: checkpoints table
+ ┌─────────────────────────────────┐
+ │ checkpoint_id: 18f5e27a...      │
+ │ branch:        main             │
+ │ commit_hash:   d980cf7f...      │
+ │ doing:         Refactoring...   │
+ │ changed_files: [...]            │
+ │ next_step:     Run pytest       │
+ │ blockers:      None             │
+ │ created_at:    1716000000       │
+ └─────────────────────────────────┘
+       │
+       │  New session / context reset
+       ▼
+MCP: restore_checkpoint
+→ Returns latest checkpoint on current branch
+→ Agent resumes exactly where it left off
 ```
 
-### The Lesson Lifecycle
-1. **Automatic Detection:** The background daemon watches Git branch switches and commits. If the git change matches a revert type (e.g. `revert` detected using `git diff`), a new lesson is created in the SQLite database with status `"pending"`.
-2. **Analysis Submission:** The agent (using the `submit_lesson_analysis` MCP tool) or the developer updates the lesson with an explanation of why the change failed.
-3. **Governance & Approval:**
-   * Pending lessons are inactive.
-   * Developers must review lessons using `synap lessons review` or `synap lessons approve <id>`.
-   * When approved, the lesson transitions to `"approved"`, and the `approval_actor` is recorded (e.g. `"cli_user"` or `"mcp_agent"`).
-4. **Retrieval Gating:** During hybrid context retrieval, **only** approved, non-expired lessons are fetched. They are injected at the top of the context block as `# APPROVED SYSTEM MEMORY (CRITICAL: MUST ADHERE)` to instruct the model on what patterns to avoid.
-5. **Memory Expiration & Pruning:** Approved lessons carry a lifetime defined by the `lesson_expiry_days` setting (default: 7 days). Stale lessons are pruned hourly by the daemon or manually via `synap memory prune`, transitioning them to the `"expired"` state.
+**MCP tools**: `create_checkpoint`, `restore_checkpoint`
+**CLI**: `synap checkpoint create`, `synap checkpoint list`, `synap checkpoint restore latest`
+
+---
+
+### 2. Decision Log
+
+A permanent audit trail of architectural and design decisions made during development.
+
+```bash
+# Via MCP (agent calls this automatically)
+MCP: log_decision
+{
+  "decision": "Use SQLite WAL mode for concurrent access",
+  "rationale": "Allows concurrent readers without locking during index writes.",
+  "tags": ["architecture", "storage"]
+}
+
+# Via CLI
+synap decision list .
+```
+
+Decisions are injected into retrieval context when relevant queries arrive, giving future agents historical rationale for current design choices.
+
+---
+
+### 3. Agent Lessons (Revert Memory)
+
+The most powerful L3 primitive. Lessons prevent agents from repeating failures that required a `git revert`.
+
+```
+Developer runs: git revert <bad-commit>
+                    │
+                    ▼
+    Daemon detects revert pattern
+                    │
+                    ▼
+    ┌───────────────────────────┐
+    │   PENDING lesson created  │
+    │   (inactive, awaiting     │
+    │    human review)          │
+    └─────────────┬─────────────┘
+                  │
+     synap lessons review .
+                  │
+        ┌─────────┴──────────┐
+        ▼                    ▼
+  ┌──────────┐         ┌──────────┐
+  │ APPROVED │         │ REJECTED │
+  │ (active) │         │ (deleted)│
+  └────┬─────┘         └──────────┘
+       │
+       │  age > lesson_expiry_days (default: 7)
+       ▼
+  ┌──────────┐
+  │ EXPIRED  │
+  │ (pruned) │
+  └──────────┘
+```
+
+**Lifecycle rules:**
+- Pending lessons are **inactive** — agents cannot see them
+- Only **approved** lessons are injected into context
+- Lessons expire automatically after `lesson_expiry_days` (default: 7 days)
+- Expired lessons can be reviewed and re-approved if still relevant
+
+---
+
+## How Lessons Are Injected
+
+During every `search` call, approved lessons are prepended to the returned context block:
+
+```
+═══════════════════════════════════════════
+ APPROVED SYSTEM MEMORY — CRITICAL: ADHERE
+═══════════════════════════════════════════
+1. [main, approved] Do NOT write un-aliased columns in
+   Postgres migration scripts. The column name resolver
+   breaks with implicit aliases. files_affected: migrations/001.sql
+
+2. [main, approved] Always wrap async SQLite writes in
+   asyncio.to_thread(). Direct awaiting causes event loop blocking.
+   files_affected: src/storage/sqlite.py
+═══════════════════════════════════════════
+
+[Retrieved context follows...]
+```
+
+---
+
+## Memory CLI Commands
+
+```bash
+# Review pending lessons interactively
+synap lessons review .
+
+# Approve a specific lesson
+synap lessons approve <lesson-id> .
+
+# Reject a lesson (deletes it)
+synap lessons reject <lesson-id> .
+
+# Show memory statistics
+synap memory status .
+
+# Force-prune expired lessons
+synap memory prune .
+
+# Validate lesson file references are not dangling
+synap memory verify .
+```
+
+---
+
+## MCP Memory Tools
+
+| Tool | When to Call |
+|---|---|
+| `get_approved_memory` | **Always at session start** — load all active constraints |
+| `restore_checkpoint` | **Always at session start** — resume from last state |
+| `create_checkpoint` | Every ~10 significant changes, or before context-heavy operations |
+| `log_decision` | After making any architectural or design choice |
+| `submit_lesson_analysis` | When asked to explain a failed/reverted change |
+| `signal_low_context` | When token usage exceeds 60% of context window capacity |

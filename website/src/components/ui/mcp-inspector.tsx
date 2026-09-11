@@ -55,9 +55,8 @@ const MCP_TOOLS: McpTool[] = [
       params: {
         name: "log_decision",
         arguments: {
-          decision: "Use SQLite WAL mode and PRAGMA synchronous = NORMAL",
-          rationale: "Ensures concurrent async readers without blocking write transactions during Git re-indexing.",
-          tags: ["architecture", "storage", "sqlite"]
+          content: "Use SQLite WAL mode and PRAGMA synchronous = NORMAL",
+          context_info: "Ensures concurrent async readers without blocking write transactions during Git re-indexing."
         }
       }
     },
@@ -65,9 +64,8 @@ const MCP_TOOLS: McpTool[] = [
       jsonrpc: "2.0",
       id: 2,
       result: {
-        status: "logged",
-        decision_id: "dec_7f10a8",
-        active_constraints_count: 5
+        status: "success",
+        decision_id: "dec_7f10a8"
       }
     }
   },
@@ -93,34 +91,37 @@ const MCP_TOOLS: McpTool[] = [
       jsonrpc: "2.0",
       id: 3,
       result: {
-        status: "saved",
-        checkpoint_id: "chk_9a41b2",
-        timestamp: "2026-08-14T19:20:00Z"
+        status: "success",
+        checkpoint_id: "chk_9a41b2"
       }
     }
   },
   {
-    id: "get_memory",
-    name: "get_memory",
-    description: "Fetches active architectural constraints, approved revert lessons, and checkpoints.",
+    id: "get_approved_memory",
+    name: "get_approved_memory",
+    description: "Fetches verified and approved architectural lessons from L3 behavioral memory.",
     requestPayload: {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
       params: {
-        name: "get_memory",
-        arguments: {
-          limit: 10
-        }
+        name: "get_approved_memory",
+        arguments: {}
       }
     },
     responsePayload: {
       jsonrpc: "2.0",
       id: 4,
       result: {
-        approved_lessons: 4,
-        checkpoints: 2,
-        active_decisions: 8
+        status: "success",
+        lessons: [
+          {
+            lesson_id: "les_3f82a1",
+            what_failed: "Async main loop blocked by synchronous disk read",
+            why_failed: "Use asyncio.to_thread() for heavy file reads",
+            status: "approved"
+          }
+        ]
       }
     }
   }

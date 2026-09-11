@@ -1,66 +1,117 @@
-# Deterministic Indexing Architecture
+---
+title: Indexing Engine
+description: How Synapse's two-path deterministic AST indexing works.
+---
 
-Synap indexes code structure deterministically using a decoupled two-path indexing architecture.
+Synapse uses a **two-path deterministic indexing architecture** — one path for first-run full scans, another for sub-5ms incremental Git delta updates.
 
 ---
 
-## The Two-Path Design
-
-To scale across large repositories without introducing high CPU or disk I/O overhead, Synap splits indexing into two dedicated execution paths: first-run and incremental.
+## Two-Path Design
 
 ```
-                  ┌──────────────────────────────┐
-                  │      Git State Check         │
-                  └──────────────┬───────────────┘
-                                 │
-                   Is first run? / Rebuild forced?
-                   ┌─────────────┴─────────────┐
-                  YES                          NO
-          ┌────────▼────────┐          ┌───────▼────────┐
-          │ First-Run Index │          │  Incremental   │
-          │  (Full AST Scan)│          │   (Git Delta)  │
-          └────────┬────────┘          └───────┬────────┘
-                   │                           │
-                   └─────────────┬─────────────┘
-                                 ▼
-                     ┌──────────────────────┐
-                     │   SQLite Storage     │
-                     │ (Graph, FTS5, Wiki)  │
-                     └──────────────────────┘
+                   ┌───────────────────────┐
+                   │   Git State Monitor   │
+                   │  (HEAD / index / refs)│
+                   └──────────┬────────────┘
+                              │
+                 First run?   │   Commit shift?
+           ┌──────────────────┴──────────────────┐
+           │                                     │
+           ▼                                     ▼
+  ┌─────────────────────┐             ┌────────────────────┐
+  │  Full Index         │             │  Incremental Index │
+  │  (synap init)       │             │  (daemon watcher)  │
+  │                     │             │                    │
+  │  ProcessPoolExecutor│             │  git diff-tree     │
+  │  500 files/chunk    │             │  (delta only)      │
+  │  All CPU cores      │             │  Changed files     │
+  └──────────┬──────────┘             └─────────┬──────────┘
+             │                                  │
+             └──────────────┬───────────────────┘
+                            ▼
+               ┌────────────────────────┐
+               │   SQLite WAL Database  │
+               │   (.synap/synap.db)    │
+               │                        │
+               │  ● symbols             │
+               │  ● edges               │
+               │  ● files               │
+               │  ● symbols_fts (FTS5)  │
+               │  ● wiki_queue          │
+               └────────────────────────┘
 ```
-
-### 1. First-Run Indexing (`_first_run_index`)
-Invoked when initializing a repository (`synap init`) or when index rebuilding is forced.
-* **Scanner Discovery:** Walks the repository tree, completely ignoring files and folders specified in `.gitignore` or default exclusions (`.venv`, `node_modules`, `dist`, etc.).
-* **Process-Pool Concurrency:** Uses `ProcessPoolExecutor` to parse codebase ASTs in parallel. Work is divided into chunks (500 files per chunk) processed across all available CPU cores.
-* **Pass 1 (AST Symbol Parsing):** Runs tree-sitter parsers to extract symbols (classes, functions, methods, modules). Generates stable, collision-free identifiers for symbols based on a `sha256(path + name + kind + start_line)` hash.
-* **Pass 2 (Bulk Edge Resolution):** Resolves imports and links dependency edges (`depends_on`) between caller and callee modules. Grouped queries are performed in batch transactions to minimize DB connections.
-* **Wiki Enqueuing:** Places files and project summaries (`overview.md`, `architecture.md`, `schema.md`) into the `wiki_queue` for asynchronous background generation.
-
-### 2. Incremental Indexing (`_incremental_index`)
-Invoked by the background daemon watcher when a Git commit or file change is detected.
-* **Git Delta Detection:** Rather than reading all files, Synap executes:
-  ```bash
-  git diff-tree -r --no-commit-id --name-status <prev_commit> <current_commit>
-  ```
-  This immediately isolates added, modified, or deleted paths.
-* **Selective AST Updates:** Only changed files are read and parsed by the Tree-sitter engine. Stale symbols for deleted or modified files are cleanly removed from SQLite tables.
-* **Incremental Edge Resolution:** Re-resolves call and dependency edges strictly for symbols defined in changed files, preserving the rest of the graph structure.
 
 ---
 
-## Exclusions & Controls
+## Path 1: Full Indexing (`synap init`)
 
-* **GitIgnore Spec:** Synap implements a custom glob-to-regex matcher to follow `.gitignore` specifications exactly.
-* **Binary File Filtering:** Synap uses a file extension blocklist coupled with a control character ratio check (scans the first 1KB of content; if control characters exceed 10%, it is treated as binary) to bypass non-text content.
-* **Size Limits:** Files exceeding `max_file_bytes` (default 1MB) are completely skipped.
+Triggered on first initialization or when `--force` is passed.
+
+### Scanner Discovery
+Walks the entire repository tree, respecting `.gitignore` rules via a custom glob-to-regex matcher. Skips:
+- `.venv/`, `node_modules/`, `dist/`, `build/`, `__pycache__/`
+- Files larger than `max_file_bytes` (default: 1MB)
+- Binary files (detected via control character ratio check on first 1KB)
+
+### Parallel Processing
+Files are split into 500-file chunks and distributed across all CPU cores using `ProcessPoolExecutor`. Each worker runs Tree-sitter in a subprocess with no GIL contention.
+
+### Pass 1 — AST Symbol Extraction
+For each file, Tree-sitter generates a concrete syntax tree. The extractor pulls:
+- `function_definition`, `class_definition`, `method_definition`
+- `import_statement`, `import_from_statement`
+- Module-level variable assignments
+
+Each symbol gets a **stable, collision-free ID**:
+```python
+symbol_id = sha256(f"{path}:{name}:{kind}:{start_line}").hexdigest()[:16]
+```
+
+### Pass 2 — Edge Resolution
+After all symbols are inserted, a second pass resolves import paths to actual file paths and inserts `depends_on` edges into the `edges` table. Batched via `executemany` transactions.
+
+### Wiki Enqueuing
+Files and project-level summaries (`overview.md`, `architecture.md`, `schema.md`) are enqueued into `wiki_queue` for background async generation.
+
+---
+
+## Path 2: Incremental Indexing (Daemon)
+
+Triggered automatically by the background daemon when a Git commit shift is detected.
+
+### Git Delta Detection
+
+Instead of reading all files, Synapse executes:
+```bash
+git diff-tree -r --no-commit-id --name-status <prev_commit> <current_commit>
+```
+
+This immediately returns only the files that changed — typically 2–20 files per commit.
+
+### Selective AST Update
+Only the changed files are re-parsed. Stale symbols for modified or deleted files are removed atomically before new symbols are inserted — preventing ghost symbols.
+
+### Incremental Edge Re-resolution
+Only edges referencing changed-file symbols are re-computed. The rest of the dependency graph is preserved unchanged.
+
+**Typical incremental latency: 3–7ms total.**
 
 ---
 
 ## SQLite Optimizations
 
-Synap applies high-throughput configurations to the SQLite indexing backend:
-* **WAL Mode:** The database is initialized with `PRAGMA journal_mode=WAL` to allow concurrent readers and writers to access the database without locking.
-* **Batch Inserts:** Inserts and deletes are wrapped in transaction blocks, executing symbol and edge insertions via `executemany` arrays.
-* **FTS5 Integration:** Synap maintains a virtual table `symbols_fts` using SQLite FTS5 for sub-millisecond keyword symbol queries, avoiding slow wildcard `LIKE` queries.
-* **Module Key Resolution:** Pre-computes and indexes a dot-separated `module_key` for every file (e.g. `src.utils.serialization`), allowing $O(1)$ module lookup.
+| Optimization | Detail |
+|---|---|
+| WAL Mode | `PRAGMA journal_mode=WAL` — concurrent readers never block the writer |
+| Synchronous Normal | `PRAGMA synchronous=NORMAL` — safe crash recovery without fsync on every write |
+| Batch Inserts | All symbol inserts use `executemany` in a single transaction |
+| FTS5 Virtual Table | `symbols_fts` for sub-millisecond BM25 keyword search |
+| Module Key Index | Pre-computed `module_key` (e.g. `src.auth.service`) for O(1) module lookups |
+| LRU Cache | Vector dot-products cached in memory to avoid recomputing embeddings |
+
+---
+
+## Supported Languages
+
+Tree-sitter grammars are bundled for: Python, TypeScript, TSX, JavaScript, JSX, Rust, Go, C, C++, C#, Java, Kotlin, Swift, Scala, Ruby, PHP, Bash, SQL, Markdown, JSON, TOML, YAML, HTML, and CSS.

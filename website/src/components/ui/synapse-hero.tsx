@@ -55,7 +55,7 @@ const GRAPH_NODES: GraphNode[] = [
   },
   {
     id: "node-3",
-    name: "sqlite_vec (WAL)",
+    name: "SQLite WAL + FTS5",
     type: "table",
     layer: "L1",
     connections: [],

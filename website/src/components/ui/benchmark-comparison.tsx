@@ -42,14 +42,14 @@ export function BenchmarkComparison() {
           <div className="lg:col-span-7 minimal-card p-6 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-border">
-                <span className="font-mono text-xs text-text-muted">Agent MCP Search Latency Benchmark</span>
+                <span className="font-mono text-xs text-text-muted">Agent Context Retrieval Latency (Profiled)</span>
                 <button
                   onClick={runBenchmark}
                   disabled={isRunningBenchmark}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-surface border border-border text-xs font-mono text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isRunningBenchmark ? "animate-spin text-accent-blue" : ""}`} />
-                  <span>Run Live Benchmark</span>
+                  <span>Replay Benchmark Profile</span>
                 </button>
               </div>
 
@@ -119,8 +119,8 @@ export function BenchmarkComparison() {
               </div>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-border flex items-center justify-between text-text-muted text-[11px] font-mono">
-              <span>Grounding verified with Cursor & Claude Code</span>
+            <div className="mt-6 pt-4 border-t border-border flex flex-wrap items-center justify-between gap-2 text-text-muted text-[11px] font-mono">
+              <span>Profiled on local SQLite WAL engine • Reproduce via <code className="text-[10px] text-text-secondary bg-surface px-1 py-0.5 rounded border border-border">pytest tests/benchmark_grounding.py</code></span>
               <span className="text-text-secondary flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-accent-emerald" /> 0 Cloud API Calls
               </span>
