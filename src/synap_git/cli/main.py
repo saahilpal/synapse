@@ -1838,6 +1838,34 @@ def run(
     start(path)
 
 
+@mcp_app.command("serve")
+def mcp_serve(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Run FastMCP stdio server in foreground for AI agents."""
+    _verify_is_git(path)
+    import asyncio
+    import os
+
+    from synap_git.mcp.server import SynapMCPServer
+
+    settings = _settings(path, json_output=True)
+    runtime = SynapRuntime(settings)
+    server = SynapMCPServer(runtime)
+    try:
+        asyncio.run(server.run())
+    except KeyboardInterrupt:
+        os._exit(0)
+
+
+@mcp_app.command("start")
+def mcp_start(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Alias for 'synap mcp serve' to run FastMCP stdio server in foreground."""
+    mcp_serve(path)
+
+
 @mcp_app.command("config")
 def mcp_config(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
@@ -1848,7 +1876,10 @@ def mcp_config(
 
     config = {
         "mcpServers": {
-            "synap": {"command": sys.executable, "args": ["-m", "synap_git.cli", "start", abs_path]}
+            "synap": {
+                "command": sys.executable,
+                "args": ["-m", "synap_git.cli", "mcp", "serve", abs_path],
+            }
         }
     }
     typer.echo(json.dumps(config, indent=2))

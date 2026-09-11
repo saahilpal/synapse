@@ -1,233 +1,236 @@
-# Model Context Protocol (MCP) Integration
+---
+title: MCP Setup
+description: Connect Cursor, Claude Code, Windsurf, or any MCP-compatible agent to Synapse.
+---
 
-Synap exposes a suite of tools through the standard Model Context Protocol (MCP) using a Stdio transport. This allows AI coding agents in environments like Cursor or Windsurf to ground their actions in codebase context.
+Synapse exposes all retrieval tools via the **Model Context Protocol (MCP)** over stdio. Your IDE agent communicates with Synapse using standard JSON-RPC 2.0 messages.
 
 ---
 
-## Connection Configuration
+## Step 1: Initialize & Start
 
-Generate the connection parameters using:
+```bash
+synap init .      # Build the AST graph (one-time)
+synap start .     # Start the background daemon
+```
+
+## Step 2: Get Your Config
+
 ```bash
 synap mcp config .
 ```
 
-Copy the generated block into your IDE settings under MCP Servers:
+This prints the exact JSON snippet for your IDE. Copy it directly.
+
+---
+
+## IDE Setup
+
+### Cursor
+
+Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for global):
+
 ```json
 {
   "mcpServers": {
-    "synap": {
-      "command": "/usr/local/bin/python",
-      "args": ["-m", "synap_git.cli", "mcp", "start", "/Users/username/project"],
+    "synapse": {
+      "command": "synap",
+      "args": ["mcp", "serve", "/absolute/path/to/your/repo"],
       "autoConnect": true
     }
   }
 }
 ```
 
+### Claude Code
+
+```bash
+claude mcp add synapse synap -- mcp serve /absolute/path/to/your/repo
+```
+
+### Windsurf
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "synapse": {
+      "command": "synap",
+      "args": ["mcp", "serve", "/absolute/path/to/your/repo"]
+    }
+  }
+}
+```
+
+### Roo Code / Cline
+
+In the MCP Servers panel, add:
+- **Command**: `synap`
+- **Args**: `mcp serve /absolute/path/to/your/repo`
+
 ---
 
-## Deterministic JSON Envelope
+## Response Envelope
 
-Every MCP tool invocation returns a JSON string structured inside a standardized envelope.
+Every MCP tool returns a standardized JSON envelope:
 
-### Successful Response Schema
 ```json
 {
   "ok": true,
-  "data": {},
+  "data": { ... },
   "warnings": [],
   "trace_id": "8b51d087-93e1-4560-9304-c36b412ee17f",
   "dirty_tree": false
 }
 ```
-* `data` — The payload returned by the specific tool.
-* `warnings` — List of warnings (e.g. `["Working tree is dirty. Index may be stale."]`).
-* `dirty_tree` — Boolean flag indicating whether the Git working directory contains uncommitted changes.
 
-### Error Response Schema
+| Field | Description |
+|---|---|
+| `ok` | `true` on success, `false` on error |
+| `data` | Tool-specific payload |
+| `warnings` | Non-fatal issues (e.g. stale index) |
+| `trace_id` | UUID for debugging |
+| `dirty_tree` | Whether the working tree has uncommitted changes |
+
+**Error response:**
 ```json
 {
   "ok": false,
   "error": {
     "code": "NOT_FOUND",
     "message": "No checkpoint found for current branch.",
-    "suggestion": "Ensure checkpoints exist for this branch."
-  },
-  "warnings": [],
-  "trace_id": "8b51d087-93e1-4560-9304-c36b412ee17f",
-  "dirty_tree": false
+    "suggestion": "Run synap checkpoint create . first."
+  }
 }
 ```
-* `error.code` — Standardized codes: `INTERNAL_ERROR`, `INDEX_STALE`, or `NOT_FOUND`.
+
+Error codes: `INTERNAL_ERROR`, `INDEX_STALE`, `NOT_FOUND`
 
 ---
 
 ## Tool Reference
 
-### 1. `get_status`
-Retrieves indexing state, branch name, and HEAD commit hashes.
-* **Input Schema:** None
-* **Output Payload (`data`):**
-  ```json
-  {
-    "repository_path": "/Users/username/project",
-    "branch": "main",
-    "git_commit": "d980cf7f4f6b2ea8b75e1c4df2e9d2d854eb75e1",
-    "active_commit": "d980cf7f4f6b2ea8b75e1c4df2e9d2d854eb75e1",
-    "symbols": 420,
-    "files": 38,
-    "mode": "active",
-    "is_dirty": false
-  }
-  ```
+### `search`
+Hybrid AST + FTS5 + vector retrieval. The primary tool agents should call for code context.
 
-### 2. `search`
-Queries the hybrid index for grounded context matches.
-* **Input Schema:**
-  * `query` (string, required): Keyword or phrase search terms.
-  * `max_tokens` (integer, optional, default: 4000): Token limit budget.
-* **Output Payload (`data`):**
-  ```json
-  {
-    "result": "Grounded answer text summarizing source symbols...",
-    "context": [
-      {
-        "symbol_id": "8c599187a...",
-        "name": "parse_args",
-        "kind": "function_definition",
-        "start_line": 12,
-        "end_line": 28,
-        "source_path": "src/cli.py",
-        "reason": "lexical:'parse_args'"
-      }
-    ],
-    "trace": {
-      "trace_id": "2d1b09b5-...",
-      "latency_ms": 142.5,
-      "nodes_explored": 8,
-      "tokens_used": 1240
+**Input:**
+```json
+{ "query": "AuthService.verify_jwt", "max_tokens": 4000 }
+```
+
+**Response `data`:**
+```json
+{
+  "context": [
+    {
+      "name": "verify_jwt",
+      "kind": "function_definition",
+      "file": "src/auth/service.py",
+      "start_line": 45,
+      "end_line": 56,
+      "source_text": "def verify_jwt(token: str) -> Claims:\n    ...",
+      "reason": "ast:exact_symbol"
     }
+  ],
+  "trace": {
+    "latency_ms": 9.2,
+    "tokens_used": 420,
+    "nodes_explored": 8
   }
-  ```
+}
+```
 
-### 3. `create_checkpoint`
-Saves current agent thoughts and files as a branch-specific checkpoint.
-* **Input Schema:**
-  * `doing` (string, required): Action description.
-  * `changed_files` (array of strings, required): Relative file paths.
-  * `next_step` (string, required): Future planned steps.
-  * `blockers` (string, required): Blockers or obstacles.
-* **Output Payload (`data`):**
-  ```json
-  {
-    "status": "success",
-    "checkpoint_id": "18f5e27a-5b12-4011-b124-7fcd491baee2"
-  }
-  ```
+### `get_status`
+Current indexing state and daemon health.
 
-### 4. `restore_checkpoint`
-Restores the latest checkpoint saved on the current branch.
-* **Input Schema:** None
-* **Output Payload (`data`):**
-  ```json
-  {
-    "checkpoint_id": "18f5e27a-5b12-4011-b124-7fcd491baee2",
-    "branch": "main",
-    "commit_hash": "d980cf7...",
-    "doing": "Refactoring API",
-    "changed_files": "[\"src/api.py\"]",
-    "next_step": "Run tests",
-    "blockers": "None",
-    "created_at": 1716000000
-  }
-  ```
+**Response `data`:**
+```json
+{
+  "branch": "main",
+  "git_commit": "d980cf7f...",
+  "symbols": 8421,
+  "files": 1120,
+  "mode": "active",
+  "is_dirty": false
+}
+```
 
-### 5. `log_decision`
-Logs technical or design decisions to the project database logs.
-* **Input Schema:**
-  * `content` (string, required): Text description of the decision.
-  * `context_info` (string, required): Contextual info leading to the decision.
-* **Output Payload (`data`):**
-  ```json
-  {
-    "status": "success",
-    "decision_id": "9a01cf5b-7c18-4012-9c10-8b1e4cfb395b"
-  }
-  ```
+### `create_checkpoint`
+Save current agent progress as an L3 checkpoint.
 
-### 6. `verify_system`
-Checks SQLite database integrity and returns diagnostics.
-* **Input Schema:** None
-* **Output Payload (`data`):**
-  ```json
-  {
-    "database_integrity": "ok",
-    "status": {
-      "branch": "main",
-      "symbols": 420,
-      "files": 38
-    }
-  }
-  ```
+**Input:**
+```json
+{
+  "doing": "Refactoring JWT auth service",
+  "changed_files": ["src/auth/service.py"],
+  "next_step": "Run pytest tests/test_auth.py",
+  "blockers": "None"
+}
+```
 
-### 7. `submit_lesson_analysis`
-Submits analysis text explaining a failure or revert event to the pending memory queue.
-* **Input Schema:**
-  * `lesson_id` (string, required): Unique identifier of the lesson.
-  * `why_failed` (string, required): Root cause analysis explaining why the code failed.
-* **Output Payload (`data`):**
-  ```json
-  {
-    "status": "success",
-    "message": "Lesson awaiting human approval"
-  }
-  ```
+### `restore_checkpoint`
+Fetch the latest checkpoint on the current branch. Call at session start to resume work.
 
-### 8. `get_approved_memory`
-Retrieves all approved, active memory lessons that the agent must adhere to.
-* **Input Schema:** None
-* **Output Payload (`data`):**
-  ```json
-  {
-    "status": "success",
-    "lessons": [
-      {
-        "lesson_id": "1fa30b5...",
-        "branch": "main",
-        "revert_commit": "c4d0a92...",
-        "reverted_from": "a1b2c3d...",
-        "what_failed": "Database migration script syntax error",
-        "why_failed": "Do not write un-aliased columns in postgres migration scripts.",
-        "files_affected": "[\"migrations/001.sql\"]",
-        "status": "approved",
-        "created_at": 1716000000,
-        "expires_at": 1716604800,
-        "approval_actor": "cli_user"
-      }
-    ]
-  }
-  ```
+### `log_decision`
+Record an architectural decision into L3 permanent memory.
 
-### 9. `get_pending_memory`
-Retrieves all pending lessons awaiting review.
-* **Input Schema:** None
-* **Output Payload (`data`):**
-  ```json
-  {
-    "status": "success",
-    "lessons": []
-  }
-  ```
+**Input:**
+```json
+{
+  "decision": "Use SQLite WAL mode for concurrent daemon access",
+  "rationale": "Allows readers and the indexer to work simultaneously without locking.",
+  "tags": ["architecture", "storage"]
+}
+```
 
-### 10. `signal_low_context`
-Notifies that the agent's context is running low, recommending a checkpoint if usage exceeds config threshold.
-* **Input Schema:**
-  * `token_count` (integer, required): Active token usage count.
-  * `capacity` (integer, required): Context window limit.
-* **Output Payload (`data`):**
-  ```json
-  {
-    "should_checkpoint": true,
-    "message": "Context usage is at 74.0%. Threshold (60.0%) reached. Checkpoint recommended."
-  }
-  ```
+### `get_approved_memory`
+Retrieve all active L3 lessons the agent must adhere to. Always call this at session start.
+
+### `get_pending_memory`
+Retrieve lessons awaiting human review.
+
+### `submit_lesson_analysis`
+Submit a root-cause explanation for a failed/reverted commit.
+
+**Input:**
+```json
+{
+  "lesson_id": "1e2c345d-...",
+  "why_failed": "Used un-aliased columns in the migration script, breaking the column name resolution."
+}
+```
+
+### `verify_system`
+Run database integrity checks and return diagnostics.
+
+### `signal_low_context`
+Notify Synapse when the agent's context window is running low. Synapse will recommend checkpointing.
+
+**Input:**
+```json
+{ "token_count": 45000, "capacity": 60000 }
+```
+
+---
+
+## System Prompt Template
+
+Paste this into your IDE's system prompt or `.cursorrules`:
+
+```
+You have access to a Synapse MCP server providing local codebase context.
+
+At the start of every session:
+1. Call get_approved_memory — adhere strictly to all returned lessons
+2. Call restore_checkpoint — resume from where you left off
+3. Call get_status — verify the index is current
+
+During work:
+- Use search before writing any code that touches existing symbols
+- Call log_decision when making architectural choices
+- Call create_checkpoint every ~10 significant changes
+- Call signal_low_context when your token usage exceeds 60%
+
+Never modify files that appear in approved lessons' files_affected without explicit user approval.
+```
