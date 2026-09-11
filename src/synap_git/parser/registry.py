@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -92,6 +93,7 @@ class CodeParserRegistry:
 
         symbols: list[CodeSymbol] = []
         imports: list[str] = []
+        symbol_counts: defaultdict[tuple[str, str, str], int] = defaultdict(int)
 
         def extract_text(node: Node | None) -> str | None:
             if not node:
@@ -144,8 +146,8 @@ class CodeParserRegistry:
 
                                 find_names(child)
                         if imported_names:
-                            for name in imported_names:
-                                imports.append(f"{mod_name}:{name}")
+                            for n_name in imported_names:
+                                imports.append(f"{mod_name}:{n_name}")
                         else:
                             imports.append(mod_name)
                 elif kind == "import_statement":
@@ -155,7 +157,7 @@ class CodeParserRegistry:
                             if imp_name:
                                 imports.append(imp_name)
 
-            elif lang_name in ("javascript", "tsx"):
+            elif lang_name in ("javascript", "tsx", "typescript"):
                 # Capturing classes, functions, methods, interfaces, and types
                 if kind in (
                     "class_declaration",
@@ -177,7 +179,18 @@ class CodeParserRegistry:
                 elif kind == "import_statement":
                     src = extract_text(node.child_by_field_name("source"))
                     if src:
-                        imports.append(src.strip("'\""))
+                        imports.append(src.strip("'\"`"))
+                elif kind == "call_expression":
+                    fn_node = node.child_by_field_name("function")
+                    fn_name = extract_text(fn_node)
+                    if fn_name == "require":
+                        args = node.child_by_field_name("arguments")
+                        if args and args.children:
+                            for ac in args.children:
+                                if ac.type in ("string", "string_fragment"):
+                                    s_val = extract_text(ac)
+                                    if s_val:
+                                        imports.append(s_val.strip("'\"`"))
 
             elif lang_name == "go":
                 if kind in ("function_declaration", "method_declaration", "type_spec"):
@@ -194,6 +207,12 @@ class CodeParserRegistry:
                         t_name = extract_text(node.child_by_field_name("type"))
                         if t_name:
                             name = "impl " + t_name
+                elif kind == "use_declaration":
+                    txt = extract_text(node)
+                    if txt:
+                        clean = txt.strip().removeprefix("use").removesuffix(";").strip()
+                        if clean:
+                            imports.append(clean)
 
             elif lang_name == "java":
                 if kind in (
@@ -203,6 +222,20 @@ class CodeParserRegistry:
                     "enum_declaration",
                 ):
                     name = extract_text(node.child_by_field_name("name"))
+                elif kind == "import_declaration":
+                    txt = extract_text(node)
+                    if txt:
+                        clean = (
+                            txt.strip()
+                            .removeprefix("import")
+                            .strip()
+                            .removeprefix("static")
+                            .strip()
+                            .removesuffix(";")
+                            .strip()
+                        )
+                        if clean:
+                            imports.append(clean)
 
             elif lang_name == "cpp":
                 if kind in ("function_definition", "class_specifier", "struct_specifier"):
@@ -212,10 +245,44 @@ class CodeParserRegistry:
                         declarator = node.child_by_field_name("declarator")
                         if declarator:
                             name = extract_text(declarator.child_by_field_name("declarator"))
+                elif kind == "preproc_include":
+                    for child in node.children:
+                        if child.type in ("system_lib_string", "string_literal"):
+                            inc_text = extract_text(child)
+                            if inc_text:
+                                imports.append(inc_text.strip("<\">'"))
+
+            elif lang_name == "c":
+                if kind in ("function_definition", "struct_specifier", "enum_specifier"):
+                    name = extract_text(node.child_by_field_name("name"))
+                    if not name:
+                        declarator = node.child_by_field_name("declarator")
+                        if declarator:
+                            name = extract_text(declarator.child_by_field_name("declarator"))
+                elif kind == "preproc_include":
+                    for child in node.children:
+                        if child.type in ("system_lib_string", "string_literal"):
+                            inc_text = extract_text(child)
+                            if inc_text:
+                                imports.append(inc_text.strip("<\">'"))
 
             elif lang_name == "ruby":
                 if kind in ("class", "module", "method"):
                     name = extract_text(node.child_by_field_name("name"))
+                elif kind == "call":
+                    fn = extract_text(node.child_by_field_name("name")) or extract_text(
+                        node.child_by_field_name("method")
+                    )
+                    if not fn and node.children:
+                        fn = extract_text(node.children[0])
+                    if fn in ("require", "require_relative"):
+                        args = node.child_by_field_name("arguments") or (
+                            node.children[1] if len(node.children) > 1 else None
+                        )
+                        if args:
+                            arg_text = extract_text(args)
+                            if arg_text:
+                                imports.append(arg_text.strip("() \"'"))
 
             elif lang_name == "c_sharp":
                 if kind in (
@@ -226,6 +293,20 @@ class CodeParserRegistry:
                     "enum_declaration",
                 ):
                     name = extract_text(node.child_by_field_name("name"))
+                elif kind == "using_directive":
+                    txt = extract_text(node)
+                    if txt:
+                        clean = (
+                            txt.strip()
+                            .removeprefix("using")
+                            .strip()
+                            .removeprefix("static")
+                            .strip()
+                            .removesuffix(";")
+                            .strip()
+                        )
+                        if clean:
+                            imports.append(clean)
 
             elif lang_name == "php":
                 if kind in (
@@ -236,6 +317,28 @@ class CodeParserRegistry:
                     "trait_declaration",
                 ):
                     name = extract_text(node.child_by_field_name("name"))
+                elif kind in ("namespace_use_declaration", "use_declaration"):
+                    has_clause = False
+                    for clause in node.children:
+                        if clause.type == "namespace_use_clause":
+                            has_clause = True
+                            u_text = extract_text(clause)
+                            if u_text:
+                                imports.append(u_text.strip("\\;"))
+                    if not has_clause:
+                        txt = extract_text(node)
+                        if txt:
+                            clean = (
+                                txt.strip()
+                                .removeprefix("use")
+                                .strip()
+                                .removeprefix("function")
+                                .strip()
+                                .removesuffix(";")
+                                .strip()
+                            )
+                            if clean:
+                                imports.append(clean.strip("\\"))
 
             elif lang_name == "kotlin":
                 if kind in (
@@ -245,6 +348,12 @@ class CodeParserRegistry:
                     "interface_declaration",
                 ):
                     name = extract_text(node.child_by_field_name("name"))
+                elif kind == "import_header":
+                    txt = extract_text(node)
+                    if txt:
+                        clean = txt.strip().removeprefix("import").strip()
+                        if clean:
+                            imports.append(clean)
 
             elif lang_name == "scala":
                 if kind in (
@@ -254,26 +363,48 @@ class CodeParserRegistry:
                     "trait_definition",
                 ):
                     name = extract_text(node.child_by_field_name("name"))
-
-            elif lang_name == "c":
-                if kind in ("function_definition", "struct_specifier", "enum_specifier"):
-                    name = extract_text(node.child_by_field_name("name"))
-                    if not name:
-                        declarator = node.child_by_field_name("declarator")
-                        if declarator:
-                            name = extract_text(declarator.child_by_field_name("declarator"))
+                elif kind == "import_declaration":
+                    txt = extract_text(node)
+                    if txt:
+                        clean = txt.strip().removeprefix("import").strip()
+                        if clean:
+                            imports.append(clean)
 
             if name:
                 # Compute hash of the node's subtree for change detection
                 ast_content = extract_text(node) or ""
                 ast_hash = stable_hash(ast_content)
 
-                # Ensure uniqueness by appending start/end lines if needed, but for now we rely on name/kind
-                # since stable_id uses path, name, kind. Wait, if multiple methods have same name (e.g. overloads)
-                # it will duplicate. Let's include start_line in stable_id to prevent IntegrityError!
+                # Deterministic disambiguation across same name+kind without coupling to volatile line numbers
+                sym_key = (relative_path, name, kind)
+                symbol_counts[sym_key] += 1
                 sym_id = stable_hash(
-                    {"path": relative_path, "name": name, "kind": kind, "line": node.start_point[0]}
+                    {
+                        "path": relative_path,
+                        "name": name,
+                        "kind": kind,
+                        "index": symbol_counts[sym_key],
+                    }
                 )
+
+                # Extract identifier references within this symbol
+                refs: set[str] = set()
+
+                def collect_refs(n: Node) -> None:
+                    if n.type in (
+                        "identifier",
+                        "type_identifier",
+                        "scoped_identifier",
+                        "property_identifier",
+                        "field_identifier",
+                    ):
+                        txt = extract_text(n)
+                        if txt and txt != name:
+                            refs.add(txt)
+                    for c in n.children:
+                        collect_refs(c)
+
+                collect_refs(node)
 
                 symbols.append(
                     CodeSymbol(
@@ -284,6 +415,7 @@ class CodeParserRegistry:
                         start_line=node.start_point[0] + 1,
                         end_line=node.end_point[0] + 1,
                         ast_hash=ast_hash,
+                        metadata={"refs": sorted(refs)},
                     )
                 )
 

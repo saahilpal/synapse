@@ -446,12 +446,34 @@ class SynapStore:
         return [dict(row) for row in rows]
 
     def get_neighborhood(
-        self, symbol_id: str, depth: int = 2, max_neighbors: int = 50
+        self,
+        symbol_id: str,
+        depth: int = 2,
+        max_neighbors: int = 50,
+        direction: str = "downstream",
     ) -> list[dict[str, Any]]:
-        """Use Recursive CTE for SQL-side graph traversal."""
+        """Use Recursive CTE for directed SQL-side graph traversal."""
         with self.connect() as conn:
-            rows = conn.execute(
+            params: tuple[Any, ...]
+            if direction == "upstream":
+                query = """
+                WITH RECURSIVE neighborhood(id, d) AS (
+                    SELECT ? as id, 0 as d
+                    UNION
+                    SELECT source_symbol, d + 1
+                    FROM edges JOIN neighborhood ON target_symbol = id
+                    WHERE d < ?
+                )
+                SELECT s.*, f.path as source_path, n.d as distance
+                FROM symbols s
+                JOIN files f ON s.file_id = f.file_id
+                JOIN neighborhood n ON s.symbol_id = n.id
+                ORDER BY n.d ASC
+                LIMIT ?
                 """
+                params = (symbol_id, depth, max_neighbors)
+            elif direction == "both":
+                query = """
                 WITH RECURSIVE neighborhood(id, d) AS (
                     SELECT ? as id, 0 as d
                     UNION
@@ -469,9 +491,27 @@ class SynapStore:
                 JOIN neighborhood n ON s.symbol_id = n.id
                 ORDER BY n.d ASC
                 LIMIT ?
-            """,
-                (symbol_id, depth, depth, max_neighbors),
-            ).fetchall()
+                """
+                params = (symbol_id, depth, depth, max_neighbors)
+            else:  # downstream (default)
+                query = """
+                WITH RECURSIVE neighborhood(id, d) AS (
+                    SELECT ? as id, 0 as d
+                    UNION
+                    SELECT target_symbol, d + 1
+                    FROM edges JOIN neighborhood ON source_symbol = id
+                    WHERE d < ?
+                )
+                SELECT s.*, f.path as source_path, n.d as distance
+                FROM symbols s
+                JOIN files f ON s.file_id = f.file_id
+                JOIN neighborhood n ON s.symbol_id = n.id
+                ORDER BY n.d ASC
+                LIMIT ?
+                """
+                params = (symbol_id, depth, max_neighbors)
+
+            rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     def put_embedding(

@@ -30,6 +30,123 @@ from synap_git.retrieval.engine import HybridRetrievalEngine
 from synap_git.storage.sqlite import SynapStore
 from synap_git.utils.serialization import stable_hash
 
+STDLIB_MODULES: set[str] = {
+    # Python
+    "abc",
+    "argparse",
+    "ast",
+    "asyncio",
+    "base64",
+    "collections",
+    "contextlib",
+    "copy",
+    "csv",
+    "dataclasses",
+    "datetime",
+    "decimal",
+    "enum",
+    "functools",
+    "glob",
+    "hashlib",
+    "io",
+    "itertools",
+    "json",
+    "logging",
+    "math",
+    "multiprocessing",
+    "operator",
+    "os",
+    "pathlib",
+    "pickle",
+    "random",
+    "re",
+    "shutil",
+    "signal",
+    "socket",
+    "sqlite3",
+    "string",
+    "struct",
+    "subprocess",
+    "sys",
+    "tempfile",
+    "threading",
+    "time",
+    "traceback",
+    "types",
+    "typing",
+    "typing_extensions",
+    "unittest",
+    "urllib",
+    "uuid",
+    "warnings",
+    "weakref",
+    "pydantic",
+    "pytest",
+    "structlog",
+    # JS / TS / Node
+    "fs",
+    "path",
+    "http",
+    "https",
+    "url",
+    "crypto",
+    "events",
+    "stream",
+    "util",
+    "child_process",
+    "assert",
+    "buffer",
+    "process",
+    "react",
+    "react-dom",
+    "next",
+    # Go
+    "bufio",
+    "bytes",
+    "context",
+    "encoding",
+    "errors",
+    "flag",
+    "fmt",
+    "log",
+    "net",
+    "reflect",
+    "regexp",
+    "sort",
+    "strconv",
+    "strings",
+    "sync",
+    "syscall",
+    "testing",  # Rust
+    "std",
+    "core",
+    "alloc",
+    # Java
+    "java",
+    "javax",
+    "org.junit",
+    # C/C++
+    "iostream",
+    "vector",
+    "stdio.h",
+    "stdlib.h",
+    "string.h",
+    "memory",
+    "map",
+    "set",
+    "algorithm",
+    "cmath",
+    "thread",
+    "chrono",
+    "cstdio",
+    "cstdlib",
+}
+
+
+def _is_stdlib_module(mod: str) -> bool:
+    root = mod.split(":")[0].split(".")[0].split("::")[0].split("/")[0]
+    return root in STDLIB_MODULES or mod in STDLIB_MODULES
+
 
 def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
     path, rel_path = args
@@ -703,12 +820,14 @@ class SynapRuntime:
         source_file_ids = set()
         candidate_paths = set()
         module_keys = set()
-        fts_names = set()
 
         for file_id, rel_path, imports in parsed_results:
             source_file_ids.add(file_id)
             current_path = Path(rel_path)
             for imp in imports:
+                if _is_stdlib_module(imp):
+                    continue
+
                 if ":" in imp:
                     module_part, target_name = imp.split(":", 1)
                 else:
@@ -741,7 +860,6 @@ class SynapRuntime:
                         structlog.get_logger().error("suppressed_error_caught", error=str(e))
                 else:
                     module_keys.add(module_part)
-                fts_names.add(target_name)
 
         with self.store.connect() as conn:
             file_symbols_map: dict[str, list[dict[str, Any]]] = {}
@@ -751,11 +869,24 @@ class SynapRuntime:
                     chunk = sf_list[i : i + 900]
                     placeholders = ",".join("?" for _ in chunk)
                     rows = conn.execute(
-                        f"SELECT file_id, symbol_id, name FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
+                        f"SELECT file_id, symbol_id, name, metadata_json FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
                         tuple(chunk),
                     ).fetchall()
                     for row in rows:
-                        file_symbols_map.setdefault(row["file_id"], []).append(dict(row))
+                        meta = {}
+                        if row["metadata_json"]:
+                            try:
+                                meta = json.loads(row["metadata_json"])
+                            except Exception:
+                                pass
+                        file_symbols_map.setdefault(row["file_id"], []).append(
+                            {
+                                "file_id": row["file_id"],
+                                "symbol_id": row["symbol_id"],
+                                "name": row["name"],
+                                "refs": set(meta.get("refs", [])),
+                            }
+                        )
 
             path_to_file_id = {}
             if candidate_paths:
@@ -787,6 +918,9 @@ class SynapRuntime:
             for file_id, rel_path, imports in parsed_results:
                 current_path = Path(rel_path)
                 for imp in imports:
+                    if _is_stdlib_module(imp):
+                        continue
+
                     if ":" in imp:
                         module_part, target_name = imp.split(":", 1)
                     else:
@@ -824,6 +958,12 @@ class SynapRuntime:
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
+                        if not target_file_id:
+                            for mk, fid in module_key_to_file_id.items():
+                                if mk.endswith(module_part) or mk.endswith(f".{module_part}"):
+                                    target_file_id = fid
+                                    break
+
                     if target_file_id:
                         target_file_ids.add(target_file_id)
 
@@ -839,19 +979,6 @@ class SynapRuntime:
                     ).fetchall()
                     for row in rows:
                         target_symbols_by_file.setdefault(row["file_id"], []).append(dict(row))
-
-            fts_symbols_by_name: dict[str, list[dict[str, Any]]] = {}
-            if fts_names:
-                fts_list = list(fts_names)
-                for i in range(0, len(fts_list), 900):
-                    chunk = fts_list[i : i + 900]
-                    placeholders = ",".join("?" for _ in chunk)
-                    rows = conn.execute(  # nosec B608
-                        f"SELECT symbol_id, name FROM symbols WHERE name IN ({placeholders})",  # noqa: S608  # nosec B608
-                        tuple(chunk),
-                    ).fetchall()
-                    for row in rows:
-                        fts_symbols_by_name.setdefault(row["name"], []).append(dict(row))
 
             target_symbols_dict: dict[str, dict[str, list[dict[str, Any]]]] = {}
             for t_file_id, syms in target_symbols_by_file.items():
@@ -870,6 +997,9 @@ class SynapRuntime:
                     if edges_added_for_file >= max_edges_per_file:
                         break
 
+                    if _is_stdlib_module(imp):
+                        continue
+
                     target_file_id = None
                     if ":" in imp:
                         module_part, target_name = imp.split(":", 1)
@@ -907,20 +1037,19 @@ class SynapRuntime:
                     else:
                         target_file_id = module_key_to_file_id.get(module_part)
 
-                        # Fuzzy fallback
+                        # Fuzzy fallback only within project module keys
                         if not target_file_id:
                             for mk, fid in module_key_to_file_id.items():
                                 if mk.endswith(module_part) or mk.endswith(f".{module_part}"):
                                     target_file_id = fid
                                     break
 
-                    target_symbols = []
-                    if target_file_id:
-                        target_symbols = target_symbols_dict.get(target_file_id, {}).get(
-                            target_name, []
-                        )
-                    else:
-                        target_symbols = fts_symbols_by_name.get(target_name, [])
+                    if not target_file_id:
+                        continue
+
+                    target_symbols = target_symbols_dict.get(target_file_id, {}).get(
+                        target_name, []
+                    )
 
                     for ts in target_symbols:
                         if edges_added_for_file >= max_edges_per_file:
@@ -930,6 +1059,16 @@ class SynapRuntime:
                                 break
                             if fs["symbol_id"] == ts["symbol_id"]:
                                 continue
+
+                            # Precision check: only link if fs references ts or module
+                            fs_refs = fs.get("refs")
+                            if (
+                                fs_refs
+                                and ts["name"] not in fs_refs
+                                and module_part.split(".")[-1] not in fs_refs
+                            ):
+                                continue
+
                             edge_id = stable_hash(
                                 {
                                     "source": fs["symbol_id"],
