@@ -1662,18 +1662,51 @@ def repair(
     console.print("Rebuilding from git history...")
     console.print("[1/3] Restoring file structure from HEAD")
 
-    saved_lessons = []
-    saved_checkpoints = []
-    saved_memory = []
-    try:
-        with runtime.store.connect() as conn:
-            saved_lessons = [dict(r) for r in conn.execute("SELECT * FROM lessons").fetchall()]
-            saved_checkpoints = [
-                dict(r) for r in conn.execute("SELECT * FROM checkpoints").fetchall()
-            ]
-            saved_memory = [dict(r) for r in conn.execute("SELECT * FROM agent_memory").fetchall()]
-    except Exception:
-        pass
+    import json as json_lib
+
+    backup_file = settings.state_path / "repair_backup.json"
+    saved_lessons: list[dict[str, Any]] = []
+    saved_checkpoints: list[dict[str, Any]] = []
+    saved_memory: list[dict[str, Any]] = []
+
+    # If previous crash left a backup, read it
+    if backup_file.exists():
+        try:
+            raw_backup = json_lib.loads(backup_file.read_text(encoding="utf-8"))
+            saved_lessons = raw_backup.get("lessons", [])
+            saved_checkpoints = raw_backup.get("checkpoints", [])
+            saved_memory = raw_backup.get("memory", [])
+        except Exception:
+            pass
+
+    if not (saved_lessons or saved_checkpoints or saved_memory):
+        try:
+            with runtime.store.connect() as conn:
+                saved_lessons = [dict(r) for r in conn.execute("SELECT * FROM lessons").fetchall()]
+                saved_checkpoints = [
+                    dict(r) for r in conn.execute("SELECT * FROM checkpoints").fetchall()
+                ]
+                saved_memory = [
+                    dict(r) for r in conn.execute("SELECT * FROM agent_memory").fetchall()
+                ]
+        except Exception:
+            pass
+
+        if saved_lessons or saved_checkpoints or saved_memory:
+            try:
+                backup_file.parent.mkdir(parents=True, exist_ok=True)
+                backup_file.write_text(
+                    json_lib.dumps(
+                        {
+                            "lessons": saved_lessons,
+                            "checkpoints": saved_checkpoints,
+                            "memory": saved_memory,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
 
     try:
         runtime.wipe_index()
@@ -1740,6 +1773,11 @@ def repair(
                         (m["id"], m["timestamp"], m["context_key"], m["payload"], m["summary"]),
                     )
             restored_count = len(saved_lessons) + len(saved_checkpoints) + len(saved_memory)
+            if backup_file.exists():
+                try:
+                    backup_file.unlink()
+                except OSError:
+                    pass
         except Exception as e:
             import structlog
 

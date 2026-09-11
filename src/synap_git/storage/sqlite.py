@@ -464,11 +464,12 @@ class SynapStore:
                     FROM edges JOIN neighborhood ON target_symbol = id
                     WHERE d < ?
                 )
-                SELECT s.*, f.path as source_path, n.d as distance
+                SELECT s.*, f.path as source_path, MIN(n.d) as distance
                 FROM symbols s
                 JOIN files f ON s.file_id = f.file_id
                 JOIN neighborhood n ON s.symbol_id = n.id
-                ORDER BY n.d ASC
+                GROUP BY s.symbol_id
+                ORDER BY distance ASC
                 LIMIT ?
                 """
                 params = (symbol_id, depth, max_neighbors)
@@ -485,11 +486,12 @@ class SynapStore:
                     FROM edges JOIN neighborhood ON target_symbol = id
                     WHERE d < ?
                 )
-                SELECT s.*, f.path as source_path, n.d as distance
+                SELECT s.*, f.path as source_path, MIN(n.d) as distance
                 FROM symbols s
                 JOIN files f ON s.file_id = f.file_id
                 JOIN neighborhood n ON s.symbol_id = n.id
-                ORDER BY n.d ASC
+                GROUP BY s.symbol_id
+                ORDER BY distance ASC
                 LIMIT ?
                 """
                 params = (symbol_id, depth, depth, max_neighbors)
@@ -502,11 +504,12 @@ class SynapStore:
                     FROM edges JOIN neighborhood ON source_symbol = id
                     WHERE d < ?
                 )
-                SELECT s.*, f.path as source_path, n.d as distance
+                SELECT s.*, f.path as source_path, MIN(n.d) as distance
                 FROM symbols s
                 JOIN files f ON s.file_id = f.file_id
                 JOIN neighborhood n ON s.symbol_id = n.id
-                ORDER BY n.d ASC
+                GROUP BY s.symbol_id
+                ORDER BY distance ASC
                 LIMIT ?
                 """
                 params = (symbol_id, depth, max_neighbors)
@@ -659,42 +662,54 @@ class SynapStore:
             return cursor.rowcount
 
     def get_decisions(self, branch: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            if not branch or branch == "all":
-                rows = conn.execute(
-                    "SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM decisions WHERE branch = ? ORDER BY created_at DESC LIMIT ?",
-                    (branch, limit),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        try:
+            with self.connect() as conn:
+                if not branch or branch == "all":
+                    rows = conn.execute(
+                        "SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?",
+                        (limit,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM decisions WHERE branch = ? ORDER BY created_at DESC LIMIT ?",
+                        (branch, limit),
+                    ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def get_latest_checkpoint(self, branch: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM checkpoints WHERE branch = ? ORDER BY created_at DESC LIMIT 1",
-                (branch,),
-            ).fetchone()
-        return dict(row) if row else None
+        try:
+            with self.connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM checkpoints WHERE branch = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    (branch,),
+                ).fetchone()
+            return dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
 
     def get_checkpoints(self, branch: str) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM checkpoints WHERE branch = ? ORDER BY created_at DESC",
-                (branch,),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM checkpoints WHERE branch = ? ORDER BY created_at DESC, rowid DESC",
+                    (branch,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def get_checkpoint(self, checkpoint_id: str) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM checkpoints WHERE checkpoint_id = ?",
-                (checkpoint_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        try:
+            with self.connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM checkpoints WHERE checkpoint_id = ?",
+                    (checkpoint_id,),
+                ).fetchone()
+            return dict(row) if row else None
+        except sqlite3.OperationalError:
+            return None
 
     def store_memory(
         self,
@@ -714,39 +729,48 @@ class SynapStore:
             )
 
     def get_recent_memory(self, context_key: str, limit: int = 10) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM agent_memory
-                WHERE context_key = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-                """,
-                (context_key, limit),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM agent_memory
+                    WHERE context_key = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (context_key, limit),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def delete_checkpoint(self, checkpoint_id: str) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                "DELETE FROM checkpoints WHERE checkpoint_id = ?",
-                (checkpoint_id,),
-            )
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    "DELETE FROM checkpoints WHERE checkpoint_id = ?",
+                    (checkpoint_id,),
+                )
+        except sqlite3.OperationalError:
+            pass
 
     def get_lessons(self, status: str) -> list[dict[str, Any]]:
         now = int(datetime.now(UTC).timestamp())
-        with self.connect() as conn:
-            if status == "all":
-                rows = conn.execute(
-                    "SELECT * FROM lessons WHERE expires_at >= ? ORDER BY created_at DESC",
-                    (now,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM lessons WHERE status = ? AND expires_at >= ? ORDER BY created_at DESC",
-                    (status, now),
-                ).fetchall()
-        return [dict(row) for row in rows]
+        try:
+            with self.connect() as conn:
+                if status == "all":
+                    rows = conn.execute(
+                        "SELECT * FROM lessons WHERE expires_at >= ? ORDER BY created_at DESC",
+                        (now,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM lessons WHERE status = ? AND expires_at >= ? ORDER BY created_at DESC",
+                        (status, now),
+                    ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            return []
 
     def get_activity(self, branch: str, limit: int = 50) -> list[dict[str, Any]]:
         with self.connect() as conn:

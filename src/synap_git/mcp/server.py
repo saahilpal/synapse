@@ -52,12 +52,16 @@ class SynapMCPFacade:
         return {"status": "success", "checkpoint_id": checkpoint_id}
 
     def restore_checkpoint(self, checkpoint_id: str) -> dict[str, Any]:
-        cp = self.runtime.store.get_checkpoint(checkpoint_id)
+        if checkpoint_id and checkpoint_id.lower() != "latest":
+            cp = self.runtime.store.get_checkpoint(checkpoint_id)
+            if not cp:
+                raise ValueError(f"No checkpoint found with ID '{checkpoint_id}'.")
+            return dict(cp)
+
+        status = self.runtime.status()
+        cp = self.runtime.store.get_latest_checkpoint(status.branch)
         if not cp:
-            status = self.runtime.status()
-            cp = self.runtime.store.get_latest_checkpoint(status.branch)
-        if not cp:
-            raise ValueError(f"No checkpoint found with ID '{checkpoint_id}'.")
+            raise ValueError(f"No checkpoints found for branch '{status.branch}'.")
         return dict(cp)
 
     def log_decision(self, content: str, context_info: str) -> dict[str, Any]:
