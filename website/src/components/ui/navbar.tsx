@@ -28,7 +28,7 @@ export function Navbar() {
               Synapse
             </span>
             <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">
-              v2.4.0
+              v2.4.1
             </span>
           </div>
         </Link>

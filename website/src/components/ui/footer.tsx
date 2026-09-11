@@ -19,7 +19,7 @@ export function Footer() {
               </div>
               <span className="font-display font-bold text-base text-text-primary">Synapse Engine</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">
-                v2.4.0
+                v2.4.1
               </span>
             </div>
             <p className="font-sans text-xs text-text-secondary max-w-md leading-relaxed">
