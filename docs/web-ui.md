@@ -22,13 +22,13 @@ synap ui .
 The dashboard is powered by a FastAPI backend exposing the following endpoints:
 
 * `GET /` — Serves the static dashboard HTML single-page application.
-* `GET /api/v1/status` — Returns overall status details, active Git branch, HEAD commit hash, files/symbols counts, and daemon heartbeats.
+* `GET /api/v1/status` (aliases: `/api/status`, `/health`, `/healthz`) — Returns overall status details, active Git branch, HEAD commit hash, files/symbols counts, and daemon heartbeats.
 * `GET /api/v1/events` — Server-Sent Events (SSE) stream broadcasting status updates every 2 seconds.
 * `GET /api/v1/memory` — Returns lists of pending and approved L3 memory lessons.
 * `GET /api/v1/usage` — Retrieves history of all LLM calls, provider names, models, token metrics, and purposes.
 * `GET /api/v1/checkpoints` — Lists the last 20 checkpoints logged on the repository.
 * `GET /api/v1/trace/latest` — Fetches the detailed diagnostic trace payload of the last search query.
-* `GET /wiki/{filepath}` — Resolves the L2 wiki markdown text for a file path, lazily triggering generation if missing or stale.
+* `GET /wiki/{filepath:path}` — Resolves the L2 wiki markdown text for a file path, lazily triggering generation if missing or stale.
 
 ---
 

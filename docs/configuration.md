@@ -1,56 +1,89 @@
 # Configuration Reference
 
-Synap uses Pydantic Settings for runtime configuration. It loads settings from environment variables and the global `config.toml` file.
+Synap uses Pydantic Settings (`pydantic-settings` v2) for runtime configuration. Settings are automatically loaded from environment variables and an optional `config.toml` file.
 
 ---
 
-## Configuration Location
+## Configuration File Location
 
 1. **Environment Override:** If the `SYNAP_CONFIG` environment variable is defined, Synap reads configuration from that absolute path.
-2. **Default Path:** By default, configuration is loaded from:
-   * Unix/macOS: `~/.config/synap/config.toml`
-   * Windows: `%USERPROFILE%\.config\synap\config.toml`
+2. **Default Path (XDG Compliant):**
+   - **macOS / Linux:** `~/.config/synap/config.toml`
+   - **Windows:** `%USERPROFILE%\.config\synap\config.toml`
 
 ---
 
 ## Configuration Fields
 
-Every setting can be specified as a key in `config.toml` (within the top-level namespace or nested under standard namespaces like `[llm]`) or as an environment variable prefixed with `SYNAP_` (e.g. `SYNAP_LOG_LEVEL`).
+Every setting can be defined inside `config.toml` (top-level or under standard sections like `[llm]`) or as an environment variable prefixed with `SYNAP_` (e.g., `SYNAP_LOG_LEVEL=DEBUG`).
 
-| Field Name | Type | Default | Description & Effect |
-| :--- | :--- | :--- | :--- |
-| `profile` | `string` | `"dev"` | Runtime profile: `"dev"`, `"test"`, or `"prod"`. Setting to `"test"` automatically configures logs to JSON format and level to `"DEBUG"`. |
-| `mode` | `string` | `"active"` | Daemon state: `"active"` or `"idle"`. Idle mode pauses Git change sweeps. |
-| `repository_path` | `string` | `"."` | Path to the repository root directory being monitored. |
-| `state_path` | `string` | `".synap"` | Root directory for local database, cache objects, and logs. Resolved relative to `repository_path` if not absolute. |
-| `sqlite_path` | `string` | `".synap/synap.db"` | Path to the SQLite database. |
-| `object_path` | `string` | `".synap/objects"` | Directory where serialized objects are stored. |
-| `log_path` | `string` | `".synap/logs"` | Directory where daemon log files are written. |
-| `logging_mode` | `string` | `"human"` | Controls terminal logging format: `"human"` or `"json"`. |
-| `log_level` | `string` | `"INFO"` | Minimum logging severity: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. |
-| `max_file_bytes` | `integer` | `1000000` | Limits indexing to files smaller than this byte count to prevent parsing overhead. |
-| `checkpoint_threshold` | `float` | `0.60` | Threshold ratio (0.0 to 1.0) of context window utilization. When reached, triggers a checkpoint recommendation. |
-| `lesson_expiry_days` | `integer` | `7` | Number of days a behavioral memory lesson remains active before moving to the `"expired"` status. |
-| `llm_provider` | `string` | `null` | Chosen generative AI service: `"openai"`, `"gemini"`, `"anthropic"`, `"ollama"`, `"openrouter"`. If null, runs in structural Mode A. |
-| `llm_model` | `string` | `null` | Model identifier used for generative wiki entries and hybrid retrieval answers. |
-| `embed_provider` | `string` | `null` | Provider for vector embeddings. Defaults to `llm_provider`. |
-| `ollama_url` | `string` | `"http://127.0.0.1:11434"` | Endpoint URL for connecting to local Ollama daemon services. |
-| `mcp_host` | `string` | `"127.0.0.1"` | Binding address for the MCP daemon service. |
-| `mcp_port` | `integer` | `9876` | Diagnostic API and web UI server listening port. |
-| `daemon_poll_interval_seconds` | `float` | `2.0` | Time interval in seconds between Git active commit change verification runs. |
-| `shutdown_timeout_seconds` | `float` | `5.0` | Timeout period allowed for daemon server tasks to shut down gracefully before termination. |
+| Setting Key | Environment Variable | Type | Default | Description & Effect |
+| :--- | :--- | :--- | :--- | :--- |
+| `profile` | `SYNAP_PROFILE` | `string` | `"dev"` | Runtime profile: `"dev"`, `"test"`, or `"prod"`. Profile `"test"` forces `logging_mode="json"` and `log_level="DEBUG"`. |
+| `mode` | `SYNAP_MODE` | `string` | `"active"` | Daemon mode: `"active"` or `"idle"`. In `"idle"` mode, Git change polling is paused. |
+| `repository_path` | `SYNAP_REPOSITORY_PATH` | `string` | `"."` | Target repository directory to monitor and index. |
+| `state_path` | `SYNAP_STATE_PATH` | `string` | `".synap"` | Root directory for local runtime data, SQLite DB, and logs. Resolved relative to `repository_path` if not absolute. |
+| `sqlite_path` | `SYNAP_SQLITE_PATH` | `string` | `".synap/synap.db"` | Path to the SQLite database file. Defaults to `<state_path>/synap.db`. |
+| `log_path` | `SYNAP_LOG_PATH` | `string` | `".synap/logs"` | Directory where rotating log files are saved. Defaults to `<state_path>/logs`. |
+| `logging_mode` | `SYNAP_LOGGING_MODE` | `string` | `"human"` | Console logging format: `"human"` (Rich colored output) or `"json"` (structured JSON). |
+| `log_level` | `SYNAP_LOG_LEVEL` | `string` | `"INFO"` | Minimum logging severity threshold: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`. |
+| `max_file_bytes` | `SYNAP_MAX_FILE_BYTES` | `integer` | `1000000` | Maximum file size in bytes to index (minimum `1024`). Files larger than this threshold are skipped. |
+| `checkpoint_threshold`| `SYNAP_CHECKPOINT_THRESHOLD` | `float` | `0.60` | Ratio (0.0 to 1.0) of context window utilization triggering a checkpoint recommendation via `signal_low_context`. |
+| `lesson_expiry_days` | `SYNAP_LESSON_EXPIRY_DAYS` | `integer` | `7` | Duration in days an approved lesson remains active before being marked `"expired"` by pruning. |
+| `llm_provider` | `SYNAP_LLM_PROVIDER` | `string` | `null` | Generative provider: `"openai"`, `"gemini"`, `"anthropic"`, `"ollama"`, or `"openrouter"`. If null, runs in structural Mode A. |
+| `llm_model` | `SYNAP_LLM_MODEL` | `string` | `null` | Specific model identifier for wiki generation and hybrid retrieval (e.g. `"gpt-4o"`). |
+| `ollama_url` | `SYNAP_OLLAMA_URL` | `string` | `"http://127.0.0.1:11434"` | Endpoint URL for connecting to local Ollama daemon services. |
+| `embedding_provider` | `SYNAP_EMBEDDING_PROVIDER` | `string` | `null` | Vector embedding provider: `"openai"`, `"gemini"`, `"ollama"`, `"anthropic"`, or `"openrouter"`. Defaults to `llm_provider` if omitted. |
+| `embedding_model` | `SYNAP_EMBEDDING_MODEL` | `string` | `null` | Model identifier for embeddings (e.g. `"text-embedding-3-small"`, `"text-embedding-004"`). |
+| `embedding_url` | `SYNAP_EMBEDDING_URL` | `string` | `null` | Custom base URL for embedding endpoints (e.g., custom Ollama host). Defaults to `ollama_url` if unset. |
+| `mcp_host` | `SYNAP_MCP_HOST` | `string` | `"127.0.0.1"` | IP address binding for daemon services. |
+| `mcp_port` | `SYNAP_MCP_PORT` | `integer` | `9876` | Diagnostic API and web UI HTTP port. Automatically seeks next available port if occupied. |
+| `daemon_poll_interval_seconds` | `SYNAP_DAEMON_POLL_INTERVAL_SECONDS` | `float` | `2.0` | Interval in seconds between background Git commit polls. |
+| `shutdown_timeout_seconds` | `SYNAP_SHUTDOWN_TIMEOUT_SECONDS` | `float` | `5.0` | Grace period in seconds allowed for active tasks to complete on daemon shutdown. |
+
+---
+
+## Example `config.toml`
+
+```toml
+profile = "dev"
+log_level = "INFO"
+max_file_bytes = 1000000
+checkpoint_threshold = 0.60
+lesson_expiry_days = 7
+
+[llm]
+llm_provider = "openai"
+llm_model = "gpt-4o"
+
+[embeddings]
+embedding_provider = "openai"
+embedding_model = "text-embedding-3-small"
+```
 
 ---
 
 ## Credential Resolution Hierarchy
 
-To call cloud LLMs (OpenAI, Gemini, Anthropic, OpenRouter), Synap requires API keys. It searches for keys sequentially using the following resolution order:
+Synap connects securely to cloud LLM and embedding providers (OpenAI, Gemini, Anthropic, OpenRouter). API keys are resolved in the following priority order:
 
-1. **System Keyring:** Resolves keys securely from the OS keyring backend (via `keyring.get_password("synap", "{provider}_api_key")`). Set during `synap setup`.
-2. **Environment Variables:** Matches active environment keys:
-   * `SYNAP_OPENAI_API_KEY`
-   * `SYNAP_GEMINI_API_KEY`
-   * `SYNAP_ANTHROPIC_API_KEY`
-   * `SYNAP_OPENROUTER_API_KEY`
-3. **Fallback Credentials File:** Reads keys from `~/.synap/credentials`.
-   * **Security Rule:** On Unix systems, this file must have strict permissions (`chmod 600`) where group and public read access are completely blocked. If permissions are too open, the credentials fallback is skipped.
+1. **System Keyring (Recommended):**
+   - Stored in the native OS credential store: macOS Keychain, Linux Secret Service (libsecret/GNOME Keyring/KWallet), or Windows Credential Manager.
+   - Automatically managed via `synap setup`.
+   - Retrieved securely via `keyring.get_password("synap", "{provider}_api_key")`.
+
+2. **Environment Variables:**
+   - `SYNAP_OPENAI_API_KEY`
+   - `SYNAP_GEMINI_API_KEY`
+   - `SYNAP_ANTHROPIC_API_KEY`
+   - `SYNAP_OPENROUTER_API_KEY`
+
+3. **Fallback File (`~/.synap/credentials`):**
+   - For headless CI/CD systems where no keyring service is running:
+     ```ini
+     SYNAP_OPENAI_API_KEY=sk-...
+     SYNAP_GEMINI_API_KEY=AIza...
+     SYNAP_ANTHROPIC_API_KEY=sk-ant-...
+     SYNAP_OPENROUTER_API_KEY=sk-or-...
+     ```
+   - **Strict Security Rule:** On Unix systems, this file **must** have strict permissions (`chmod 600`). If group or world permissions are open, Synap will reject the file to prevent credential leaks.

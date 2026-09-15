@@ -1,26 +1,26 @@
 # Troubleshooting Guide
 
-This guide details actual error scenarios encountered in Synap and provides steps to resolve them.
+This guide details common operational and environment issues encountered when running Synap, their root causes, and verified resolutions.
 
 ---
 
 ## 1. SQLite Database Corruption
 
 ### Symptom
-Errors stating `database disk image is malformed` or database connection timeouts.
+Errors stating `database disk image is malformed`, locks, or database connection timeouts.
 
 ### Root Cause
-Unclean shutdowns, process termination during database write loops, or system restarts while write-ahead logs (WAL) are flushed.
+Unclean shutdowns, process termination during database write loops, or system restarts while SQLite write-ahead logs (`WAL`) are being synchronized.
 
 ### Solutions
-* **Auto-Healing:** The background daemon automatically checks integrity using `PRAGMA quick_check`. If corruption is detected, the daemon deletes `.synap/synap.db`, `.synap/synap.db-wal`, and `.synap/synap.db-shm` and boots fresh.
-* **Manual Rebuild:** Run the repair CLI command:
+* **Auto-Healing:** The background daemon automatically checks integrity on startup using `PRAGMA quick_check`. If corruption is detected, it archives the damaged file, deletes `.synap/synap.db-wal` and `.synap/synap.db-shm`, and rebuilds fresh.
+* **Manual Repair:** Run the repair CLI command:
   ```bash
-  synap repair .
+  synap repair . -y
   ```
-  Or completely wipe the database directory and re-initialize:
+* **Full Reset:** Wipe the database directory and re-initialize:
   ```bash
-  synap wipe .
+  synap wipe . -y
   synap init .
   ```
 
@@ -29,24 +29,28 @@ Unclean shutdowns, process termination during database write loops, or system re
 ## 2. Keyring Initialization Errors (CI / Headless Servers)
 
 ### Symptom
-`setup` commands fail or cloud keys cannot be stored, reporting keyring errors.
+`synap setup` fails or cloud keys cannot be stored, reporting `keyring.errors.NoKeyringError`.
 
 ### Root Cause
-On headless Linux instances, Docker containers, or CI environments, keyring services (like DBus, GNOME Keyring, or KWallet) are absent.
+On headless Linux servers, Docker containers, or CI/CD runners, native desktop keyring services (DBus, GNOME Keyring, KWallet) are absent.
 
 ### Solutions
-* **Environment Variables:** Set keys directly in the terminal session:
+* **Environment Variables:** Set keys directly in the shell environment:
   ```bash
   export SYNAP_OPENAI_API_KEY="sk-..."
+  export SYNAP_GEMINI_API_KEY="AIza..."
+  export SYNAP_ANTHROPIC_API_KEY="sk-ant-..."
+  export SYNAP_OPENROUTER_API_KEY="sk-or-..."
   ```
 * **Fallback Credentials File:** Save keys to `~/.synap/credentials`:
   ```ini
   SYNAP_OPENAI_API_KEY=sk-...
   ```
-  Ensure strict permission settings are applied to prevent Synap from skipping the file:
+  **Critical Security Requirement:** On Unix systems, set strict permissions:
   ```bash
   chmod 600 ~/.synap/credentials
   ```
+  *If group or other read permissions exist, Synap will ignore the file for security.*
 
 ---
 
@@ -58,41 +62,41 @@ Running `synap start` prints:
 Or `synap doctor` reports a stale daemon heartbeat.
 
 ### Root Cause
-The daemon process crashed or was force-terminated, leaving stale lock files in `.synap/daemon.pid` and `.synap/daemon_heartbeat.json`.
+The daemon process crashed or was forcefully killed (`kill -9`), leaving orphan lock files behind in `.synap/daemon.pid` and `.synap/daemon_heartbeat.json`.
 
 ### Solutions
-* Stop services and clear lockfiles:
+* Gracefully stop the service:
   ```bash
   synap stop .
   ```
-* If the lock files persist, manually remove them:
+* If lockfiles persist after stopping, remove them manually:
   ```bash
-  rm .synap/daemon.pid
-  rm .synap/daemon_heartbeat.json
-  ```
-  Restart the daemon:
-  ```bash
+  rm -f .synap/daemon.pid .synap/daemon_heartbeat.json
   synap start .
   ```
 
 ---
 
-## 4. Code Symbols Not Appearing in Retrieval
+## 4. Code Symbols Missing from Retrieval
 
 ### Symptom
-Search queries or MCP tools do not return symbols or code blocks for a specific file.
+Search queries or MCP tools do not return symbols or code blocks for specific files.
 
 ### Root Cause
-* File type is unsupported.
-* File exceeds `max_file_bytes` limit (default 1MB).
-* File matches exclusions in `.gitignore`.
-* File is flagged as binary (contains control characters or null bytes).
+* The file extension is not yet mapped in `parser/registry.py`.
+* File size exceeds `max_file_bytes` (default: 1MB).
+* File path is matched by `.gitignore` or default exclusions (`.venv`, `node_modules`, `dist`).
+* File contains binary bytes or control characters exceeding 10% in the first 1KB.
 
 ### Solutions
-* Run `synap doctor` to confirm Tree-sitter parser status.
-* Check file size and update limits in `~/.config/synap/config.toml`:
+* Run `synap doctor` to confirm parser registry health.
+* Increase file size threshold in `~/.config/synap/config.toml`:
   ```toml
   max_file_bytes = 2000000
+  ```
+* Verify if the file is tracked by Git:
+  ```bash
+  git check-ignore -v <path-to-file>
   ```
 
 ---
@@ -104,11 +108,57 @@ Daemon startup prints:
 `⚠ Found X permanently failed wiki pages. They will not be retried automatically.`
 
 ### Root Cause
-An L2 documentation generation task failed 3 consecutive times (typically due to LLM rate limits or network issues), moving its status in `wiki_queue` to `"failed"`.
+An L2 documentation task encountered 3 consecutive errors (such as API rate limits or network timeouts), transitioning its status in `wiki_queue` to `"failed"`.
 
 ### Solutions
-* **Manual Refresh:** Force dynamic lazy regeneration by requesting the page directly:
+* **Re-queue All Failed Tasks:** Use the built-in retry command:
   ```bash
-  synap wiki show src/your_file.py .
+  synap wiki retry .
   ```
-* **Trigger Re-Index:** Modify or save the file to trigger an incremental indexing pass, which re-enqueues the wiki task.
+* **On-Demand Single Page Refresh:** Force lazy generation by requesting the page directly:
+  ```bash
+  synap wiki show src/my_file.py .
+  ```
+
+---
+
+## 6. MCP Client Connection Failures
+
+### Symptom
+Cursor, Windsurf, or Claude Desktop reports `Connection closed` or fails to discover MCP tools.
+
+### Root Cause
+* Standard output (`stdout`) contamination: Print statements or raw text written to stdout break JSON-RPC protocol parsing.
+* Incorrect repository path or missing Python binary in IDE configuration.
+
+### Solutions
+* Run verification to test the MCP server over stdio:
+  ```bash
+  synap mcp verify .
+  ```
+* Regenerate the IDE configuration snippet:
+  ```bash
+  synap mcp config .
+  ```
+* Ensure all custom plugins or script wrappers route logs strictly to `stderr`.
+
+---
+
+## 7. macOS Developer Tools / Git License Agreement
+
+### Symptom
+Commands or test suites fail with:
+`You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license'`
+
+### Root Cause
+macOS `/usr/bin/git` is an Xcode developer shim. When Xcode is updated, Git commands fail until the license agreement is reviewed.
+
+### Solutions
+* Agree to the license:
+  ```bash
+  sudo xcodebuild -license
+  ```
+* Alternatively, prioritize the standalone Command Line Tools binary:
+  ```bash
+  export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
+  ```

@@ -1,24 +1,50 @@
 # Model Context Protocol (MCP) Integration
 
-Synap exposes a suite of tools through the standard Model Context Protocol (MCP) using a Stdio transport. This allows AI coding agents in environments like Cursor or Windsurf to ground their actions in codebase context.
+Synap exposes a rich suite of context tools through the standard Model Context Protocol (MCP) using a standard input/output (`stdio`) transport. This enables AI coding agents in environments like Cursor, Windsurf, Claude Desktop, and custom agentic frameworks to ground their operations in real-time codebase structure.
 
 ---
 
 ## Connection Configuration
 
-Generate the connection parameters using:
+Generate the exact connection parameters for your current environment:
 ```bash
 synap mcp config .
 ```
 
-Copy the generated block into your IDE settings under MCP Servers:
+### 1. Cursor Configuration
+Add to `.cursor/mcp.json` or your global Cursor Settings (`Cursor Settings -> Features -> MCP`):
 ```json
 {
   "mcpServers": {
     "synap": {
-      "command": "/usr/local/bin/python",
-      "args": ["-m", "synap_git.cli", "mcp", "start", "/Users/username/project"],
-      "autoConnect": true
+      "command": "synap",
+      "args": ["mcp", "serve", "/absolute/path/to/repository"]
+    }
+  }
+}
+```
+
+### 2. Windsurf Configuration
+Add to `~/.codeium/windsurf/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "synap": {
+      "command": "synap",
+      "args": ["mcp", "serve", "/absolute/path/to/repository"]
+    }
+  }
+}
+```
+
+### 3. Claude Desktop Configuration
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "synap": {
+      "command": "synap",
+      "args": ["mcp", "serve", "/absolute/path/to/repository"]
     }
   }
 }
@@ -26,9 +52,20 @@ Copy the generated block into your IDE settings under MCP Servers:
 
 ---
 
+## Transport & Stdio Hygiene
+
+* **Pure JSON-RPC on `stdout`:** Synap strictly reserves standard output for JSON-RPC messages required by the MCP protocol specification.
+* **Diagnostics on `stderr`:** All system logging, operational metrics, and error diagnostics from `structlog` are routed directly to standard error (`stderr`), preventing protocol stream parsing failures.
+* **Verification:** Test connection viability using the CLI verification command:
+  ```bash
+  synap mcp verify .
+  ```
+
+---
+
 ## Deterministic JSON Envelope
 
-Every MCP tool invocation returns a JSON string structured inside a standardized envelope.
+Every MCP tool invocation returns a JSON string enclosed within a standardized, predictable envelope.
 
 ### Successful Response Schema
 ```json
@@ -41,8 +78,9 @@ Every MCP tool invocation returns a JSON string structured inside a standardized
 }
 ```
 * `data` — The payload returned by the specific tool.
-* `warnings` — List of warnings (e.g. `["Working tree is dirty. Index may be stale."]`).
-* `dirty_tree` — Boolean flag indicating whether the Git working directory contains uncommitted changes.
+* `warnings` — List of warnings (e.g., `["Working tree is dirty. Index may be stale."]`).
+* `dirty_tree` — Boolean flag indicating whether the Git working tree contains uncommitted changes.
+* `trace_id` — Unique UUID string tracing the query lifecycle.
 
 ### Error Response Schema
 ```json
@@ -58,15 +96,15 @@ Every MCP tool invocation returns a JSON string structured inside a standardized
   "dirty_tree": false
 }
 ```
-* `error.code` — Standardized codes: `INTERNAL_ERROR`, `INDEX_STALE`, or `NOT_FOUND`.
+* `error.code` — Standardized error codes: `INTERNAL_ERROR`, `INDEX_STALE`, or `NOT_FOUND`.
 
 ---
 
 ## Tool Reference
 
 ### 1. `get_status`
-Retrieves indexing state, branch name, and HEAD commit hashes.
-* **Input Schema:** None
+Retrieves indexing state, active Git branch, HEAD commit hashes, and file counts.
+* **Input Parameters:** None
 * **Output Payload (`data`):**
   ```json
   {
@@ -74,18 +112,18 @@ Retrieves indexing state, branch name, and HEAD commit hashes.
     "branch": "main",
     "git_commit": "d980cf7f4f6b2ea8b75e1c4df2e9d2d854eb75e1",
     "active_commit": "d980cf7f4f6b2ea8b75e1c4df2e9d2d854eb75e1",
-    "symbols": 420,
-    "files": 38,
+    "symbols": 770,
+    "files": 115,
     "mode": "active",
     "is_dirty": false
   }
   ```
 
 ### 2. `search`
-Queries the hybrid index for grounded context matches.
-* **Input Schema:**
-  * `query` (string, required): Keyword or phrase search terms.
-  * `max_tokens` (integer, optional, default: 4000): Token limit budget.
+Executes hybrid structural search for grounded context matches.
+* **Input Parameters:**
+  * `query` (string, required): Search phrase or symbol name.
+  * `max_tokens` (integer, optional, default: 4000): Token budget limit.
 * **Output Payload (`data`):**
   ```json
   {
@@ -111,12 +149,12 @@ Queries the hybrid index for grounded context matches.
   ```
 
 ### 3. `create_checkpoint`
-Saves current agent thoughts and files as a branch-specific checkpoint.
-* **Input Schema:**
-  * `doing` (string, required): Action description.
-  * `changed_files` (array of strings, required): Relative file paths.
-  * `next_step` (string, required): Future planned steps.
-  * `blockers` (string, required): Blockers or obstacles.
+Saves the agent's task state and affected files as a branch-specific checkpoint.
+* **Input Parameters:**
+  * `doing` (string, required): Active task description.
+  * `changed_files` (array of strings, required): Relative paths of modified files.
+  * `next_step` (string, required): Planned subsequent actions.
+  * `blockers` (string, required): Identified blockers or notes.
 * **Output Payload (`data`):**
   ```json
   {
@@ -127,7 +165,7 @@ Saves current agent thoughts and files as a branch-specific checkpoint.
 
 ### 4. `restore_checkpoint`
 Restores the latest checkpoint saved on the current branch.
-* **Input Schema:** None
+* **Input Parameters:** None
 * **Output Payload (`data`):**
   ```json
   {
@@ -143,10 +181,10 @@ Restores the latest checkpoint saved on the current branch.
   ```
 
 ### 5. `log_decision`
-Logs technical or design decisions to the project database logs.
-* **Input Schema:**
-  * `content` (string, required): Text description of the decision.
-  * `context_info` (string, required): Contextual info leading to the decision.
+Logs technical and architectural decisions to persistent project storage.
+* **Input Parameters:**
+  * `content` (string, required): Description of the technical decision.
+  * `context_info` (string, required): Contextual rationale leading to the choice.
 * **Output Payload (`data`):**
   ```json
   {
@@ -156,25 +194,25 @@ Logs technical or design decisions to the project database logs.
   ```
 
 ### 6. `verify_system`
-Checks SQLite database integrity and returns diagnostics.
-* **Input Schema:** None
+Checks SQLite database integrity and verifies runtime diagnostics.
+* **Input Parameters:** None
 * **Output Payload (`data`):**
   ```json
   {
     "database_integrity": "ok",
     "status": {
       "branch": "main",
-      "symbols": 420,
-      "files": 38
+      "symbols": 770,
+      "files": 115
     }
   }
   ```
 
 ### 7. `submit_lesson_analysis`
-Submits analysis text explaining a failure or revert event to the pending memory queue.
-* **Input Schema:**
+Submits root cause analysis for a pending memory lesson (e.g., following a revert event).
+* **Input Parameters:**
   * `lesson_id` (string, required): Unique identifier of the lesson.
-  * `why_failed` (string, required): Root cause analysis explaining why the code failed.
+  * `why_failed` (string, required): Explanation of why the code failed and what rule should be followed.
 * **Output Payload (`data`):**
   ```json
   {
@@ -184,8 +222,8 @@ Submits analysis text explaining a failure or revert event to the pending memory
   ```
 
 ### 8. `get_approved_memory`
-Retrieves all approved, active memory lessons that the agent must adhere to.
-* **Input Schema:** None
+Retrieves all approved, active memory lessons that agents must strictly obey.
+* **Input Parameters:** None
 * **Output Payload (`data`):**
   ```json
   {
@@ -209,8 +247,8 @@ Retrieves all approved, active memory lessons that the agent must adhere to.
   ```
 
 ### 9. `get_pending_memory`
-Retrieves all pending lessons awaiting review.
-* **Input Schema:** None
+Retrieves pending lessons awaiting human review.
+* **Input Parameters:** None
 * **Output Payload (`data`):**
   ```json
   {
@@ -220,9 +258,9 @@ Retrieves all pending lessons awaiting review.
   ```
 
 ### 10. `signal_low_context`
-Notifies that the agent's context is running low, recommending a checkpoint if usage exceeds config threshold.
-* **Input Schema:**
-  * `token_count` (integer, required): Active token usage count.
+Notifies that the agent is approaching context limits, recommending a checkpoint if usage exceeds the configured threshold (`checkpoint_threshold`).
+* **Input Parameters:**
+  * `token_count` (integer, required): Current token usage count.
   * `capacity` (integer, required): Context window limit.
 * **Output Payload (`data`):**
   ```json

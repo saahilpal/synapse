@@ -453,6 +453,25 @@ Even extensionless scripts are gracefully detected via shebang parsing. Missing 
 
 ---
 
+## Documentation
+
+Explore detailed guides and reference manuals:
+
+| Guide | Description |
+| :--- | :--- |
+| [CLI Command Reference](docs/cli.md) | Complete CLI syntax, options, and subcommand references. |
+| [Configuration Reference](docs/configuration.md) | Environment variables, config.toml options, and credentials. |
+| [Model Context Protocol (MCP)](docs/mcp.md) | IDE setup for Cursor, Windsurf, Claude Desktop, and tool definitions. |
+| [LLM & Embedding Providers](docs/providers.md) | Ollama, OpenAI, Gemini, Anthropic, OpenRouter, and embeddings. |
+| [Deterministic Indexing Architecture](docs/indexing.md) | Two-path scanner, Tree-sitter parsers, and SQLite optimizations. |
+| [L2 Semantic Wiki Engine](docs/wiki.md) | Asynchronous queue worker, lazy generation, and project synthesis. |
+| [L3 Behavioral Memory](docs/memory.md) | Checkpoints, decisions log, and git revert lesson lifecycle. |
+| [Diagnostic Web UI](docs/web-ui.md) | REST endpoints, SSE streams, and real-time dashboard panels. |
+| [Troubleshooting Guide](docs/troubleshooting.md) | Resolving DB locks, stale heartbeats, and environment errors. |
+| [Contributing Guide](docs/contributing.md) | Development setup, typing standards, and pull request rules. |
+
+---
+
 ## Contributing
 
 Execute unit tests:

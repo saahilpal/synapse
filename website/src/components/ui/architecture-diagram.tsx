@@ -46,7 +46,7 @@ const ARCH_COMPONENTS: ArchitectureComponent[] = [
     name: "FastMCP Stdio Server",
     category: "interface",
     description: "Low-latency Model Context Protocol bridge communicating directly with AI agent editors via standard I/O.",
-    techDetails: "Exposes search, log_decision, get_context, checkpoint tools with sub-10ms intent routing.",
+    techDetails: "Exposes search, log_decision, create_checkpoint, restore_checkpoint, and get_approved_memory tools over stdio.",
     inputData: "MCP JSON-RPC agent tool calls",
     outputData: "Grounded structural AST symbols & markdown context",
     fileLocation: "src/synap_git/mcp/server.py"

@@ -22,14 +22,11 @@ build/
 *.db-shm
 .env
 .env.*
+!.env.example
 .env.local
 .synapse/
 .synapse/*-wal
 .synapse/*-shm
-config.json
-status.json
-fix_exc.py
-test_embed.py
 .vscode/
 .idea/
 *.log

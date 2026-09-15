@@ -1,12 +1,12 @@
 # Deterministic Indexing Architecture
 
-Synap indexes code structure deterministically using a decoupled two-path indexing architecture.
+Synap indexes repository structure deterministically using a decoupled two-path architecture designed to provide sub-second incremental updates while scaling to 100k+ file monorepos.
 
 ---
 
 ## The Two-Path Design
 
-To scale across large repositories without introducing high CPU or disk I/O overhead, Synap splits indexing into two dedicated execution paths: first-run and incremental.
+To balance deep initial graph extraction with minimal CPU and I/O overhead during development, Synap splits indexing into two distinct paths:
 
 ```
                   ┌──────────────────────────────┐
@@ -30,37 +30,71 @@ To scale across large repositories without introducing high CPU or disk I/O over
 ```
 
 ### 1. First-Run Indexing (`_first_run_index`)
-Invoked when initializing a repository (`synap init`) or when index rebuilding is forced.
-* **Scanner Discovery:** Walks the repository tree, completely ignoring files and folders specified in `.gitignore` or default exclusions (`.venv`, `node_modules`, `dist`, etc.).
-* **Process-Pool Concurrency:** Uses `ProcessPoolExecutor` to parse codebase ASTs in parallel. Work is divided into chunks (500 files per chunk) processed across all available CPU cores.
-* **Pass 1 (AST Symbol Parsing):** Runs tree-sitter parsers to extract symbols (classes, functions, methods, modules). Generates stable, collision-free identifiers for symbols based on a `sha256(path + name + kind + start_line)` hash.
-* **Pass 2 (Bulk Edge Resolution):** Resolves imports and links dependency edges (`depends_on`) between caller and callee modules. Grouped queries are performed in batch transactions to minimize DB connections.
-* **Wiki Enqueuing:** Places files and project summaries (`overview.md`, `architecture.md`, `schema.md`) into the `wiki_queue` for asynchronous background generation.
+Invoked on `synap init` or when forced via `synap index --force`:
+* **Scanner Discovery:** Traverses the repository tree, honoring `.gitignore` rules and built-in exclusions (`.git`, `.synap`, `.venv`, `node_modules`, `dist`, `build`, `target`, `.next`, `vendor`).
+* **Process-Pool Concurrency:** Uses `ProcessPoolExecutor` to parse codebase ASTs concurrently across all CPU cores, processing files in chunks (500 files per chunk).
+* **Pass 1 (AST Symbol Extraction):** Runs language-specific Tree-sitter grammars to extract symbols (classes, functions, methods, interfaces, modules). Generates stable, deterministic identifiers:
+  $$\text{stable\_id} = \text{sha256}(\text{path} + \text{name} + \text{kind} + \text{start\_line})$$
+* **Pass 2 (Bulk Edge Resolution):** Resolves imports and links dependency edges (`depends_on`, caller/callee, class inheritance) between symbols. Queries and inserts are batched in single SQLite transactions.
+* **Wiki Enqueuing:** Places files and project synthesis summaries (`overview.md`, `architecture.md`, `schema.md`) into `wiki_queue`.
 
 ### 2. Incremental Indexing (`_incremental_index`)
-Invoked by the background daemon watcher when a Git commit or file change is detected.
-* **Git Delta Detection:** Rather than reading all files, Synap executes:
+Triggered automatically by the daemon or manually via `synap sync`:
+* **Git Delta Isolation:** Executes Git diffing between commits:
   ```bash
   git diff-tree -r --no-commit-id --name-status <prev_commit> <current_commit>
   ```
-  This immediately isolates added, modified, or deleted paths.
-* **Selective AST Updates:** Only changed files are read and parsed by the Tree-sitter engine. Stale symbols for deleted or modified files are cleanly removed from SQLite tables.
-* **Incremental Edge Resolution:** Re-resolves call and dependency edges strictly for symbols defined in changed files, preserving the rest of the graph structure.
+  Immediately isolates added (`A`), modified (`M`), deleted (`D`), or renamed (`R`) files.
+* **Selective AST Updates:** Only modified or added files are parsed. Old symbols and stale edges belonging to modified or removed files are pruned within a single atomic SQLite transaction.
+* **Incremental Edge Relinking:** Dependency edges are recalculated strictly for symbols affected by the changed files, preserving the rest of the graph structure untouched.
 
 ---
 
-## Exclusions & Controls
+## Supported Language Grammars
 
-* **GitIgnore Spec:** Synap implements a custom glob-to-regex matcher to follow `.gitignore` specifications exactly.
-* **Binary File Filtering:** Synap uses a file extension blocklist coupled with a control character ratio check (scans the first 1KB of content; if control characters exceed 10%, it is treated as binary) to bypass non-text content.
-* **Size Limits:** Files exceeding `max_file_bytes` (default 1MB) are completely skipped.
+Synap integrates Tree-sitter parsers covering 25+ programming and configuration languages:
+
+| Language | File Extensions | Extracted Symbol Types |
+| :--- | :--- | :--- |
+| **Python** | `.py` | Classes, functions, methods, imports |
+| **TypeScript / JavaScript** | `.ts`, `.tsx`, `.js`, `.jsx` | Classes, functions, methods, interfaces, types, imports |
+| **Rust** | `.rs` | Structs, enums, traits, functions, impl blocks, modules |
+| **Go** | `.go` | Structs, interfaces, functions, methods, package imports |
+| **C / C++** | `.c`, `.h`, `.cpp`, `.hpp`, `.cc` | Functions, structs, classes, namespaces, headers |
+| **Java** | `.java` | Classes, interfaces, methods, imports |
+| **C#** | `.cs` | Classes, interfaces, methods, namespaces |
+| **Ruby** | `.rb` | Classes, modules, methods |
+| **PHP** | `.php` | Classes, interfaces, functions, methods |
+| **Swift** | `.swift` | Classes, structs, protocols, functions |
+| **Kotlin / Scala** | `.kt`, `.kts`, `.scala` | Classes, objects, functions, traits |
+| **Shell / Bash** | `.sh`, `.bash` | Functions |
+| **SQL** | `.sql` | Tables, procedures, views |
+| **Configuration / Data** | `.json`, `.toml`, `.yaml`, `.yml` | Document structure and top-level keys |
 
 ---
 
-## SQLite Optimizations
+## Graph Edges & Relationships
 
-Synap applies high-throughput configurations to the SQLite indexing backend:
-* **WAL Mode:** The database is initialized with `PRAGMA journal_mode=WAL` to allow concurrent readers and writers to access the database without locking.
-* **Batch Inserts:** Inserts and deletes are wrapped in transaction blocks, executing symbol and edge insertions via `executemany` arrays.
-* **FTS5 Integration:** Synap maintains a virtual table `symbols_fts` using SQLite FTS5 for sub-millisecond keyword symbol queries, avoiding slow wildcard `LIKE` queries.
-* **Module Key Resolution:** Pre-computes and indexes a dot-separated `module_key` for every file (e.g. `src.utils.serialization`), allowing $O(1)$ module lookup.
+The structural graph records relational bonds between code nodes:
+* `depends_on` / `imports`: File-to-file and module-to-module dependencies.
+* `calls`: Function/method caller-to-callee invocations.
+* `inherits`: Class and interface inheritance hierarchies.
+* `contains`: File-to-symbol and class-to-method ownership.
+
+---
+
+## Exclusions & Safety Controls
+
+1. **GitIgnore Specifications:** Follows `.gitignore` rules recursively using an exact glob-to-regex matcher.
+2. **Binary File Filtering:**
+   - Extension blocklist (executables, archives, binaries, media).
+   - Control character ratio check: Inspects the first 1KB of content. If control bytes exceed 10%, the file is skipped as binary.
+3. **Size Limits:** Files exceeding `max_file_bytes` (default 1,000,000 bytes) are ignored to protect memory limits.
+
+---
+
+## SQLite Performance & Concurrency
+
+* **WAL Mode:** Initialized with `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL`, allowing concurrent reader threads without write blocking.
+* **FTS5 Full-Text Search:** Virtual table `symbols_fts` powers sub-millisecond lexical queries across symbol names and signatures.
+* **Module Key Resolution:** Pre-computes and indexes dot-separated `module_key` lookups (e.g. `synap_git.indexer.scanner`) for $O(1)$ dependency graph traversal.

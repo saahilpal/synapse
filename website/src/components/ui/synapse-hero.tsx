@@ -268,7 +268,7 @@ export function SynapseHero() {
         <div className="mt-14 max-w-5xl mx-auto">
           <div className="minimal-card overflow-hidden shadow-2xl">
             {/* Sandbox Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-surface-subtle">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-border bg-surface-subtle">
               <div className="flex items-center gap-2">
                 <div className="flex gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]/60"></div>
@@ -279,28 +279,28 @@ export function SynapseHero() {
               </div>
 
               {/* View Switcher Tabs */}
-              <div className="flex items-center bg-surface border border-border rounded-lg p-0.5 text-xs font-mono">
+              <div className="flex items-center overflow-x-auto max-w-full bg-surface border border-border rounded-lg p-0.5 text-xs font-mono">
                 <button
                   onClick={() => setActiveView("graph")}
-                  className={`px-3 py-1 rounded-md transition-all ${activeView === "graph" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                  className={`px-3 py-1 rounded-md transition-all whitespace-nowrap ${activeView === "graph" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
                 >
                   AST Graph (L1)
                 </button>
                 <button
                   onClick={() => setActiveView("visual")}
-                  className={`px-3 py-1 rounded-md transition-all ${activeView === "visual" ? "bg-surface-hover text-accent-blue font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                  className={`px-3 py-1 rounded-md transition-all whitespace-nowrap ${activeView === "visual" ? "bg-surface-hover text-accent-blue font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
                 >
                   Visual Architecture
                 </button>
                 <button
                   onClick={() => setActiveView("mcp")}
-                  className={`px-3 py-1 rounded-md transition-all ${activeView === "mcp" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                  className={`px-3 py-1 rounded-md transition-all whitespace-nowrap ${activeView === "mcp" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
                 >
                   FastMCP Protocol
                 </button>
                 <button
                   onClick={() => setActiveView("savings")}
-                  className={`px-3 py-1 rounded-md transition-all ${activeView === "savings" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
+                  className={`px-3 py-1 rounded-md transition-all whitespace-nowrap ${activeView === "savings" ? "bg-surface-hover text-text-primary font-medium border border-border" : "text-text-muted hover:text-text-primary"}`}
                 >
                   Token Economics
                 </button>

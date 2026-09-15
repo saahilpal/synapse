@@ -39,11 +39,11 @@ export function ThreeLayerExplorer() {
         </div>
 
         {/* Layer Selector Tabs */}
-        <div className="flex justify-center mb-10">
-          <div className="inline-flex p-1 rounded-xl bg-surface border border-border font-mono text-xs shadow-md">
+        <div className="flex justify-center mb-10 px-2">
+          <div className="inline-flex flex-wrap sm:flex-nowrap justify-center p-1 rounded-xl bg-surface border border-border font-mono text-xs shadow-md max-w-full overflow-x-auto gap-1">
             <button
               onClick={() => setActiveLayer("L1")}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeLayer === "L1"
                   ? "bg-surface-hover text-accent-blue font-semibold border border-border"
                   : "text-text-muted hover:text-text-primary"
@@ -55,7 +55,7 @@ export function ThreeLayerExplorer() {
 
             <button
               onClick={() => setActiveLayer("L2")}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeLayer === "L2"
                   ? "bg-surface-hover text-accent-emerald font-semibold border border-border"
                   : "text-text-muted hover:text-text-primary"
@@ -67,7 +67,7 @@ export function ThreeLayerExplorer() {
 
             <button
               onClick={() => setActiveLayer("L3")}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeLayer === "L3"
                   ? "bg-surface-hover text-accent-amber font-semibold border border-border"
                   : "text-text-muted hover:text-text-primary"
