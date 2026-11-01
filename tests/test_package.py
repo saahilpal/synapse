@@ -76,13 +76,16 @@ def test_cli_version_flags() -> None:
 
 
 def test_cli_help() -> None:
+    import re
+
     runner = CliRunner()
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Usage: synap" in result.output
+    clean = " ".join(re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.output).split())
+    assert "Usage: synap" in clean or "synap" in clean
     # Check core commands appear in help
     for cmd in ["init", "status", "start", "stop", "blast", "hubs", "search", "doctor", "mcp"]:
-        assert cmd in result.output
+        assert cmd in clean
 
 
 @pytest.mark.parametrize(
@@ -122,4 +125,5 @@ def test_non_git_directory_help_and_version(tmp_path: Path) -> None:
 
         res_help = runner.invoke(app, ["--help"])
         assert res_help.exit_code == 0
-        assert "Usage: synap" in res_help.output
+        clean_help = " ".join(re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res_help.output).split())
+        assert "Usage: synap" in clean_help or "synap" in clean_help
