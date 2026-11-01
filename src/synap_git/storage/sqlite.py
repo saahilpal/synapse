@@ -892,14 +892,14 @@ class SynapStore:
                 touched_ids = [t["symbol_id"] for t in touched]
                 placeholders = ",".join(["?"] * len(touched_ids))
                 caller_rows = conn.execute(
-                    f"""
+                    f"""  # nosec B608
                     SELECT s_caller.name, s_caller.kind, f_caller.path, s_caller.start_line, s_target.name as impacts
                     FROM edges e
                     JOIN symbols s_caller ON e.source_symbol = s_caller.symbol_id
                     JOIN files f_caller ON s_caller.file_id = f_caller.file_id
                     JOIN symbols s_target ON e.target_symbol = s_target.symbol_id
                     WHERE e.target_symbol IN ({placeholders})
-                    """,  # noqa: S608
+                    """,  # noqa: S608  # nosec B608
                     touched_ids,
                 ).fetchall()
                 for r in caller_rows:
