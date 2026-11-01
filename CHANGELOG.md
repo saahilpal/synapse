@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-11-01
+
+### Specialist Implementation Sprint & Production-Quality Engineering
+- **Shared Runtime Snapshot Caching & Event Stream Isolation**: Added 2-second TTL caching to `/api/status` and `/api/v1/events` avoiding redundant Git child processes and SQLite queries; added client disconnect detection (`await request.is_disconnected()`) in SSE loop to prevent CPU leaks on closed browser tabs.
+- **Compact FastMCP Session Preamble & Batch Extraction**: Reduced `get_session_preamble()` prompt overhead to <150 tokens preserving negative constraints and branch checkpoints; added `read_symbols(symbols=[...])` for single-roundtrip multi-symbol extraction.
+- **Pipe-Friendly CLI & Machine-Parsable JSON**: Added interactive TTY autodetection in `_print_formatted()` emitting unstyled plain text and pipe-delimited tables when redirected, plus `--json` flags to `synap status`, `synap diff`, `synap blast`, and `synap hubs`.
+- **Merge/Rebase In-Progress Indexing Guards**: Prevented conflict marker corruption (`<<<<<<< HEAD`) by auto-pausing the indexing engine during active `MERGE_HEAD`, `REBASE_HEAD`, or `BISECT_HEAD` operations.
+- **Proportional Context Budgeting & Tokenization**: Replaced fixed 600-token safety margin with dynamic proportional allocation (`12%` budget cap) and added 2-character identifier preservation (`db`, `id`, `ip`, `ui`, `tx`) with camelCase/snake_case sub-tokenization.
+- **Storage Self-Healing Isolation**: Enforced that `recover_if_corrupted()` only resets database files upon explicit `PRAGMA quick_check` B-tree failure, never on transient concurrency lock timeouts.
+- **Background UI Throttling**: Paused dashboard polling and event consumption when browser tab is inactive via Page Visibility API.
+- **Packaging & Version Synchronization**: Unified package version `2.6.0` across `pyproject.toml` and `synap_git/__init__.py`, and pruned legacy unused dependencies.
+
+## [2.5.0] - 2026-11-01
+
+### Major System Transformation & Performance Acceleration (10-Specialist Mission)
+- **193x Faster Graph Traversal**: Replaced full-table scans in `get_neighborhood()` with `min_distances` CTE pre-aggregation and added composite covering indexes (`idx_edges_src_tgt`, `idx_edges_tgt_src`, `idx_symbols_start_end`).
+- **Personalized PageRank (PPR)**: Pure-Python PPR implementation accelerated 2.36x with integer index arrays, biasing ranking towards active dirty files to identify architectural hubs.
+- **Git-Aware Blast Radius Analysis**: Diff interval mapping (`get_dirty_diff_ranges()`) across untracked, staged, and unstaged modifications, correlating touched lines to AST symbols, callers, and impacted test suites.
+- **Git Worktree & Detached HEAD Resolution**: Safe worktree support resolving `gitdir:` and `commondir:`, robust checkout classification during detached HEAD and rebases, and clean ghost file pruning on branch checkout transitions.
+- **Deterministic AST Code Skeletonization**: Reverse-order byte-slicing across Python, JS/TS, Go, Rust, Java, C/C++ yielding 81%–90% token reduction with nested closure preservation.
+- **Zero-Corruption SQLite Recovery**: Hardened `recover_if_corrupted()` to never wipe database files on transient lock contention or timeouts, and added PRAGMA tuning (`busy_timeout=30000`, `cache_size=-64000`, `temp_store=MEMORY`).
+- **FastMCP Tool Diet**: Upgraded 23 FastMCP tools with clean fallback defaults, directional aliases (`get_callers`, `get_callees`), `read_symbol`, `get_diff`, and `get_test_recommendations`.
+- **New Advanced CLI Commands**: Added `synap blast`, `synap hubs`, `synap outline`, `synap diff`, `synap test`, `synap explain`, `synap pack`, interactive status dashboard on zero arguments, and `--fix` / `--context` support in `synap doctor`.
+- **Web UI Overhaul**: Revamped diagnostic dashboard with zero emojis, dark/light themes, `/` keyboard shortcut search, interactive symbol inspector modal, live blast radius table, PageRank hubs table, and one-click lesson approval/rejection.
+- **Dead Code Pruning**: Purged obsolete `retrieval/memory.py` module, redundant CLI wrappers, and standardized soft-rejection semantics across Web UI and CLI.
+- **10-Specialist Improvement Audit**: Added authoritative audit roadmap (`docs/IMPROVEMENT_AUDIT.md`), architecture specifications (`docs/architecture/system-overview.md`), research literature review (`docs/research/benchmarks-and-literature.md`), and monorepo stress methodology (`docs/benchmarks/monorepo-stress-methodology.md`).
+- **Critical Concurrency & Safety Fixes**:
+  - Atomic wiki task dequeuing in SQLite via `UPDATE ... RETURNING *` inside `BEGIN IMMEDIATE`.
+  - JSONC comment parsing and `.bak` backups in `_inject_mcp_config` to prevent IDE config wiping.
+  - Subdirectory CLI execution automatically resolves repository root via `GitRepository.find_root`.
+  - Indexing suspended during active merge conflicts (`MERGE_HEAD`), rebases, and bisects.
+  - Proportional token budgeting (`min(500, int(max_tokens * 0.15))`) and preserved $\ge 2$ char tokens in lexical search.
+  - Web UI polling throttled when tab is backgrounded via Page Visibility API.
+
 ## [2.4.1] - 2026-09-11
 
 ### Security, Protocol & Architecture Hardening (Audit Remediation)

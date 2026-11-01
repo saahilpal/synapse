@@ -79,6 +79,10 @@ class SynapSettings(BaseSettings):
 
     daemon_poll_interval_seconds: float = 2.0
     shutdown_timeout_seconds: float = 5.0
+    enable_file_wiki: bool = Field(
+        default=False,
+        description="Enable bulk LLM wiki generation for individual files (disabled by default to prevent token waste).",
+    )
 
     def _get_fallback_credential(self, key: str) -> str | None:
         try:

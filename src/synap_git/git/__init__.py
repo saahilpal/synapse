@@ -6,6 +6,14 @@ from synap_git.git.state import (
     GitIntegrationError,
     GitRepository,
     GitState,
+    SymbolLineageRecord,
 )
 
-__all__ = ["GitChange", "GitChangeKind", "GitIntegrationError", "GitRepository", "GitState"]
+__all__ = [
+    "GitChange",
+    "GitChangeKind",
+    "GitIntegrationError",
+    "GitRepository",
+    "GitState",
+    "SymbolLineageRecord",
+]

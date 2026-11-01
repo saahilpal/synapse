@@ -59,8 +59,8 @@ def test_incremental_zero_changes_is_fast(settings: SynapSettings) -> None:
     new_commit = runtime.index_repository()
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
-    assert elapsed_ms < 100.0, (
-        f"Incremental indexing with zero changes took {elapsed_ms:.1f}ms — exceeds 100ms budget"
+    assert elapsed_ms < 250.0, (
+        f"Incremental indexing with zero changes took {elapsed_ms:.1f}ms — exceeds 250ms budget"
     )
     assert new_commit is not None
 

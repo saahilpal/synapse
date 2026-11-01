@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -95,3 +96,157 @@ def test_api_get_wiki_page(client: TestClient, runtime: SynapRuntime) -> None:
     res_missing = client.get("/wiki/non-existent")
     assert res_missing.status_code == 200
     assert res_missing.json()["status"] == "error"
+
+
+def test_status_snapshot_caching(client: TestClient) -> None:
+    # First call
+    res1 = client.get("/api/v1/status")
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert "freshness_ttl" in data1
+    assert data1["freshness_ttl"] == 2.0
+    assert "timestamp" in data1
+    assert "cached_at" in data1
+    assert "fingerprint" in data1
+    assert "is_dirty" in data1
+
+    # Second call immediately after should return cached snapshot
+    res2 = client.get("/api/v1/status")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["timestamp"] == data1["timestamp"]
+    assert data2["cached_at"] == data1["cached_at"]
+    assert data2["fingerprint"] == data1["fingerprint"]
+
+    # Alias /api/status should also share the same cached snapshot
+    res3 = client.get("/api/status")
+    assert res3.status_code == 200
+    data3 = res3.json()
+    assert data3["timestamp"] == data1["timestamp"]
+    assert data3["fingerprint"] == data1["fingerprint"]
+
+    # Invalidate cache and call again
+    cache = cast(Any, client.app).state.status_cache
+    cache.invalidate()
+    res4 = client.get("/api/v1/status")
+    assert res4.status_code == 200
+    data4 = res4.json()
+    assert data4["timestamp"] >= data1["timestamp"]
+
+
+def test_runtime_status_calls_throttled(
+    client: TestClient, runtime: SynapRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call_count = 0
+    orig_status = runtime.status
+
+    def mock_status() -> Any:
+        nonlocal call_count
+        call_count += 1
+        return orig_status()
+
+    monkeypatch.setattr(runtime, "status", mock_status)
+
+    cache = cast(Any, client.app).state.status_cache
+    cache.invalidate()
+
+    # Make 10 sequential calls across different status aliases
+    for _ in range(5):
+        r1 = client.get("/api/v1/status")
+        assert r1.status_code == 200
+        r2 = client.get("/api/status")
+        assert r2.status_code == 200
+
+    # Only 1 call to runtime.status should have occurred thanks to the shared snapshot cache
+    assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_events_sse_stream_initial_and_keepalive(runtime: SynapRuntime) -> None:
+    import json
+    from unittest.mock import MagicMock
+
+    from fastapi.routing import APIRoute
+
+    app = create_app(runtime)
+    mock_request = MagicMock()
+    call_count = 0
+
+    async def is_disc() -> bool:
+        nonlocal call_count
+        call_count += 1
+        # Disconnect after emitting initial data and keepalive
+        if call_count > 22:
+            return True
+        return False
+
+    mock_request.is_disconnected = is_disc
+
+    route = next(r for r in app.routes if getattr(r, "path", None) == "/api/v1/events")
+    assert isinstance(route, APIRoute)
+    response = await route.endpoint(mock_request)
+    assert response.status_code == 200
+    assert response.media_type == "text/event-stream"
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    assert len(chunks) == 2
+    assert chunks[0].startswith("data: ")
+    payload = json.loads(chunks[0][len("data: ") :])
+    assert "symbols" in payload
+    assert "branch" in payload
+    assert "fingerprint" in payload
+    assert "timestamp" in payload
+
+    # Second event must be a keepalive heartbeat
+    assert chunks[1] == ": keepalive\n\n"
+
+
+@pytest.mark.asyncio
+async def test_events_sse_stream_updates_on_fingerprint_change(runtime: SynapRuntime) -> None:
+    import json
+    from unittest.mock import MagicMock
+
+    from fastapi.routing import APIRoute
+
+    app = create_app(runtime)
+    mock_request = MagicMock()
+    call_count = 0
+
+    async def is_disc() -> bool:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 10:
+            # Simulate a state change by invalidating cache and updating mock
+            app.state.status_cache.invalidate()
+            orig = app.state.status_cache.get_status
+
+            async def fake_status() -> dict[str, Any]:
+                s = await orig()
+                s = dict(s)
+                s["fingerprint"] = "changed-fingerprint"
+                return cast(dict[str, Any], s)
+
+            app.state.status_cache.get_status = fake_status
+        if call_count > 25:
+            return True
+        return False
+
+    mock_request.is_disconnected = is_disc
+
+    route = next(r for r in app.routes if getattr(r, "path", None) == "/api/v1/events")
+    assert isinstance(route, APIRoute)
+    response = await route.endpoint(mock_request)
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    assert len(chunks) == 2
+    # Both events should be data updates because the fingerprint changed
+    assert chunks[0].startswith("data: ")
+    assert chunks[1].startswith("data: ")
+    p2 = json.loads(chunks[1][len("data: ") :])
+    assert p2["fingerprint"] == "changed-fingerprint"

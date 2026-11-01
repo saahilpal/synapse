@@ -1,32 +1,60 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synap Operational Dashboard</title>
+    <title>Synapse Operations & Code Intelligence</title>
     <style>
-        :root {
+        :root[data-theme="dark"] {
             --bg: #09090b;
-            --surface: #18181b;
-            --surface-hover: #27272a;
+            --surface: #121215;
+            --surface-hover: #1c1c22;
             --border: #27272a;
+            --border-subtle: #1e1e24;
             --text-primary: #f4f4f5;
             --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
             --accent: #3b82f6;
+            --accent-subtle: rgba(59, 130, 246, 0.12);
             --success: #22c55e;
-            --warning: #eab308;
+            --success-subtle: rgba(34, 197, 94, 0.12);
+            --warning: #f59e0b;
+            --warning-subtle: rgba(245, 158, 11, 0.12);
             --danger: #ef4444;
-            --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
-            --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+            --danger-subtle: rgba(239, 68, 68, 0.12);
+            --code-bg: #0d0d11;
         }
 
+        :root[data-theme="light"] {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-hover: #f1f5f9;
+            --border: #e2e8f0;
+            --border-subtle: #edf2f7;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+            --accent: #2563eb;
+            --accent-subtle: rgba(37, 99, 235, 0.08);
+            --success: #16a34a;
+            --success-subtle: rgba(22, 163, 74, 0.08);
+            --warning: #d97706;
+            --warning-subtle: rgba(217, 119, 6, 0.08);
+            --danger: #dc2626;
+            --danger-subtle: rgba(220, 38, 38, 0.08);
+            --code-bg: #f1f5f9;
+        }
+
+        * { box-sizing: border-box; }
+
         body {
-            font-family: var(--font-sans);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: var(--bg);
             color: var(--text-primary);
             margin: 0;
-            padding: 2rem;
+            padding: 1.5rem 2rem;
             line-height: 1.5;
+            transition: background 0.15s ease, color 0.15s ease;
         }
 
         header {
@@ -34,117 +62,645 @@
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid var(--border);
-            padding-bottom: 1.5rem;
-            margin-bottom: 2rem;
+            padding-bottom: 1.25rem;
+            margin-bottom: 1.5rem;
+            gap: 1rem;
+            flex-wrap: wrap;
         }
 
-        h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; }
-        h2 { margin: 0 0 1rem 0; font-size: 1.125rem; font-weight: 500; color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;}
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        h1 { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
+        h2 { margin: 0 0 1rem 0; font-size: 0.95rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+
+        .version-badge {
+            font-size: 0.7rem;
+            padding: 0.15rem 0.45rem;
+            background: var(--accent-subtle);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 9999px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-input {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.45rem 2.25rem 0.45rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.8125rem;
+            width: 270px;
+            outline: none;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-subtle);
+        }
+
+        .search-kbd {
+            position: absolute;
+            right: 0.55rem;
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            border-radius: 0.25rem;
+            padding: 1px 5px;
+            font-family: monospace;
+            pointer-events: none;
+            background: var(--bg);
+        }
+
+        .btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.8125rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+
+        .btn:hover {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+            border-color: var(--text-muted);
+        }
+
+        .btn-action {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+        }
+
+        .btn-action:hover {
+            filter: brightness(1.1);
+            color: #ffffff;
+        }
+
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: #ffffff;
+            border-color: var(--success);
+            padding: 0.2rem 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: #ffffff;
+            border-color: var(--danger);
+            padding: 0.2rem 0.5rem;
+            font-size: 0.75rem;
+        }
 
         .status-badge {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.25rem 0.75rem;
+            padding: 0.3rem 0.75rem;
             border-radius: 9999px;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             font-weight: 500;
-            background: rgba(34, 197, 94, 0.1);
+            background: var(--success-subtle);
             color: var(--success);
-            border: 1px solid rgba(34, 197, 94, 0.2);
+            border: 1px solid var(--success);
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background: currentColor;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
         }
 
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 1.25rem;
+        }
+
+        .col-4 { grid-column: span 4; }
+        .col-6 { grid-column: span 6; }
+        .col-8 { grid-column: span 8; }
+        .col-12 { grid-column: span 12; }
+
+        @media (max-width: 1024px) {
+            .col-4, .col-6, .col-8 { grid-column: span 12; }
         }
 
         .card {
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 0.5rem;
-            padding: 1.5rem;
+            padding: 1.25rem;
             display: flex;
             flex-direction: column;
-            margin-bottom: 1.5rem;
+            transition: outline 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        @keyframes cardGlow {
+            0% { outline: 2px solid var(--accent); box-shadow: 0 0 16px var(--accent-subtle); }
+            50% { outline: 2px solid var(--accent); box-shadow: 0 0 20px var(--accent); }
+            100% { outline: 2px solid transparent; box-shadow: none; }
+        }
+
+        .card-highlight {
+            animation: cardGlow 1.5s ease-out;
+        }
+
+        /* 1. Guided Onboarding Banner */
+        .onboarding-card {
+            background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+            border: 1px solid var(--accent);
+            border-radius: 0.5rem;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .onboarding-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.75rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .onboarding-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .onboarding-title {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .onboarding-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.35fr 1fr;
+            gap: 1.25rem;
+        }
+
+        @media (max-width: 1024px) {
+            .onboarding-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+        }
+
+        .onboarding-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+
+        .onboarding-panel h3 {
+            margin: 0;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .pill-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            width: fit-content;
+        }
+
+        .pill-clean {
+            background: var(--success-subtle);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .pill-dirty {
+            background: var(--warning-subtle);
+            color: var(--warning);
+            border: 1px solid var(--warning);
+        }
+
+        .hub-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.2rem;
+        }
+
+        .hub-chip {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.2rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            transition: all 0.15s ease;
+        }
+
+        .hub-chip:hover {
+            border-color: var(--accent);
+            background: var(--accent-subtle);
+            color: var(--accent);
+        }
+
+        .hub-chip .hub-score {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+        }
+
+        .quick-links-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+        }
+
+        .quick-link-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.45rem 0.75rem;
+            border-radius: 0.35rem;
+            font-size: 0.78125rem;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.15s ease;
+        }
+
+        .quick-link-btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+            color: var(--accent);
         }
 
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 1rem;
+            gap: 0.75rem;
         }
 
         .stat-box {
             background: var(--bg);
             border: 1px solid var(--border);
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             border-radius: 0.375rem;
         }
 
-        .stat-value { font-size: 1.5rem; font-weight: 600; font-family: var(--font-mono); }
-        .stat-label { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
 
-        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-        th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--border); }
-        th { color: var(--text-secondary); font-weight: 500; }
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.6875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-top: 0.2rem;
+        }
+
+        /* 2. Responsive Table layout with graceful text wrapping */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+            table-layout: fixed;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+            word-break: break-word;
+            overflow-wrap: break-word;
+            vertical-align: middle;
+        }
+
+        th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
 
         code {
-            background: var(--bg);
-            padding: 0.2rem 0.4rem;
+            background: var(--code-bg);
+            padding: 0.15rem 0.35rem;
             border-radius: 0.25rem;
-            font-family: var(--font-mono);
-            font-size: 0.8125rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
             color: var(--accent);
             border: 1px solid var(--border);
+            word-break: break-all;
+            white-space: normal;
+            display: inline-block;
+            max-width: 100%;
         }
 
         .empty-state {
             color: var(--text-secondary);
             text-align: center;
-            padding: 2rem;
-            font-style: italic;
+            padding: 1.75rem 1rem;
+            font-size: 0.8125rem;
             background: var(--bg);
             border-radius: 0.375rem;
             border: 1px dashed var(--border);
+            line-height: 1.6;
         }
 
         .row-hover:hover {
-            background: var(--bg);
+            background: var(--surface-hover);
+        }
+
+        /* Modal Dialog */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.65);
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding-top: 4.5rem;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            width: 720px;
+            max-width: 92vw;
+            max-height: 82vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-body {
+            padding: 1.25rem;
+            overflow-y: auto;
+        }
+
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            overflow-x: auto;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* Offline loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--text-muted);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--accent);
+            padding: 0.65rem 1.15rem;
+            border-radius: 0.375rem;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            z-index: 2000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+            gap: 0.5rem;
         }
     </style>
 </head>
 <body>
-    <header>
-        <div>
-            <h1>Synap <span style="color: var(--text-secondary); font-weight: 400;">Operations</span></h1>
-            <p id="repo-path" style="margin: 0.25rem 0 0 0; font-size: 0.875rem; color: var(--text-secondary); font-family: var(--font-mono);">Connecting...</p>
+    <header role="banner">
+        <div class="header-title">
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <h1>Synapse <span style="color: var(--text-secondary); font-weight: 400; font-size: 1rem;">Context Engine</span></h1>
+                    <span class="version-badge">v2.6</span>
+                </div>
+                <p id="repo-path" style="margin: 0.15rem 0 0 0; font-size: 0.75rem; color: var(--text-secondary); font-family: monospace;">Connecting to repository...</p>
+            </div>
         </div>
-        <div class="status-badge">
-            <div class="status-dot"></div>
-            Daemon Active
+
+        <div class="header-controls">
+            <div class="search-box">
+                <input type="search" id="global-search" class="search-input" placeholder="Search symbols & context..." aria-label="Search symbols & context" autocomplete="off" />
+                <span class="search-kbd">/</span>
+            </div>
+
+            <button class="btn" id="mcp-config-btn" title="View MCP Client configuration snippets">
+                <span>MCP Setup</span>
+            </button>
+
+            <button class="btn" id="guide-toggle-btn" title="Toggle Onboarding Guide (?)">
+                <span id="guide-btn-text">Guide</span>
+            </button>
+
+            <button class="btn" id="theme-btn" title="Toggle theme (D)">
+                <span id="theme-icon">Theme</span>
+            </button>
+
+            <button class="btn" id="refresh-btn" title="Refresh dashboard (R)">
+                Refresh
+            </button>
+
+            <div class="status-badge" id="daemon-badge">
+                <div class="status-dot"></div>
+                <span id="daemon-text">Connecting</span>
+            </div>
         </div>
     </header>
 
-    <div class="grid">
-        <!-- Index Health -->
-        <div class="card">
-            <h2>State Overview</h2>
+    <main class="grid" role="main">
+        <!-- 0. Product Onboarding Journey Banner -->
+        <section class="card col-12 onboarding-card" id="onboarding-guide" aria-labelledby="onboarding-title">
+            <div class="onboarding-header">
+                <div class="onboarding-title-wrap">
+                    <h2 class="onboarding-title" id="onboarding-title" style="border: none; margin: 0; padding: 0;">Welcome to Synapse | Developer Onboarding & Health</h2>
+                    <span class="version-badge">Self-Contained</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <button class="btn btn-sm" id="dismiss-onboarding-btn" title="Dismiss guide (reopen via Guide button in header)">
+                        ✕ Dismiss Guide
+                    </button>
+                </div>
+            </div>
+
+            <div class="onboarding-grid">
+                <!-- Panel A: Indexing & Tree State -->
+                <div class="onboarding-panel">
+                    <h3>📊 Indexing & Freshness</h3>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="pill-badge pill-clean" id="onboarding-tree-status">
+                            <span class="status-dot"></span> Checking tree...
+                        </span>
+                    </div>
+                    <div style="font-size: 0.78125rem; color: var(--text-secondary);" id="onboarding-freshness-info">
+                        Freshness: <strong id="onboarding-freshness" style="color: var(--text-primary); font-family: monospace;">calculating...</strong>
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;" id="onboarding-engine-summary">
+                        L1 AST index active with SQLite WAL storage and zero external CDNs.
+                    </div>
+                </div>
+
+                <!-- Panel B: Repository Architecture & Hubs -->
+                <div class="onboarding-panel">
+                    <h3>🏛️ Architecture & Top Hubs</h3>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                        <strong>3-Layer Engine:</strong> L1 AST Code Graph (Tree-sitter) · L2 Semantic Wiki · L3 Behavioral Memory.
+                    </div>
+                    <div>
+                        <div style="font-size: 0.6875rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em; margin-bottom: 0.2rem;">
+                            Top Architectural Hubs (PageRank):
+                        </div>
+                        <div class="hub-chips" id="onboarding-top-hubs">
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Calculating hubs...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel C: Quick Navigation & Ergonomics -->
+                <div class="onboarding-panel">
+                    <h3>⚡ Quick Actions</h3>
+                    <div class="quick-links-group">
+                        <button class="quick-link-btn" onclick="focusSearch()">
+                            <span>🔍 Search Symbols & Graph</span>
+                            <kbd class="search-kbd" style="position: static; font-size: 0.65rem;">/</kbd>
+                        </button>
+                        <button class="quick-link-btn" onclick="scrollToCard('blast-card')">
+                            <span>🎯 Inspect Blast Radius</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted);">Uncommitted</span>
+                        </button>
+                        <button class="quick-link-btn" onclick="scrollToCard('memory-card')">
+                            <span>🛡️ View Active Rules</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted);">L3 Memory</span>
+                        </button>
+                        <button class="quick-link-btn" id="onboarding-copy-mcp" onclick="copyActiveMcpSnippet()">
+                            <span>📋 Copy MCP Connection Config</span>
+                            <span style="font-size: 0.7rem; color: var(--accent);">One-Click</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 1. State Overview -->
+        <section class="card col-4" id="repo-state-card" aria-labelledby="repo-state-title">
+            <h2 id="repo-state-title">Repository State</h2>
             <div class="stats-grid">
                 <div class="stat-box">
                     <div class="stat-value" id="stat-files">-</div>
@@ -152,132 +708,184 @@
                 </div>
                 <div class="stat-box">
                     <div class="stat-value" id="stat-symbols">-</div>
-                    <div class="stat-label">Symbols Extracted</div>
+                    <div class="stat-label">Indexed Symbols</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value" id="stat-branch">-</div>
+                    <div class="stat-value" id="stat-branch" style="font-size: 1rem; word-break: break-all;">-</div>
                     <div class="stat-label">Active Branch</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value" id="stat-commit" style="font-size: 1rem; margin-top:0.3rem;">-</div>
-                    <div class="stat-label">HEAD OID</div>
+                    <div class="stat-value" id="stat-commit" style="font-size: 0.95rem; margin-top: 0.15rem;">-</div>
+                    <div class="stat-label">HEAD Commit</div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- L3 Memory (Lessons) -->
-        <div class="card" style="grid-column: span 2;">
-            <h2>L3 Agent Memory (Lessons)</h2>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
-                <div>
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--success);">Approved (Active)</h3>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Rule / Details</th>
-                                <th>Expires</th>
-                            </tr>
-                        </thead>
-                        <tbody id="approved-lessons-body">
-                            <tr><td colspan="3" class="empty-state">Loading approved lessons...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div>
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--warning);">Pending Approval</h3>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Commit</th>
-                                <th>What Failed</th>
-                                <th>Files</th>
-                            </tr>
-                        </thead>
-                        <tbody id="pending-lessons-body">
-                            <tr><td colspan="3" class="empty-state">Loading pending lessons...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+        <!-- 2. Git Blast Radius -->
+        <section class="card col-8" id="blast-card" aria-labelledby="blast-title">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 1rem;">
+                <h2 id="blast-title" style="margin: 0; border: none; padding: 0;">Git Blast Radius (Uncommitted Changes)</h2>
+                <span id="blast-clean-pill" class="pill-badge pill-clean" style="display: none;">Clean Working Tree</span>
             </div>
-        </div>
+            <div style="max-height: 220px; overflow-y: auto;">
+                <table style="table-layout: fixed;">
+                    <colgroup>
+                        <col style="width: 28%;">
+                        <col style="width: 28%;">
+                        <col style="width: 22%;">
+                        <col style="width: 22%;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Modified Symbol</th>
+                            <th>Location</th>
+                            <th>Direct Callers</th>
+                            <th>Impacted Tests</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blast-body">
+                        <tr><td colspan="4" class="empty-state">Loading blast radius...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
-        <!-- LLM Usage -->
-        <div class="card" style="grid-column: span 2;">
-            <h2>LLM Call Usage</h2>
-            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem;">
-                <div class="stats-grid" style="grid-template-columns: 1fr; gap: 0.75rem;">
-                    <div class="stat-box">
-                        <div class="stat-value" id="cost-total-calls">0</div>
-                        <div class="stat-label">Total LLM Calls</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value" id="cost-total-tokens">0</div>
-                        <div class="stat-label">Total Tokens (In+Out)</div>
-                    </div>
-                </div>
+        <!-- 3. Architectural Hubs (PageRank) -->
+        <section class="card col-6" id="hubs-card" aria-labelledby="hubs-title">
+            <h2 id="hubs-title">Architectural Hubs (PageRank)</h2>
+            <div style="max-height: 240px; overflow-y: auto;">
+                <table style="table-layout: fixed;">
+                    <colgroup>
+                        <col style="width: 32%;">
+                        <col style="width: 14%;">
+                        <col style="width: 38%;">
+                        <col style="width: 16%;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Kind</th>
+                            <th>Path</th>
+                            <th style="text-align: right;">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hubs-body">
+                        <tr><td colspan="4" class="empty-state">Loading architectural hubs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 4. L3 Agent Behavioral Memory & Lessons -->
+        <section class="card col-6" id="memory-card" aria-labelledby="memory-title">
+            <h2 id="memory-title">L3 Memory & Negative Constraints</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                 <div>
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Recent LLM Calls</h3>
-                    <div style="max-height: 220px; overflow-y: auto;">
+                    <h3 style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; margin: 0 0 0.5rem 0; color: var(--success);">Approved Rules</h3>
+                    <div style="max-height: 180px; overflow-y: auto;">
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Provider</th>
-                                    <th>Model</th>
-                                    <th>Purpose</th>
-                                    <th>Tokens</th>
-                                </tr>
-                            </thead>
-                            <tbody id="cost-calls-body">
-                                <tr><td colspan="5" class="empty-state">No calls recorded.</td></tr>
+                            <tbody id="approved-lessons-body">
+                                <tr><td class="empty-state">Loading rules...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <h3 style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; margin: 0 0 0.5rem 0; color: var(--warning);">Pending Review</h3>
+                    <div style="max-height: 180px; overflow-y: auto;">
+                        <table>
+                            <tbody id="pending-lessons-body">
+                                <tr><td class="empty-state">No pending lessons.</td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Checkpoints -->
-        <div class="card" style="grid-column: span 2;">
-            <h2>Recent Checkpoints</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Action</th>
-                        <th>Branch</th>
-                        <th>Time</th>
-                    </tr>
-                </thead>
-                <tbody id="checkpoints-body">
-                    <tr><td colspan="4" class="empty-state">Loading checkpoints...</td></tr>
-                </tbody>
-            </table>
-        </div>
+        <!-- 5. Recent Checkpoints -->
+        <section class="card col-6" id="checkpoints-card" aria-labelledby="checkpoints-title">
+            <h2 id="checkpoints-title">Recent Checkpoints</h2>
+            <div style="max-height: 200px; overflow-y: auto;">
+                <table style="table-layout: fixed;">
+                    <colgroup>
+                        <col style="width: 32%;">
+                        <col style="width: 32%;">
+                        <col style="width: 18%;">
+                        <col style="width: 18%;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Doing</th>
+                            <th>Next Step</th>
+                            <th>Branch</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="checkpoints-body">
+                        <tr><td colspan="4" class="empty-state">Loading checkpoints...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
-        <!-- Latest Operational Trace -->
-        <div class="card" style="grid-column: span 2;" id="trace-card">
-            <h2>Latest Operational Trace</h2>
-            <div id="trace-info" style="display: none;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
-                    <div>
-                        <strong style="color: var(--accent);">Type:</strong> <span id="trace-type" style="text-transform: uppercase; font-weight: 500; font-family: var(--font-mono); color: var(--accent);">-</span>
-                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">ID:</strong> <code id="trace-id" style="font-size: 0.75rem;">-</code></span>
-                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">Time:</strong> <span id="trace-time" style="font-family: var(--font-mono);">-</span></span>
+        <!-- 6. LLM Cost & Usage -->
+        <section class="card col-6" id="usage-card" aria-labelledby="usage-title">
+            <h2 id="usage-title">LLM Provider Usage</h2>
+            <div style="display: grid; grid-template-columns: 120px 1fr; gap: 1rem;">
+                <div class="stats-grid" style="grid-template-columns: 1fr; gap: 0.5rem;">
+                    <div class="stat-box">
+                        <div class="stat-value" id="cost-total-calls">0</div>
+                        <div class="stat-label">Calls</div>
                     </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="cost-total-tokens" style="font-size: 1rem;">0</div>
+                        <div class="stat-label">Tokens</div>
+                    </div>
+                </div>
+                <div style="max-height: 160px; overflow-y: auto;">
+                    <table style="table-layout: fixed;">
+                        <colgroup>
+                            <col style="width: 22%;">
+                            <col style="width: 24%;">
+                            <col style="width: 34%;">
+                            <col style="width: 20%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Model</th>
+                                <th>Purpose</th>
+                                <th>Tokens</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cost-calls-body">
+                            <tr><td colspan="4" class="empty-state">No LLM calls recorded.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. Operational Trace & Latency Timeline -->
+        <section class="card col-12" id="trace-card" aria-labelledby="trace-title">
+            <h2 id="trace-title">Latest Operational Trace</h2>
+            <div id="trace-info" style="display: none;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
                     <div>
-                        <span id="trace-dirty-warning" class="status-badge" style="background: rgba(234, 179, 8, 0.1); color: var(--warning); border: 1px solid rgba(234, 179, 8, 0.2); display: none;">
-                            <div class="status-dot" style="background: var(--warning);"></div> Dirty Tree
-                        </span>
+                        <strong style="color: var(--accent);">Type:</strong> <span id="trace-type" style="font-family: monospace; color: var(--accent);">-</span>
+                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">ID:</strong> <code id="trace-id">-</code></span>
+                        <span style="margin-left: 1.5rem;"><strong style="color: var(--text-secondary);">Time:</strong> <span id="trace-time" style="font-family: monospace;">-</span></span>
+                    </div>
+                    <div id="trace-dirty-warning" style="display: none; color: var(--warning); font-size: 0.75rem; font-weight: 500;">
+                        Dirty Tree
                     </div>
                 </div>
 
-                <p style="margin: 0 0 1rem 0; font-weight: 500; font-size: 1rem; color: var(--text-primary);" id="trace-summary">-</p>
+                <p style="margin: 0 0 0.75rem 0; font-size: 0.875rem;" id="trace-summary">-</p>
 
-                <!-- Retrieval Specific Details -->
                 <div id="retrieval-details" style="display: none;">
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem;">
                         <div class="stat-box">
                             <div class="stat-value" id="trace-retrieval-nodes">-</div>
                             <div class="stat-label">Nodes Explored</div>
@@ -292,334 +900,691 @@
                         </div>
                         <div class="stat-box">
                             <div class="stat-value" id="trace-retrieval-budget-pct">-</div>
-                            <div class="stat-label">Budget Utilized</div>
+                            <div class="stat-label">Budget Used</div>
                         </div>
                     </div>
 
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Phase Latencies (Timeline)</h3>
-                    <div style="display: flex; gap: 4px; height: 16px; background: var(--border); border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;" id="timeline-bar">
-                        <!-- timeline segments filled dynamically -->
-                    </div>
-                    <div id="timeline-labels" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                        <!-- timeline labels filled dynamically -->
-                    </div>
-
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Structural Traversal (Hops)</h3>
-                    <div id="structural-hops-container" style="margin-bottom: 1.5rem; font-family: var(--font-mono); font-size: 0.75rem; max-height: 150px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 0.375rem;">
-                        <!-- structural hops list -->
-                    </div>
-
-                    <h3 style="font-size: 0.9rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; color: var(--text-secondary);">Grounding Source Provenance & Truncation</h3>
-                    <table style="font-size: 0.75rem;">
-                        <thead>
-                            <tr>
-                                <th>Symbol</th>
-                                <th>Path</th>
-                                <th>Score</th>
-                                <th>Tokens</th>
-                                <th>Status / Reason</th>
-                            </tr>
-                        </thead>
-                        <tbody id="provenance-body">
-                            <!-- filled dynamically -->
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Generic/Other Details (JSON view) -->
-                <div id="generic-details" style="display: none;">
-                    <pre id="generic-json" style="background: var(--bg); border: 1px solid var(--border); padding: 1rem; border-radius: 0.375rem; font-family: var(--font-mono); font-size: 0.8125rem; overflow-x: auto; max-height: 300px; color: var(--text-secondary);"></pre>
+                    <div style="display: flex; gap: 3px; height: 12px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 0.5rem;" id="timeline-bar"></div>
+                    <div id="timeline-labels" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; font-size: 0.6875rem; color: var(--text-secondary);"></div>
                 </div>
             </div>
             <div id="trace-empty" class="empty-state">
-                No operational traces recorded. Run queries or tool invocations to populate.
+                No operational traces recorded. Run queries or agent tools to view performance timelines.
+            </div>
+        </section>
+    </main>
+
+    <footer role="contentinfo">
+        <div>Synapse 2.6 Context Runtime · 100% Offline & Self-Contained · Zero External CDNs</div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <span>Shortcuts: <kbd class="search-kbd" style="position: static;">/</kbd> Search · <kbd class="search-kbd" style="position: static;">Esc</kbd> Close · <kbd class="search-kbd" style="position: static;">D</kbd> Theme · <kbd class="search-kbd" style="position: static;">R</kbd> Refresh</span>
+        </div>
+    </footer>
+
+    <!-- Search / Symbol Inspector Modal -->
+    <div id="search-modal" class="modal-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal">
+            <div class="modal-header">
+                <strong id="modal-title">Code Search & Symbol Inspector</strong>
+                <button class="btn btn-sm" onclick="closeAllModals()" aria-label="Close search modal">Close (Esc)</button>
+            </div>
+            <div class="modal-body" id="modal-content">
+                <div class="empty-state">Type a query in the search bar above to search symbols across the AST code graph.</div>
             </div>
         </div>
     </div>
 
+    <!-- MCP Connection Config Modal -->
+    <div id="mcp-modal" class="modal-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="mcp-modal-title">
+        <div class="modal">
+            <div class="modal-header">
+                <strong id="mcp-modal-title">MCP Client Connection Setup</strong>
+                <button class="btn btn-sm" onclick="closeAllModals()" aria-label="Close MCP modal">Close (Esc)</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin: 0 0 1rem 0; font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.5;">
+                    Synapse exposes high-speed structural context and memory to AI coding agents via standard <strong>Model Context Protocol (MCP)</strong> stdio transport.
+                </p>
+
+                <div style="margin-bottom: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                        <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--accent);">Claude Desktop / claude_desktop_config.json</span>
+                        <button class="btn btn-sm btn-action" id="copy-claude-btn" onclick="copyMcpSnippet('claude')">📋 Copy Snippet</button>
+                    </div>
+                    <pre><code id="claude-mcp-code">Loading config...</code></pre>
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                        <span style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--accent);">Cursor / .cursor/mcp.json</span>
+                        <button class="btn btn-sm btn-action" id="copy-cursor-btn" onclick="copyMcpSnippet('cursor')">📋 Copy Snippet</button>
+                    </div>
+                    <pre><code id="cursor-mcp-code">Loading config...</code></pre>
+                </div>
+
+                <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
+                    💡 <em>Tip: You can also run <code>synap setup</code> in your terminal to automatically detect and configure all installed agent IDEs.</em>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Toast Notification -->
+    <div id="toast" class="toast" role="status" aria-live="polite">
+        <span id="toast-text">Notification</span>
+    </div>
+
     <script>
-        function timeAgo(timestamp) {
-            const seconds = Math.floor((new Date() - new Date(timestamp * 1000)) / 1000);
-            if (seconds < 60) return `${seconds}s ago`;
-            if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`;
-            return `${Math.floor(seconds/3600)}h ago`;
+        // State variables
+        let lastStatusData = null;
+        let lastBlastData = null;
+        let lastHubsData = null;
+        let lastSyncTimestamp = Date.now();
+        let searchTimer = null;
+
+        // Utilities
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
-        async function updateDashboard() {
+        function timeAgo(timestamp) {
+            if (!timestamp) return 'n/a';
+            const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp * 1000)) / 1000));
+            if (seconds < 5) return 'just now';
+            if (seconds < 60) return `${seconds}s ago`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            return `${Math.floor(seconds / 3600)}h ago`;
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastText = document.getElementById('toast-text');
+            toastText.textContent = message;
+            toast.style.borderColor = isError ? 'var(--danger)' : 'var(--accent)';
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2500);
+        }
+
+        // Theme management
+        const currentTheme = localStorage.getItem('synap-theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', currentTheme);
+        document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? 'Light' : 'Dark';
+
+        function toggleTheme() {
+            const active = document.documentElement.getAttribute('data-theme');
+            const next = active === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('synap-theme', next);
+            document.getElementById('theme-icon').textContent = next === 'dark' ? 'Light' : 'Dark';
+        }
+
+        document.getElementById('theme-btn').addEventListener('click', toggleTheme);
+
+        // Onboarding Guide Visibility
+        const onboardingGuide = document.getElementById('onboarding-guide');
+        const guideToggleBtn = document.getElementById('guide-toggle-btn');
+        const dismissOnboardingBtn = document.getElementById('dismiss-onboarding-btn');
+
+        const isGuideDismissed = localStorage.getItem('synap-onboarding-dismissed') === 'true';
+        if (isGuideDismissed) {
+            onboardingGuide.style.display = 'none';
+        }
+
+        dismissOnboardingBtn.addEventListener('click', () => {
+            onboardingGuide.style.display = 'none';
+            localStorage.setItem('synap-onboarding-dismissed', 'true');
+            showToast('Onboarding guide minimized (click "Guide" to reopen)');
+        });
+
+        guideToggleBtn.addEventListener('click', () => {
+            const isHidden = onboardingGuide.style.display === 'none';
+            onboardingGuide.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                localStorage.removeItem('synap-onboarding-dismissed');
+                scrollToCard('onboarding-guide');
+            } else {
+                localStorage.setItem('synap-onboarding-dismissed', 'true');
+            }
+        });
+
+        // Modals Management
+        function closeAllModals() {
+            document.getElementById('search-modal').style.display = 'none';
+            document.getElementById('mcp-modal').style.display = 'none';
+        }
+
+        function scrollToCard(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.remove('card-highlight');
+            // Trigger reflow for animation restart
+            void el.offsetWidth;
+            el.classList.add('card-highlight');
+            setTimeout(() => {
+                el.classList.remove('card-highlight');
+            }, 1600);
+        }
+
+        function focusSearch() {
+            const searchInput = document.getElementById('global-search');
+            searchInput.focus();
+            searchInput.select();
+        }
+
+        // Keyboard navigation
+        window.addEventListener('keydown', (e) => {
+            const activeTag = document.activeElement ? document.activeElement.tagName : '';
+            const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
+
+            if (e.key === '/' && !isInputFocused) {
+                e.preventDefault();
+                focusSearch();
+            } else if (e.key.toLowerCase() === 'r' && !isInputFocused) {
+                e.preventDefault();
+                updateDashboard();
+                showToast('Refreshing dashboard...');
+            } else if (e.key.toLowerCase() === 'd' && !isInputFocused) {
+                e.preventDefault();
+                toggleTheme();
+            } else if (e.key === '?' && !isInputFocused) {
+                e.preventDefault();
+                guideToggleBtn.click();
+            } else if (e.key === 'Escape') {
+                closeAllModals();
+            }
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            updateDashboard();
+            showToast('Refreshing dashboard...');
+        });
+
+        // Search debouncing (250ms)
+        const globalSearch = document.getElementById('global-search');
+        globalSearch.addEventListener('input', (e) => {
+            clearTimeout(searchTimer);
+            const q = e.target.value.trim();
+            if (!q) {
+                closeAllModals();
+                return;
+            }
+            searchTimer = setTimeout(() => runSearch(q), 250);
+        });
+
+        async function runSearch(query) {
+            const modal = document.getElementById('search-modal');
+            const content = document.getElementById('modal-content');
+            modal.style.display = 'flex';
+            content.innerHTML = `
+                <div class="empty-state" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <div class="spinner"></div> Searching repository code graph for "<strong>${escapeHtml(query)}</strong>"...
+                </div>
+            `;
+
             try {
-                // Fetch Status
-                const statusRes = await fetch('/api/v1/status');
-                const status = await statusRes.json();
+                const res = await fetch(`/api/v1/search?q=${encodeURIComponent(query)}`);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+                }
+                const data = await res.json();
+                const matches = data.results?.matches || [];
 
-                document.getElementById('repo-path').textContent = status.repository_path;
-                document.getElementById('stat-files').textContent = status.files.toLocaleString();
-                document.getElementById('stat-symbols').textContent = status.symbols.toLocaleString();
-                document.getElementById('stat-branch').textContent = status.branch;
-                document.getElementById('stat-commit').innerHTML = `<code>${status.git_commit?.substring(0,7) || 'unknown'}</code>`;
-
-                // Update Daemon Status Badge
-                const daemonBadge = document.querySelector('.status-badge');
-                if (status.daemon) {
-                    const statusStr = status.daemon.status.toUpperCase();
-                    if (statusStr === 'HEALTHY') {
-                        daemonBadge.style.color = 'var(--success)';
-                        daemonBadge.style.background = 'rgba(34, 197, 94, 0.1)';
-                        daemonBadge.style.borderColor = 'rgba(34, 197, 94, 0.2)';
-                        daemonBadge.innerHTML = `<div class="status-dot"></div> Daemon Active (PID ${status.daemon.pid})`;
-                    } else if (statusStr === 'STALE') {
-                        daemonBadge.style.color = 'var(--warning)';
-                        daemonBadge.style.background = 'rgba(234, 179, 8, 0.1)';
-                        daemonBadge.style.borderColor = 'rgba(234, 179, 8, 0.2)';
-                        daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--warning);"></div> Daemon Stale (PID ${status.daemon.pid})`;
-                    } else {
-                        daemonBadge.style.color = 'var(--danger)';
-                        daemonBadge.style.background = 'rgba(239, 68, 68, 0.1)';
-                        daemonBadge.style.borderColor = 'rgba(239, 68, 68, 0.2)';
-                        daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--danger);"></div> Daemon Degraded`;
-                    }
-                } else {
-                    daemonBadge.style.color = 'var(--text-secondary)';
-                    daemonBadge.style.background = 'rgba(161, 161, 170, 0.1)';
-                    daemonBadge.style.borderColor = 'rgba(161, 161, 170, 0.2)';
-                    daemonBadge.innerHTML = `<div class="status-dot" style="background: var(--text-secondary); animation: none;"></div> Daemon Inactive`;
+                if (matches.length === 0) {
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            No symbols or context found matching "<strong>${escapeHtml(query)}</strong>".<br/>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.35rem; display: inline-block;">
+                                Tip: Try searching for function names, classes, file paths, or architectural components.
+                            </span>
+                        </div>
+                    `;
+                    return;
                 }
 
-                // Fetch Checkpoints
-                const cpRes = await fetch('/api/v1/checkpoints');
-                const cpData = await cpRes.json();
-                const cpBody = document.getElementById('checkpoints-body');
-                if (cpData.checkpoints && cpData.checkpoints.length > 0) {
-                    cpBody.innerHTML = cpData.checkpoints.map(cp => `
-                        <tr class="row-hover">
-                            <td><code>${cp.checkpoint_id.split('-')[0]}</code></td>
-                            <td>${cp.doing}</td>
-                            <td><span style="border:1px solid var(--border); padding:2px 6px; border-radius:4px; font-size:11px;">${cp.branch}</span></td>
-                            <td style="color:var(--text-secondary);">${timeAgo(cp.created_at)}</td>
-                        </tr>
-                    `).join('');
-                } else {
-                    cpBody.innerHTML = `<tr><td colspan="4" class="empty-state">No checkpoints recorded yet.</td></tr>`;
-                }
-
-                // Fetch Lessons
-                const memRes = await fetch('/api/v1/memory');
-                const memData = await memRes.json();
-
-                const approvedBody = document.getElementById('approved-lessons-body');
-                if (memData.approved && memData.approved.length > 0) {
-                    approvedBody.innerHTML = memData.approved.map(l => {
-                        const expires = new Date(l.expires_at * 1000).toLocaleDateString();
-                        return `
-                        <tr class="row-hover">
-                            <td><code>${l.lesson_id.substring(0,8)}</code></td>
-                            <td><span style="font-weight:500;">Failed:</span> ${l.what_failed}<br/><span style="color:var(--text-secondary); font-size:11px;">Why: ${l.why_failed}</span></td>
-                            <td style="color:var(--text-secondary);">${expires}</td>
-                        </tr>
-                        `;
-                    }).join('');
-                } else {
-                    approvedBody.innerHTML = `<tr><td colspan="3" class="empty-state">No approved rules in memory.</td></tr>`;
-                }
-
-                const pendingBody = document.getElementById('pending-lessons-body');
-                if (memData.pending && memData.pending.length > 0) {
-                    pendingBody.innerHTML = memData.pending.map(l => {
-                        let files = [];
-                        try { files = JSON.parse(l.files_affected); } catch(e){}
-                        return `
-                        <tr class="row-hover">
-                            <td><code>${l.revert_commit.substring(0,7)}</code></td>
-                            <td>${l.what_failed}</td>
-                            <td>${files.length} file(s)</td>
-                        </tr>
-                        `;
-                    }).join('');
-                } else {
-                    pendingBody.innerHTML = `<tr><td colspan="3" class="empty-state">No pending lessons needing approval.</td></tr>`;
-                }
-
-                // Fetch Usage
-                const usageRes = await fetch('/api/v1/usage');
-                const usageData = await usageRes.json();
-                const costBody = document.getElementById('cost-calls-body');
-
-                let totalCalls = 0;
-                let totalTokens = 0;
-
-                if (usageData.calls && usageData.calls.length > 0) {
-                    totalCalls = usageData.calls.length;
-                    usageData.calls.slice(0, 15).map(c => {
-                        const tokens = c.input_tokens + c.output_tokens;
-                        totalTokens += tokens;
-
-                        const timeStr = new Date(c.created_at * 1000).toLocaleTimeString();
-                        const row = `
-                        <tr class="row-hover">
-                            <td>${timeStr}</td>
-                            <td>${c.provider}</td>
-                            <td><code>${c.model}</code></td>
-                            <td>${c.purpose}</td>
-                            <td>${tokens.toLocaleString()}</td>
-                        </tr>
-                        `;
-                        costBody.insertAdjacentHTML('beforeend', row);
-                    });
-
-                    // Clear the loading message if it exists
-                    if (usageData.calls.length > 0 && costBody.querySelector('.empty-state')) {
-                        costBody.innerHTML = '';
-                        // Re-render the 15 calls because we just cleared it
-                         costBody.innerHTML = usageData.calls.slice(0, 15).map(c => {
-                            const tokens = c.input_tokens + c.output_tokens;
-                            const timeStr = new Date(c.created_at * 1000).toLocaleTimeString();
-                            return `
-                            <tr class="row-hover">
-                                <td>${timeStr}</td>
-                                <td>${c.provider}</td>
-                                <td><code>${c.model}</code></td>
-                                <td>${c.purpose}</td>
-                                <td>${tokens.toLocaleString()}</td>
+                content.innerHTML = `
+                    <div style="margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);">
+                        Found <strong>${matches.length}</strong> matching symbols:
+                    </div>
+                    <table style="table-layout: fixed;">
+                        <colgroup>
+                            <col style="width: 28%;">
+                            <col style="width: 14%;">
+                            <col style="width: 38%;">
+                            <col style="width: 20%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Kind</th>
+                                <th>Location</th>
+                                <th>Match Reason</th>
                             </tr>
-                            `;
-                        }).join('');
-                    }
-
-                    usageData.calls.slice(15).forEach(c => {
-                        totalTokens += (c.input_tokens + c.output_tokens);
-                    });
-                } else {
-                    costBody.innerHTML = `<tr><td colspan="5" class="empty-state">No LLM calls recorded yet.</td></tr>`;
-                }
-
-                document.getElementById('cost-total-calls').textContent = totalCalls.toLocaleString();
-                document.getElementById('cost-total-tokens').textContent = totalTokens.toLocaleString();
-
-                // Fetch Latest Trace
-                const traceRes = await fetch('/api/v1/trace/latest');
-                const trace = await traceRes.json();
-                const traceInfo = document.getElementById('trace-info');
-                const traceEmpty = document.getElementById('trace-empty');
-
-                if (trace && trace.trace_id && trace.trace_id !== 'none' && trace.trace_id !== 'error') {
-                    traceEmpty.style.display = 'none';
-                    traceInfo.style.display = 'block';
-
-                    document.getElementById('trace-type').textContent = trace.type;
-                    document.getElementById('trace-id').textContent = trace.trace_id;
-                    document.getElementById('trace-time').textContent = new Date(trace.timestamp).toLocaleTimeString();
-                    document.getElementById('trace-summary').textContent = trace.summary;
-
-                    if (trace.type === 'retrieval' && trace.details) {
-                        document.getElementById('retrieval-details').style.display = 'block';
-                        document.getElementById('generic-details').style.display = 'none';
-
-                        const details = trace.details;
-
-                        const dirtyWarning = document.getElementById('trace-dirty-warning');
-                        if (details.dirty_tree_warning) {
-                            dirtyWarning.style.display = 'inline-flex';
-                        } else {
-                            dirtyWarning.style.display = 'none';
-                        }
-
-                        document.getElementById('trace-retrieval-nodes').textContent = details.nodes_explored;
-
-                        const alloc = details.token_allocation || {};
-                        const used = details.tokens_used || 0;
-                        const budget = alloc.retrieval_budget || 3400;
-                        document.getElementById('trace-retrieval-tokens').textContent = `${used} / ${budget}`;
-
-                        const lat = details.latency_ms || 0;
-                        document.getElementById('trace-retrieval-latency').textContent = lat.toFixed(1);
-
-                        const pct = budget > 0 ? (used / budget * 100).toFixed(1) : 0;
-                        document.getElementById('trace-retrieval-budget-pct').textContent = `${pct}%`;
-
-                        const tl = details.timeline || {};
-                        const phases = [
-                            { key: 'lexical_search_ms', name: 'Lexical', color: '#3b82f6' },
-                            { key: 'structural_expansion_ms', name: 'Structural', color: '#8b5cf6' },
-                            { key: 'semantic_ranking_ms', name: 'Semantic', color: '#ec4899' },
-                            { key: 'context_packing_ms', name: 'Packing', color: '#f59e0b' },
-                            { key: 'llm_generation_ms', name: 'LLM Gen', color: '#10b981' }
-                        ];
-
-                        const totalMs = tl.total_ms || 1;
-                        const barContainer = document.getElementById('timeline-bar');
-                        const labelContainer = document.getElementById('timeline-labels');
-
-                        barContainer.innerHTML = '';
-                        labelContainer.innerHTML = '';
-
-                        phases.forEach(phase => {
-                            const val = tl[phase.key] || 0;
-                            const share = (val / totalMs * 100);
-
-                            if (val > 0) {
-                                  const segment = document.createElement('div');
-                                  segment.style.width = `${share}%`;
-                                  segment.style.backgroundColor = phase.color;
-                                  segment.title = `${phase.name}: ${val.toFixed(1)} ms`;
-                                  barContainer.appendChild(segment);
-                            }
-
-                            const label = document.createElement('div');
-                            label.innerHTML = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${phase.color}; margin-right:4px;"></span>${phase.name}: ${val.toFixed(1)}ms`;
-                            labelContainer.appendChild(label);
-                        });
-
-                        const hops = details.structural_hops || [];
-                        const hopsContainer = document.getElementById('structural-hops-container');
-                        if (hops.length > 0) {
-                            hopsContainer.innerHTML = hops.map(h =>
-                                  `<div style="margin-bottom: 2px;">• <span style="color:var(--accent);">${h.from_symbol}</span> ➔ <span style="color:var(--success);">${h.to_symbol}</span> <span style="color:var(--text-secondary); font-size:10px;">(dist: ${h.distance})</span></div>`
-                            ).join('');
-                        } else {
-                            hopsContainer.innerHTML = '<div class="empty-state" style="padding:0.5rem; font-size:11px;">No hops navigated</div>';
-                        }
-
-                        const elements = details.elements || [];
-                        const provBody = document.getElementById('provenance-body');
-                        if (elements.length > 0) {
-                            provBody.innerHTML = elements.map(el => {
-                                  const isTruncated = el.reason && el.reason.startsWith('truncated');
-                                  const statusHtml = isTruncated
-                                      ? `<span style="color:var(--danger); font-weight:500;">Truncated</span><br/><span style="color:var(--text-secondary); font-size:10px;">${el.reason}</span>`
-                                      : `<span style="color:var(--success); font-weight:500;">Packed</span><br/><span style="color:var(--text-secondary); font-size:10px;">${el.reason}</span>`;
-
-                                  return `<tr class="row-hover" style="${isTruncated ? 'opacity: 0.6;' : ''}">
-                                      <td><code>${el.name}</code></td>
-                                      <td style="font-family:var(--font-mono); font-size:11px;">${el.path}</td>
-                                      <td>${el.score ? el.score.toFixed(2) : '-'}</td>
-                                      <td>${el.tokens}</td>
-                                      <td>${statusHtml}</td>
-                                  </tr>`;
-                            }).join('');
-                        } else {
-                            provBody.innerHTML = `<tr><td colspan="5" class="empty-state">No elements in trace.</td></tr>`;
-                        }
-
-                    } else {
-                        document.getElementById('retrieval-details').style.display = 'none';
-                        document.getElementById('generic-details').style.display = 'block';
-                        document.getElementById('generic-json').textContent = JSON.stringify(trace.details, null, 2);
-                    }
-                } else {
-                    traceEmpty.style.display = 'block';
-                    traceInfo.style.display = 'none';
-                }
-
-            } catch (e) {
-                console.error("Dashboard update failed:", e);
-                document.querySelector('.status-badge').style.color = 'var(--danger)';
-                document.querySelector('.status-badge').style.background = 'rgba(239, 68, 68, 0.1)';
-                document.querySelector('.status-badge').style.borderColor = 'rgba(239, 68, 68, 0.2)';
-                document.querySelector('.status-badge').innerHTML = '<div class="status-dot"></div> Connection Lost';
+                        </thead>
+                        <tbody>
+                            ${matches.map(m => `
+                                <tr class="row-hover" style="cursor: pointer;" onclick="inspectSymbol('${escapeHtml(m.symbol)}', '${escapeHtml(m.path)}')">
+                                    <td><strong style="color: var(--accent);">${escapeHtml(m.symbol)}</strong></td>
+                                    <td><span style="border: 1px solid var(--border); padding: 1px 5px; border-radius: 3px; font-size: 11px;">${escapeHtml(m.kind)}</span></td>
+                                    <td><code>${escapeHtml(m.path)}:${m.lines}</code></td>
+                                    <td style="color: var(--text-secondary); font-size: 11px;">${escapeHtml(m.reason)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (err) {
+                content.innerHTML = `
+                    <div class="empty-state" style="color: var(--danger);">
+                        Search failed: ${escapeHtml(err.message)}. Please verify engine status.
+                    </div>
+                `;
             }
         }
 
+        async function inspectSymbol(name, path) {
+            const modal = document.getElementById('search-modal');
+            const content = document.getElementById('modal-content');
+            modal.style.display = 'flex';
+            content.innerHTML = `
+                <div class="empty-state" style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <div class="spinner"></div> Inspecting symbol <code>${escapeHtml(name)}</code>...
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/v1/symbol?name=${encodeURIComponent(name)}&file_path=${encodeURIComponent(path)}`);
+                const data = await res.json();
+                if (data.status !== 'ok') {
+                    content.innerHTML = `<div class="empty-state" style="color: var(--danger);">${escapeHtml(data.message || 'Symbol not found.')}</div>`;
+                    return;
+                }
+
+                const s = data.symbol;
+                const callers = data.callers?.neighbors || [];
+                const callees = data.callees?.neighbors || [];
+
+                content.innerHTML = `
+                    <div style="margin-bottom: 1rem;">
+                        <h3 style="margin: 0; font-size: 1.1rem; color: var(--text-primary);">${escapeHtml(s.name)} <span style="font-weight: 400; font-size: 0.8rem; color: var(--text-secondary);">(${escapeHtml(s.kind)})</span></h3>
+                        <p style="margin: 0.25rem 0 0 0; font-family: monospace; font-size: 0.8rem; color: var(--accent);">${escapeHtml(s.path)}:${s.start_line}-${s.end_line}</p>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="stat-box">
+                            <div class="stat-label">Upstream Callers (${callers.length})</div>
+                            <div style="margin-top: 0.35rem; font-size: 0.75rem; max-height: 120px; overflow-y: auto;">
+                                ${callers.length > 0 ? callers.map(c => `<div><code>${escapeHtml(c.name)}</code> <span style="color:var(--text-muted); font-size:10px;">(${escapeHtml(c.path)})</span></div>`).join('') : '<span style="color: var(--text-muted);">No inbound callers</span>'}
+                            </div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Downstream Dependencies (${callees.length})</div>
+                            <div style="margin-top: 0.35rem; font-size: 0.75rem; max-height: 120px; overflow-y: auto;">
+                                ${callees.length > 0 ? callees.map(c => `<div><code>${escapeHtml(c.name)}</code> <span style="color:var(--text-muted); font-size:10px;">(${escapeHtml(c.path)})</span></div>`).join('') : '<span style="color: var(--text-muted);">No outbound calls</span>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-label" style="margin-bottom: 0.35rem;">Code Implementation</div>
+                    <pre><code>${escapeHtml(s.numbered_code || s.code)}</code></pre>
+                `;
+            } catch (err) {
+                content.innerHTML = `<div class="empty-state" style="color: var(--danger);">Inspection failed: ${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        // MCP Configuration Helpers
+        function getMcpSnippet(repoPath, format = 'claude') {
+            const cleanPath = repoPath || '/path/to/repository';
+            if (format === 'cursor') {
+                return JSON.stringify({
+                    "mcpServers": {
+                        "synap": {
+                            "command": "synap",
+                            "args": ["mcp", "serve", cleanPath]
+                        }
+                    }
+                }, null, 2);
+            }
+            return JSON.stringify({
+                "mcpServers": {
+                    "synap": {
+                        "command": "synap",
+                        "args": ["mcp", "serve", cleanPath]
+                    }
+                }
+            }, null, 2);
+        }
+
+        async function copyToClipboard(text, successMsg = 'Copied to clipboard!') {
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                }
+                showToast(successMsg);
+                return true;
+            } catch (err) {
+                showToast('Failed to copy: ' + err.message, true);
+                return false;
+            }
+        }
+
+        function copyActiveMcpSnippet() {
+            const repoPath = lastStatusData?.repository_path || '';
+            const snippet = getMcpSnippet(repoPath, 'claude');
+            copyToClipboard(snippet, '✓ MCP connection snippet copied to clipboard!');
+        }
+
+        function copyMcpSnippet(format) {
+            const repoPath = lastStatusData?.repository_path || '';
+            const snippet = getMcpSnippet(repoPath, format);
+            copyToClipboard(snippet, `✓ ${format === 'cursor' ? 'Cursor' : 'Claude Desktop'} config copied!`);
+        }
+
+        // Open MCP Modal
+        document.getElementById('mcp-config-btn').addEventListener('click', () => {
+            const repoPath = lastStatusData?.repository_path || '';
+            document.getElementById('claude-mcp-code').textContent = getMcpSnippet(repoPath, 'claude');
+            document.getElementById('cursor-mcp-code').textContent = getMcpSnippet(repoPath, 'cursor');
+            document.getElementById('mcp-modal').style.display = 'flex';
+        });
+
+        // Lessons Approval / Rejection
+        async function approveLesson(id) {
+            try {
+                await fetch('/api/v1/memory/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lesson_id: id })
+                });
+                showToast('Rule approved and activated in L3 memory');
+                updateDashboard();
+            } catch (e) {
+                showToast('Failed to approve lesson: ' + e.message, true);
+            }
+        }
+
+        async function rejectLesson(id) {
+            try {
+                await fetch('/api/v1/memory/reject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lesson_id: id })
+                });
+                showToast('Lesson dismissed');
+                updateDashboard();
+            } catch (e) {
+                showToast('Failed to dismiss lesson: ' + e.message, true);
+            }
+        }
+
+        // Dynamic Freshness Display
+        function updateFreshnessDisplay() {
+            const freshnessEl = document.getElementById('onboarding-freshness');
+            if (!freshnessEl) return;
+
+            if (lastStatusData?.daemon?.timestamp) {
+                const hbTime = Date.parse(lastStatusData.daemon.timestamp) / 1000;
+                freshnessEl.textContent = `Heartbeat active (${timeAgo(hbTime)})`;
+            } else {
+                const diffSeconds = Math.max(0, Math.floor((Date.now() - lastSyncTimestamp) / 1000));
+                if (diffSeconds < 5) {
+                    freshnessEl.textContent = 'Refreshed just now';
+                } else {
+                    freshnessEl.textContent = `Refreshed ${diffSeconds}s ago`;
+                }
+            }
+        }
+
+        // Main Dashboard Data Fetch
+        async function updateDashboard() {
+            lastSyncTimestamp = Date.now();
+            try {
+                // 1. Status
+                const statusRes = await fetch('/api/v1/status');
+                const status = await statusRes.json();
+                lastStatusData = status;
+
+                document.getElementById('repo-path').textContent = status.repository_path || 'Unknown Repository';
+                document.getElementById('stat-files').textContent = (status.files || 0).toLocaleString();
+                document.getElementById('stat-symbols').textContent = (status.symbols || 0).toLocaleString();
+                document.getElementById('stat-branch').textContent = status.branch || 'main';
+                document.getElementById('stat-commit').innerHTML = `<code>${status.git_commit?.substring(0, 7) || 'unknown'}</code>`;
+
+                const daemonBadge = document.getElementById('daemon-badge');
+                const daemonText = document.getElementById('daemon-text');
+                if (status.daemon && (status.daemon.status === 'healthy' || status.daemon.pid)) {
+                    daemonBadge.style.color = 'var(--success)';
+                    daemonBadge.style.borderColor = 'var(--success)';
+                    daemonText.textContent = `Daemon PID ${status.daemon.pid}`;
+                } else {
+                    daemonBadge.style.color = 'var(--text-secondary)';
+                    daemonBadge.style.borderColor = 'var(--border)';
+                    daemonText.textContent = 'Zero-Daemon Mode';
+                }
+
+                // Update Onboarding Summary
+                document.getElementById('onboarding-engine-summary').textContent =
+                    `${(status.files || 0).toLocaleString()} files and ${(status.symbols || 0).toLocaleString()} symbols indexed in SQLite L1 graph (${status.branch || 'main'}).`;
+
+                // 2. Git Blast Radius
+                try {
+                    const blastRes = await fetch('/api/v1/blast');
+                    const blastData = await blastRes.json();
+                    lastBlastData = blastData;
+                    const blast = blastData.blast || {};
+                    const touched = blast.touched_symbols || [];
+                    const callers = blast.direct_callers || [];
+                    const tests = blast.impacted_tests || [];
+                    const blastBody = document.getElementById('blast-body');
+                    const treeStatus = document.getElementById('onboarding-tree-status');
+                    const blastCleanPill = document.getElementById('blast-clean-pill');
+
+                    if (touched.length > 0) {
+                        treeStatus.className = 'pill-badge pill-dirty';
+                        treeStatus.innerHTML = `<span class="status-dot"></span> Dirty (${touched.length} modified symbols)`;
+                        blastCleanPill.style.display = 'none';
+
+                        blastBody.innerHTML = touched.map(s => {
+                            const cList = callers.filter(c => c.impacts === s.name).map(c => `<code>${escapeHtml(c.name)}</code>`).join(', ') || '<span style="color:var(--text-muted);">None</span>';
+                            const tList = tests.filter(t => t.impacts === s.name).map(t => `<span style="color:var(--warning); font-size:11px;">${escapeHtml(t.path)}</span>`).join('<br/>') || '<span style="color:var(--text-muted);">None</span>';
+                            return `
+                                <tr class="row-hover">
+                                    <td><strong style="color:var(--warning);">${escapeHtml(s.name)}</strong></td>
+                                    <td><code>${escapeHtml(s.path)}:${s.start_line}</code></td>
+                                    <td>${cList}</td>
+                                    <td>${tList}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    } else {
+                        treeStatus.className = 'pill-badge pill-clean';
+                        treeStatus.innerHTML = '<span class="status-dot"></span> Clean Working Tree';
+                        blastCleanPill.style.display = 'inline-flex';
+                        blastBody.innerHTML = '<tr><td colspan="4" class="empty-state" style="color:var(--success);">Working tree is clean. No uncommitted modifications detected.</td></tr>';
+                    }
+                } catch (e) {
+                    document.getElementById('blast-body').innerHTML = '<tr><td colspan="4" class="empty-state">Unable to load blast radius.</td></tr>';
+                }
+
+                // 3. Architectural Hubs (PageRank)
+                try {
+                    const hubsRes = await fetch('/api/v1/hubs?limit=6');
+                    const hubsData = await hubsRes.json();
+                    lastHubsData = hubsData;
+                    const hubs = hubsData.hubs || [];
+                    const hubsBody = document.getElementById('hubs-body');
+                    const onboardingHubs = document.getElementById('onboarding-top-hubs');
+
+                    if (hubs.length > 0) {
+                        hubsBody.innerHTML = hubs.map(h => `
+                            <tr class="row-hover" style="cursor: pointer;" onclick="inspectSymbol('${escapeHtml(h.name)}', '${escapeHtml(h.path)}')">
+                                <td><strong style="color:var(--accent);">${escapeHtml(h.name)}</strong></td>
+                                <td><span style="border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; font-size: 10px;">${escapeHtml(h.kind)}</span></td>
+                                <td style="color:var(--text-secondary); font-size: 11px;">${escapeHtml(h.path)}</td>
+                                <td style="text-align: right; font-family: monospace; font-size: 11px;">${Number(h.score).toFixed(4)}</td>
+                            </tr>
+                        `).join('');
+
+                        // Top hubs preview in Onboarding Banner
+                        onboardingHubs.innerHTML = hubs.slice(0, 4).map(h => `
+                            <button class="hub-chip" onclick="inspectSymbol('${escapeHtml(h.name)}', '${escapeHtml(h.path)}')" title="Inspect ${escapeHtml(h.name)} (${escapeHtml(h.path)})">
+                                <strong>${escapeHtml(h.name)}</strong>
+                                <span class="hub-score">${Number(h.score).toFixed(3)}</span>
+                            </button>
+                        `).join('');
+                    } else {
+                        hubsBody.innerHTML = '<tr><td colspan="4" class="empty-state">No graph hubs calculated yet.</td></tr>';
+                        onboardingHubs.innerHTML = '<span style="font-size: 0.75rem; color: var(--text-muted);">None indexed yet</span>';
+                    }
+                } catch (e) {}
+
+                // 4. Memory & Lessons
+                try {
+                    const memRes = await fetch('/api/v1/memory');
+                    const memData = await memRes.json();
+
+                    const approvedBody = document.getElementById('approved-lessons-body');
+                    if (memData.approved && memData.approved.length > 0) {
+                        approvedBody.innerHTML = memData.approved.slice(0, 5).map(l => `
+                            <tr>
+                                <td><strong>Rule:</strong> ${escapeHtml(l.what_failed)}<br/><span style="color:var(--text-secondary); font-size: 10px;">Why: ${escapeHtml(l.why_failed)}</span></td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        approvedBody.innerHTML = '<tr><td class="empty-state">No approved constraints.</td></tr>';
+                    }
+
+                    const pendingBody = document.getElementById('pending-lessons-body');
+                    if (memData.pending && memData.pending.length > 0) {
+                        pendingBody.innerHTML = memData.pending.map(l => `
+                            <tr>
+                                <td>
+                                    <strong>${escapeHtml(l.what_failed)}</strong>
+                                    <div style="margin-top: 0.35rem; display: flex; gap: 0.35rem;">
+                                        <button class="btn btn-success" onclick="approveLesson('${escapeHtml(l.lesson_id)}')">Approve</button>
+                                        <button class="btn btn-danger" onclick="rejectLesson('${escapeHtml(l.lesson_id)}')">Dismiss</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        pendingBody.innerHTML = '<tr><td class="empty-state">No pending lessons awaiting review.</td></tr>';
+                    }
+                } catch (e) {}
+
+                // 5. Checkpoints
+                try {
+                    const cpRes = await fetch('/api/v1/checkpoints');
+                    const cpData = await cpRes.json();
+                    const cpBody = document.getElementById('checkpoints-body');
+                    if (cpData.checkpoints && cpData.checkpoints.length > 0) {
+                        cpBody.innerHTML = cpData.checkpoints.slice(0, 6).map(cp => `
+                            <tr class="row-hover">
+                                <td><strong>${escapeHtml(cp.doing)}</strong></td>
+                                <td style="color:var(--text-secondary);">${escapeHtml(cp.next_step || 'n/a')}</td>
+                                <td><code>${escapeHtml(cp.branch)}</code></td>
+                                <td style="color:var(--text-muted); font-size: 11px;">${timeAgo(cp.created_at)}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        cpBody.innerHTML = '<tr><td colspan="4" class="empty-state">No checkpoints saved.</td></tr>';
+                    }
+                } catch (e) {}
+
+                // 6. LLM Usage
+                try {
+                    const usageRes = await fetch('/api/v1/usage');
+                    const usageData = await usageRes.json();
+                    const calls = usageData.calls || [];
+                    document.getElementById('cost-total-calls').textContent = calls.length.toLocaleString();
+                    const totalTokens = calls.reduce((acc, c) => acc + (c.input_tokens + c.output_tokens), 0);
+                    document.getElementById('cost-total-tokens').textContent = totalTokens.toLocaleString();
+
+                    const costBody = document.getElementById('cost-calls-body');
+                    if (calls.length > 0) {
+                        costBody.innerHTML = calls.slice(0, 5).map(c => `
+                            <tr class="row-hover">
+                                <td style="font-size: 11px;">${new Date(c.created_at * 1000).toLocaleTimeString()}</td>
+                                <td><code>${escapeHtml(c.model)}</code></td>
+                                <td>${escapeHtml(c.purpose)}</td>
+                                <td>${(c.input_tokens + c.output_tokens).toLocaleString()}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        costBody.innerHTML = '<tr><td colspan="4" class="empty-state">No external LLM calls.</td></tr>';
+                    }
+                } catch (e) {}
+
+                // 7. Latest Trace
+                try {
+                    const traceRes = await fetch('/api/v1/trace/latest');
+                    const trace = await traceRes.json();
+                    if (trace && trace.trace_id && trace.trace_id !== 'none') {
+                        document.getElementById('trace-empty').style.display = 'none';
+                        document.getElementById('trace-info').style.display = 'block';
+                        document.getElementById('trace-type').textContent = trace.type;
+                        document.getElementById('trace-id').textContent = trace.trace_id;
+                        document.getElementById('trace-time').textContent = new Date(trace.timestamp).toLocaleTimeString();
+                        document.getElementById('trace-summary').textContent = trace.summary;
+
+                        if (trace.type === 'retrieval' && trace.details) {
+                            document.getElementById('retrieval-details').style.display = 'block';
+                            const d = trace.details;
+                            document.getElementById('trace-retrieval-nodes').textContent = d.nodes_explored || 0;
+                            document.getElementById('trace-retrieval-tokens').textContent = `${d.tokens_used || 0} / ${d.token_allocation?.retrieval_budget || 3400}`;
+                            document.getElementById('trace-retrieval-latency').textContent = (d.latency_ms || 0).toFixed(1);
+                            const budget = d.token_allocation?.retrieval_budget || 1;
+                            document.getElementById('trace-retrieval-budget-pct').textContent = `${((d.tokens_used || 0) / budget * 100).toFixed(0)}%`;
+                        }
+                    }
+                } catch (e) {}
+
+                updateFreshnessDisplay();
+
+            } catch (err) {
+                console.error("Dashboard update failed:", err);
+            }
+        }
+
+        // Initial Load
         updateDashboard();
-        setInterval(updateDashboard, 5000);
+
+        // Freshness ticker (every 1 second)
+        setInterval(() => {
+            if (document.hidden) return;
+            updateFreshnessDisplay();
+        }, 1000);
+
+        // Page Visibility API polling (every 5 seconds when visible, paused when hidden)
+        setInterval(() => {
+            if (document.hidden) return;
+            updateDashboard();
+        }, 5000);
+
+        // Instant refresh when user returns to tab
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                updateDashboard();
+            }
+        });
     </script>
 </body>
 </html>

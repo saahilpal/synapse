@@ -248,7 +248,7 @@ class RepositoryScanner:
         paths: list[Path] = []
         try:
             result = subprocess.run(  # noqa: S603
-                ["git", "ls-files", "-z", "-c", "-o", "--exclude-standard"],  # noqa: S607
+                ["git", "ls-files", "-z", "-c", "--exclude-standard"],  # noqa: S607
                 cwd=self.repository_path,
                 capture_output=True,
                 check=True,

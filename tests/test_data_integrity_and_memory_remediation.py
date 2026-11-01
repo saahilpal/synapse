@@ -149,3 +149,115 @@ def test_repair_preserves_l3_memory(tmp_path: Path) -> None:
         les = conn.execute("SELECT * FROM lessons WHERE lesson_id = 'les-1'").fetchone()
         assert les is not None, "Lesson should be preserved during repair"
         assert les["status"] == "approved"
+
+
+def test_store_memory_deduplication(tmp_path: Path) -> None:
+    """Verify that repeated store_memory calls with the same key update rather than duplicate."""
+    store = SynapStore(tmp_path / "synap.db")
+    store.initialize()
+
+    # Store fact repeatedly with same key
+    store.store_memory("mem-1", "cache_strategy", "lru", "LRU cache")
+    store.store_memory("mem-2", "cache_strategy", "fifo", "FIFO cache")
+    store.store_memory("mem-3", "cache_strategy", "arc", "Adaptive Replacement Cache")
+
+    # Store another distinct fact
+    store.store_memory("mem-4", "db_port", "5432", "Postgres port")
+
+    # Check that cache_strategy only has 1 record (the latest)
+    memories = store.get_recent_memory("cache_strategy")
+    assert len(memories) == 1
+    assert memories[0]["id"] == "mem-3"
+    assert memories[0]["payload"] == "arc"
+
+    # Check total memory count is 2 (not 4)
+    all_mem = store.get_recent_memory()
+    assert len(all_mem) == 2
+
+    with store.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM agent_memory WHERE context_key = 'cache_strategy'"
+        ).fetchone()[0]
+        assert count == 1
+        indexes = [
+            r[1]
+            for r in conn.execute(
+                "SELECT type, name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        ]
+        assert "idx_agent_memory_key_unique" in indexes
+
+
+def test_atomic_wiki_dequeue_concurrency(tmp_path: Path) -> None:
+    """Verify that concurrent workers using BEGIN IMMEDIATE + UPDATE RETURNING * never duplicate tasks."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = SynapStore(tmp_path / "synap.db")
+    store.initialize()
+
+    # Enqueue 40 tasks
+    num_tasks = 40
+    for i in range(num_tasks):
+        store.enqueue_wiki(f"src/file_{i}.py")
+
+    claimed_task_ids: list[str] = []
+
+    def worker_loop() -> list[str]:
+        worker_claimed: list[str] = []
+        w_store = SynapStore(tmp_path / "synap.db")
+        while True:
+            task = w_store.dequeue_wiki()
+            if not task:
+                break
+            worker_claimed.append(task["task_id"])
+            time.sleep(0.001)  # tiny yield to maximize thread contention
+        return worker_claimed
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(worker_loop) for _ in range(8)]
+        for f in futures:
+            claimed_task_ids.extend(f.result())
+
+    # Every task was claimed exactly once
+    assert len(claimed_task_ids) == num_tasks
+    assert len(set(claimed_task_ids)) == num_tasks, (
+        "Duplicate task claims detected under concurrency!"
+    )
+
+
+def test_linear_migration_ladder_v1_to_v6_covering_indexes(tmp_path: Path) -> None:
+    """Verify linear user_version migration ladder from v1 through v6 with covering indexes."""
+    required_indexes = [
+        "idx_edges_src_tgt",
+        "idx_edges_tgt_src",
+        "idx_symbols_start_end",
+        "idx_checkpoints_branch_created",
+        "idx_agent_memory_key_unique",
+    ]
+
+    for start_ver in [1, 2, 3, 4, 5]:
+        db_file = tmp_path / f"test_mig_v{start_ver}.db"
+        store = SynapStore(db_file)
+        # Initialize initial structure
+        store.initialize()
+
+        # Artificially roll back version to test ladder
+        with store.connect() as conn:
+            conn.execute(f"PRAGMA user_version = {start_ver}")
+
+        # Re-initialize should migrate to TARGET_VERSION = 6
+        store.initialize()
+
+        with store.connect() as conn:
+            final_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            assert final_version == 6, f"Expected version 6 after migration from {start_ver}"
+
+            index_rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+            installed_indexes = {r[0] for r in index_rows}
+            for idx in required_indexes:
+                assert idx in installed_indexes, (
+                    f"Missing covering index {idx} migrating from v{start_ver}"
+                )

@@ -84,6 +84,7 @@ STDLIB_MODULES: set[str] = {
     "pytest",
     "structlog",
     # JS / TS / Node
+    "node",
     "fs",
     "path",
     "http",
@@ -144,6 +145,8 @@ STDLIB_MODULES: set[str] = {
 
 
 def _is_stdlib_module(mod: str) -> bool:
+    if mod.startswith("node:") or (mod.startswith("<") and mod.endswith(">")):
+        return True
     root = mod.split(":")[0].split(".")[0].split("::")[0].split("/")[0]
     return root in STDLIB_MODULES or mod in STDLIB_MODULES
 
@@ -186,6 +189,130 @@ class RuntimeStatus:
     files: int
     mode: str
     is_dirty: bool = False
+
+
+def _generate_candidate_paths(current_rel_path: str, module_part: str) -> list[str]:
+    candidates: list[str] = []
+    current_path = Path(current_rel_path)
+    exts = [
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".cpp",
+        ".cc",
+        ".c",
+        ".h",
+        ".hpp",
+        ".rb",
+        ".cs",
+        ".php",
+        ".kt",
+        ".scala",
+    ]
+
+    # Handle relative imports starting with .
+    if module_part.startswith("."):
+        if module_part.startswith(("./", "../")):
+            try:
+                base_dir = current_path.parent
+                cand_path = Path(module_part)
+                norm_parts = list(base_dir.parts)
+                for part in cand_path.parts:
+                    if part in (".", ""):
+                        continue
+                    elif part == "..":
+                        if norm_parts:
+                            norm_parts.pop()
+                    else:
+                        norm_parts.append(part)
+                cand_base = "/".join(norm_parts)
+                if cand_base:
+                    candidates.append(cand_base)
+                    for ext in exts:
+                        candidates.append(f"{cand_base}{ext}")
+                        candidates.append(f"{cand_base}/index{ext}")
+                    candidates.append(f"{cand_base}/mod.rs")
+                    candidates.append(f"{cand_base}/__init__.py")
+            except Exception:
+                pass
+        else:
+            # Python style relative imports e.g. .models, ..utils
+            dot_count = len(module_part) - len(module_part.lstrip("."))
+            clean_part = module_part.lstrip(".")
+            clean_slash = clean_part.replace(".", "/")
+            try:
+                if dot_count <= len(current_path.parents):
+                    target_dir = current_path.parents[dot_count - 1]
+                    cand_base = (
+                        (target_dir / clean_slash).as_posix()
+                        if clean_slash
+                        else target_dir.as_posix()
+                    )
+                    candidates.append(cand_base)
+                    for ext in exts:
+                        candidates.append(f"{cand_base}{ext}")
+                    candidates.append(f"{cand_base}/__init__.py")
+            except Exception:
+                pass
+
+    # Rust module references
+    elif module_part.startswith("crate::"):
+        clean = module_part.removeprefix("crate::").replace("::", "/")
+        candidates.extend(
+            [f"src/{clean}.rs", f"src/{clean}/mod.rs", f"{clean}.rs", f"{clean}/mod.rs"]
+        )
+    elif module_part.startswith("super::"):
+        clean = module_part.removeprefix("super::").replace("::", "/")
+        try:
+            target_dir = current_path.parent.parent
+            cand_base = (target_dir / clean).as_posix()
+            candidates.extend([f"{cand_base}.rs", f"{cand_base}/mod.rs"])
+        except Exception:
+            pass
+    elif module_part.startswith("self::"):
+        clean = module_part.removeprefix("self::").replace("::", "/")
+        cand_base = (current_path.parent / clean).as_posix()
+        candidates.extend([f"{cand_base}.rs", f"{cand_base}/mod.rs"])
+
+    # C/C++ header or relative file include
+    elif any(
+        module_part.endswith(h_ext) for h_ext in (".h", ".hpp", ".hh", ".hxx", ".c", ".cpp", ".cc")
+    ):
+        candidates.append((current_path.parent / module_part).as_posix())
+        candidates.append(module_part)
+        candidates.append(f"src/{module_part}")
+        candidates.append(f"include/{module_part}")
+
+    # General module path (Go, Java, Python, C#, etc.)
+    else:
+        candidates.append((current_path.parent / module_part).as_posix())
+        for ext in exts:
+            candidates.append((current_path.parent / f"{module_part}{ext}").as_posix())
+
+        clean_slash = module_part.replace(".", "/").replace("::", "/")
+        candidates.append(clean_slash)
+        for ext in exts:
+            candidates.append(f"{clean_slash}{ext}")
+            candidates.append(f"src/{clean_slash}{ext}")
+
+        last_segment = clean_slash.split("/")[-1]
+        if last_segment != clean_slash:
+            candidates.extend(
+                [
+                    f"{last_segment}.go",
+                    f"pkg/{last_segment}.go",
+                    f"pkg/{last_segment}/{last_segment}.go",
+                    f"src/{last_segment}.go",
+                    f"src/pkg/{last_segment}/{last_segment}.go",
+                ]
+            )
+
+    return candidates
 
 
 class SynapRuntime:
@@ -260,22 +387,47 @@ class SynapRuntime:
         self._auto_protect_synap()
         git_state = self.git.state(force=True)
         branch = git_state.effective_branch
-        existing_commit = self.store.get_active_commit(branch)
 
-        if existing_commit == git_state.head_commit and not force:
-            self.logger.info("bootstrap_skipped", branch=branch, commit=existing_commit)
-            return existing_commit
+        dirs = GitRepository.resolve_git_dir(self.git.path)
+        git_dir = dirs[0] if dirs else self.git.path / ".git"
+        merge_conflict = (
+            git_state.merge_in_progress
+            or (git_dir / "MERGE_HEAD").exists()
+            or (git_dir / "CHERRY_PICK_HEAD").exists()
+            or (git_dir / "REVERT_HEAD").exists()
+        )
+        rebase_in_progress = (
+            git_state.rebase_in_progress
+            or (git_dir / "rebase-merge").exists()
+            or (git_dir / "rebase-apply").exists()
+        )
+        bisect_in_progress = (
+            git_state.bisect_in_progress
+            or (git_dir / "BISECT_LOG").exists()
+            or (git_dir / "BISECT_START").exists()
+        )
 
-        if (
-            existing_commit
-            and existing_commit != git_state.head_commit
-            and existing_commit != "unknown"
-        ):
+        if merge_conflict or rebase_in_progress or bisect_in_progress:
+            self.logger.warning(
+                "indexing_suspended_in_progress_operation",
+                merge=merge_conflict,
+                rebase=rebase_in_progress,
+                bisect=bisect_in_progress,
+            )
+            return git_state.head_commit
+
+        last_indexed = self.store.get_last_indexed_commit()
+
+        if last_indexed == git_state.head_commit and not force:
+            self.logger.info("bootstrap_skipped", branch=branch, commit=last_indexed)
+            return last_indexed
+
+        if last_indexed and last_indexed != git_state.head_commit and last_indexed != "unknown":
             try:
                 prev = GitState(
                     repository_path=self.settings.repository_path,
                     is_repository=True,
-                    head_commit=existing_commit,
+                    head_commit=last_indexed,
                     branch=branch,
                 )
                 change = self.git.classify(prev, git_state)
@@ -364,35 +516,62 @@ class SynapRuntime:
         git_state = git_state or self.git.state(force=True)
         branch = git_state.effective_branch
 
-        # If the current repository commit is already indexed, skip reindexing entirely.
+        dirs = GitRepository.resolve_git_dir(self.git.path)
+        git_dir = dirs[0] if dirs else self.git.path / ".git"
+        merge_conflict = (
+            git_state.merge_in_progress
+            or (git_dir / "MERGE_HEAD").exists()
+            or (git_dir / "CHERRY_PICK_HEAD").exists()
+            or (git_dir / "REVERT_HEAD").exists()
+        )
+        rebase_in_progress = (
+            git_state.rebase_in_progress
+            or (git_dir / "rebase-merge").exists()
+            or (git_dir / "rebase-apply").exists()
+        )
+        bisect_in_progress = (
+            git_state.bisect_in_progress
+            or (git_dir / "BISECT_LOG").exists()
+            or (git_dir / "BISECT_START").exists()
+        )
+
+        if merge_conflict or rebase_in_progress or bisect_in_progress:
+            self.logger.warning(
+                "indexing_suspended_in_progress_operation",
+                merge=merge_conflict,
+                rebase=rebase_in_progress,
+                bisect=bisect_in_progress,
+            )
+            return git_state.head_commit
+
+        # Determine last commit indexed in SQLite
+        last_indexed: str | None = None
         if self.store.path.exists():
-            existing_commit = self.store.get_active_commit(branch)
-            if existing_commit == git_state.head_commit and not force:
+            last_indexed = self.store.get_last_indexed_commit()
+            if last_indexed == git_state.head_commit and not force:
                 self.logger.info(
                     "index_repository_skipped",
                     branch=branch,
-                    commit=existing_commit,
+                    commit=last_indexed,
                 )
-                return existing_commit
-        else:
-            existing_commit = None
+                return last_indexed
 
         self.initialize_storage()
 
         # Check active commit after storage initialization
-        if existing_commit is None:
-            existing_commit = self.store.get_active_commit(branch)
+        if last_indexed is None:
+            last_indexed = self.store.get_last_indexed_commit()
 
         # Determine if we should run first-run or incremental
         if (
-            existing_commit is None
+            last_indexed is None
             or force
-            or existing_commit == "unknown"
+            or last_indexed == "unknown"
             or not git_state.is_repository
         ):
             commit = self._first_run_index(git_state)
         else:
-            commit = self._incremental_index(existing_commit, git_state)
+            commit = self._incremental_index(last_indexed, git_state)
 
         # Automatic periodic checkpointing (unrelated to indexing itself, but keeps spec compatibility)
         self.commit_count += 1
@@ -458,6 +637,7 @@ class SynapRuntime:
         chunk_size = 500
         parsed_results = []
         symbols_to_embed = []
+        scanned_paths: set[str] = set()
         # Parallel parsing using ProcessPoolExecutor
 
         num_workers = max(1, multiprocessing.cpu_count())
@@ -503,6 +683,7 @@ class SynapRuntime:
 
                         for res in chunk_results:
                             rel_path = res["path"]
+                            scanned_paths.add(rel_path)
                             matching_info = file_info_map.get(rel_path)
                             git_oid = matching_info.git_oid if matching_info else ""
                             content_hash = matching_info.content_hash if matching_info else ""
@@ -520,7 +701,8 @@ class SynapRuntime:
                                 symbols=res["symbols"],
                             )
                             symbols_to_embed.append((file_id_hash, res["symbols"], content_hash))
-                            self.store.enqueue_wiki(rel_path)
+                            if self.settings.enable_file_wiki:
+                                self.store.enqueue_wiki(rel_path)
                             parsed_results.append((file_id_hash, rel_path, res["imports"]))
 
                         # Generate Embeddings Synchronously
@@ -549,6 +731,7 @@ class SynapRuntime:
 
                     for res in chunk_results:
                         rel_path = res["path"]
+                        scanned_paths.add(rel_path)
                         matching_info = file_info_map.get(rel_path)
                         git_oid = matching_info.git_oid if matching_info else ""
                         content_hash = matching_info.content_hash if matching_info else ""
@@ -566,7 +749,8 @@ class SynapRuntime:
                             symbols=res["symbols"],
                         )
                         symbols_to_embed.append((file_id_hash, res["symbols"], content_hash))
-                        self.store.enqueue_wiki(rel_path)
+                        if self.settings.enable_file_wiki:
+                            self.store.enqueue_wiki(rel_path)
                         parsed_results.append((file_id_hash, rel_path, res["imports"]))
 
                     # Generate Embeddings Synchronously
@@ -584,6 +768,24 @@ class SynapRuntime:
         if parsed_results:
             self.logger.info("structural_edge_resolution_started")
             self._resolve_and_insert_edges(parsed_results)
+
+        # Clean up stale ghost files that no longer exist in the working tree
+        with self.store.connect() as conn:
+            existing_rows = conn.execute("SELECT file_id, path FROM files").fetchall()
+            stale_file_ids = [
+                row["file_id"] for row in existing_rows if row["path"] not in scanned_paths
+            ]
+            for fid in stale_file_ids:
+                conn.execute(
+                    "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?) OR target_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                    (fid, fid),
+                )
+                conn.execute("DELETE FROM symbols WHERE file_id = ?", (fid,))
+                conn.execute("DELETE FROM files WHERE file_id = ?", (fid,))
+            conn.execute(
+                "DELETE FROM edges WHERE source_symbol NOT IN (SELECT symbol_id FROM symbols) OR target_symbol NOT IN (SELECT symbol_id FROM symbols)"
+            )
+            conn.execute("DELETE FROM symbols WHERE file_id NOT IN (SELECT file_id FROM files)")
 
         # Set active commit
         self.store.set_active_commit(git_state.effective_branch, git_state.head_commit or "unknown")
@@ -715,7 +917,46 @@ class SynapRuntime:
                 ).fetchone()
                 if file_row:
                     file_id = file_row["file_id"]
+                    conn.execute(
+                        "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?) OR target_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                        (file_id, file_id),
+                    )
+                    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
                     conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+                else:
+                    conn.execute("DELETE FROM files WHERE path = ?", (rel_path,))
+
+            # Clean up ghost files deleted or untracked in Git
+            try:
+                tracked_res = subprocess.run(
+                    ["git", "ls-files", "-z", "-c", "--exclude-standard"],
+                    cwd=self.settings.repository_path,
+                    capture_output=True,
+                    check=True,
+                )
+                tracked_set = {
+                    p.decode("utf-8", errors="replace")
+                    for p in tracked_res.stdout.split(b"\0")
+                    if p
+                }
+                existing_rows = conn.execute("SELECT file_id, path FROM files").fetchall()
+                for row in existing_rows:
+                    if row["path"] not in tracked_set:
+                        fid = row["file_id"]
+                        conn.execute(
+                            "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?) OR target_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                            (fid, fid),
+                        )
+                        conn.execute("DELETE FROM symbols WHERE file_id = ?", (fid,))
+                        conn.execute("DELETE FROM files WHERE file_id = ?", (fid,))
+            except Exception as e:
+                self.logger.debug("ghost_file_check_skipped", error=str(e))
+
+            # Purge any dangling edges or symbols
+            conn.execute(
+                "DELETE FROM edges WHERE source_symbol NOT IN (SELECT symbol_id FROM symbols) OR target_symbol NOT IN (SELECT symbol_id FROM symbols)"
+            )
+            conn.execute("DELETE FROM symbols WHERE file_id NOT IN (SELECT file_id FROM files)")
 
         for rel_path in deleted:
             self.store.set_wiki_status(rel_path, None, "stale")
@@ -804,8 +1045,9 @@ class SynapRuntime:
                 )
                 symbols_to_embed.append((file_id_hash, symbols_list, content_hash))
 
-                self.store.set_wiki_status(rel_path, None, "stale")
-                self.store.enqueue_wiki(rel_path)
+                if self.settings.enable_file_wiki:
+                    self.store.set_wiki_status(rel_path, None, "stale")
+                    self.store.enqueue_wiki(rel_path)
 
                 with self.store.connect() as conn:
                     conn.execute(
@@ -832,107 +1074,87 @@ class SynapRuntime:
         return git_state.head_commit
 
     def _resolve_and_insert_edges(self, parsed_results: list[tuple[str, str, list[str]]]) -> None:
-        edges_to_insert = []
-        source_file_ids = set()
-        candidate_paths = set()
-        module_keys = set()
-
-        for file_id, rel_path, imports in parsed_results:
-            source_file_ids.add(file_id)
-            current_path = Path(rel_path)
-            for imp in imports:
-                if _is_stdlib_module(imp):
-                    continue
-
-                if ":" in imp:
-                    module_part, target_name = imp.split(":", 1)
-                else:
-                    module_part, target_name = imp, imp.split(".")[-1]
-
-                if module_part.startswith("."):
-                    parts = module_part.lstrip(".").split(".")
-                    dot_count = len(module_part) - len(module_part.lstrip("."))
-                    try:
-                        target_dir = current_path.parents[dot_count - 1]
-                        candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                        for ext in [
-                            ".py",
-                            ".ts",
-                            ".tsx",
-                            ".js",
-                            ".jsx",
-                            ".go",
-                            ".rs",
-                            ".java",
-                            ".cpp",
-                            ".cc",
-                            ".c",
-                            ".h",
-                            ".hpp",
-                            ".rb",
-                        ]:
-                            candidate_paths.add(f"{candidate_rel}{ext}")
-                    except Exception as e:
-                        structlog.get_logger().error("suppressed_error_caught", error=str(e))
-                else:
-                    module_keys.add(module_part)
+        if not parsed_results:
+            return
 
         with self.store.connect() as conn:
+            all_files = conn.execute("SELECT file_id, path, module_key FROM files").fetchall()
+            if not all_files:
+                return
+
+            path_to_file_id: dict[str, str] = {row["path"]: row["file_id"] for row in all_files}
+            module_key_to_file_id: dict[str, str] = {
+                row["module_key"]: row["file_id"] for row in all_files if row["module_key"]
+            }
+            filename_to_file_ids: dict[str, list[str]] = {}
+            for row in all_files:
+                fname = Path(row["path"]).name
+                filename_to_file_ids.setdefault(fname, []).append(row["file_id"])
+
+            source_file_ids = {r[0] for r in parsed_results}
             file_symbols_map: dict[str, list[dict[str, Any]]] = {}
-            if source_file_ids:
-                sf_list = list(source_file_ids)
-                for i in range(0, len(sf_list), 900):
-                    chunk = sf_list[i : i + 900]
-                    placeholders = ",".join("?" for _ in chunk)
-                    rows = conn.execute(
-                        f"SELECT file_id, symbol_id, name, metadata_json FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
-                        tuple(chunk),
-                    ).fetchall()
-                    for row in rows:
-                        meta = {}
-                        if row["metadata_json"]:
-                            try:
-                                meta = json.loads(row["metadata_json"])
-                            except Exception:
-                                pass
-                        file_symbols_map.setdefault(row["file_id"], []).append(
-                            {
-                                "file_id": row["file_id"],
-                                "symbol_id": row["symbol_id"],
-                                "name": row["name"],
-                                "refs": set(meta.get("refs", [])),
-                            }
-                        )
+            sf_list = list(source_file_ids)
+            for i in range(0, len(sf_list), 900):
+                chunk = sf_list[i : i + 900]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"SELECT file_id, symbol_id, name, metadata_json FROM symbols WHERE file_id IN ({placeholders})",  # noqa: S608  # nosec B608
+                    tuple(chunk),
+                ).fetchall()
+                for row in rows:
+                    meta = {}
+                    if row["metadata_json"]:
+                        try:
+                            meta = json.loads(row["metadata_json"])
+                        except Exception:
+                            pass
+                    file_symbols_map.setdefault(row["file_id"], []).append(
+                        {
+                            "file_id": row["file_id"],
+                            "symbol_id": row["symbol_id"],
+                            "name": row["name"],
+                            "refs": set(meta.get("refs", [])),
+                        }
+                    )
 
-            path_to_file_id = {}
-            if candidate_paths:
-                paths_list = list(candidate_paths)
-                for i in range(0, len(paths_list), 900):
-                    chunk = paths_list[i : i + 900]
-                    placeholders = ",".join("?" for _ in chunk)
-                    rows = conn.execute(
-                        f"SELECT file_id, path FROM files WHERE path IN ({placeholders})",  # noqa: S608  # nosec B608
-                        tuple(chunk),
-                    ).fetchall()
-                    for row in rows:
-                        path_to_file_id[row["path"]] = row["file_id"]
+            def find_target_file_id(current_rel_path: str, module_part: str) -> str | None:
+                cand_paths = _generate_candidate_paths(current_rel_path, module_part)
+                for cand in cand_paths:
+                    if cand in path_to_file_id:
+                        return path_to_file_id[cand]
 
-            module_key_to_file_id = {}
-            if module_keys:
-                mk_list = list(module_keys)
-                for i in range(0, len(mk_list), 900):
-                    chunk = mk_list[i : i + 900]
-                    placeholders = ",".join("?" for _ in chunk)
-                    rows = conn.execute(
-                        f"SELECT file_id, module_key FROM files WHERE module_key IN ({placeholders})",  # noqa: S608  # nosec B608
-                        tuple(chunk),
-                    ).fetchall()
-                    for row in rows:
-                        module_key_to_file_id[row["module_key"]] = row["file_id"]
+                if module_part in module_key_to_file_id:
+                    return module_key_to_file_id[module_part]
 
-            target_file_ids = set()
+                fname = Path(module_part).name
+                if fname in filename_to_file_ids:
+                    return filename_to_file_ids[fname][0]
+
+                clean_mod = module_part.removeprefix("crate::").replace("::", ".").replace("/", ".")
+                if clean_mod in module_key_to_file_id:
+                    return module_key_to_file_id[clean_mod]
+
+                last_part = clean_mod.split(".")[-1]
+                if last_part in module_key_to_file_id:
+                    return module_key_to_file_id[last_part]
+
+                for mk, fid in module_key_to_file_id.items():
+                    if (
+                        mk == clean_mod
+                        or mk.endswith(f".{clean_mod}")
+                        or clean_mod.endswith(f".{mk}")
+                        or clean_mod.endswith(f".{last_part}")
+                        or mk.endswith(f".{last_part}")
+                    ):
+                        return fid
+
+                return None
+
+            target_file_ids: set[str] = set()
+            resolved_imports_by_file: list[tuple[str, str, list[tuple[str, str | None, str]]]] = []
+
             for file_id, rel_path, imports in parsed_results:
-                current_path = Path(rel_path)
+                file_resolved: list[tuple[str, str | None, str]] = []
                 for imp in imports:
                     if _is_stdlib_module(imp):
                         continue
@@ -940,50 +1162,16 @@ class SynapRuntime:
                     if ":" in imp:
                         module_part, target_name = imp.split(":", 1)
                     else:
-                        module_part, target_name = imp, imp.split(".")[-1]
+                        module_part, target_name = imp, None
 
-                    target_file_id = None
-                    if module_part.startswith("."):
-                        parts = module_part.lstrip(".").split(".")
-                        dot_count = len(module_part) - len(module_part.lstrip("."))
-                        try:
-                            target_dir = current_path.parents[dot_count - 1]
-                            candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                            for ext in [
-                                ".py",
-                                ".ts",
-                                ".tsx",
-                                ".js",
-                                ".jsx",
-                                ".go",
-                                ".rs",
-                                ".java",
-                                ".cpp",
-                                ".cc",
-                                ".c",
-                                ".h",
-                                ".hpp",
-                                ".rb",
-                            ]:
-                                cand_path = f"{candidate_rel}{ext}"
-                                if cand_path in path_to_file_id:
-                                    target_file_id = path_to_file_id[cand_path]
-                                    break
-                        except Exception as e:
-                            structlog.get_logger().error("suppressed_error_caught", error=str(e))
-                    else:
-                        target_file_id = module_key_to_file_id.get(module_part)
+                    t_file_id = find_target_file_id(rel_path, module_part)
+                    if t_file_id and t_file_id != file_id:
+                        target_file_ids.add(t_file_id)
+                        file_resolved.append((t_file_id, target_name, module_part))
 
-                        if not target_file_id:
-                            for mk, fid in module_key_to_file_id.items():
-                                if mk.endswith(module_part) or mk.endswith(f".{module_part}"):
-                                    target_file_id = fid
-                                    break
+                resolved_imports_by_file.append((file_id, rel_path, file_resolved))
 
-                    if target_file_id:
-                        target_file_ids.add(target_file_id)
-
-            target_symbols_by_file: dict[str, list[dict[str, Any]]] = {}
+            target_symbols_dict: dict[str, dict[str, list[dict[str, Any]]]] = {}
             if target_file_ids:
                 tf_list = list(target_file_ids)
                 for i in range(0, len(tf_list), 900):
@@ -994,95 +1182,46 @@ class SynapRuntime:
                         tuple(chunk),
                     ).fetchall()
                     for row in rows:
-                        target_symbols_by_file.setdefault(row["file_id"], []).append(dict(row))
+                        target_symbols_dict.setdefault(row["file_id"], {}).setdefault(
+                            row["name"], []
+                        ).append(dict(row))
 
-            target_symbols_dict: dict[str, dict[str, list[dict[str, Any]]]] = {}
-            for t_file_id, syms in target_symbols_by_file.items():
-                name_map: dict[str, Any] = {}
-                for sym in syms:
-                    name_map.setdefault(sym["name"], []).append(sym)
-                target_symbols_dict[t_file_id] = name_map
-
-            for file_id, rel_path, imports in parsed_results:
+            edges_to_insert = []
+            for file_id, rel_path, resolved_imports in resolved_imports_by_file:
                 file_symbols = file_symbols_map.get(file_id, [])
-                current_path = Path(rel_path)
                 edges_added_for_file = 0
                 max_edges_per_file = 1000
 
-                for imp in imports:
+                for t_file_id, target_name, module_part in resolved_imports:
                     if edges_added_for_file >= max_edges_per_file:
                         break
 
-                    if _is_stdlib_module(imp):
+                    sym_map = target_symbols_dict.get(t_file_id, {})
+                    if not sym_map:
                         continue
 
-                    target_file_id = None
-                    if ":" in imp:
-                        module_part, target_name = imp.split(":", 1)
+                    if target_name and target_name in sym_map:
+                        target_symbols = sym_map[target_name]
                     else:
-                        module_part, target_name = imp, imp.split(".")[-1]
+                        target_symbols = [s for sym_list in sym_map.values() for s in sym_list]
 
-                    if module_part.startswith("."):
-                        parts = module_part.lstrip(".").split(".")
-                        dot_count = len(module_part) - len(module_part.lstrip("."))
-                        try:
-                            target_dir = current_path.parents[dot_count - 1]
-                            candidate_rel = (target_dir / "/".join(parts)).as_posix()
-                            for ext in [
-                                ".py",
-                                ".ts",
-                                ".tsx",
-                                ".js",
-                                ".jsx",
-                                ".go",
-                                ".rs",
-                                ".java",
-                                ".cpp",
-                                ".cc",
-                                ".c",
-                                ".h",
-                                ".hpp",
-                                ".rb",
-                            ]:
-                                cand_path = f"{candidate_rel}{ext}"
-                                if cand_path in path_to_file_id:
-                                    target_file_id = path_to_file_id[cand_path]
-                                    break
-                        except Exception as e:
-                            structlog.get_logger().error("suppressed_error_caught", error=str(e))
-                    else:
-                        target_file_id = module_key_to_file_id.get(module_part)
-
-                        # Fuzzy fallback only within project module keys
-                        if not target_file_id:
-                            for mk, fid in module_key_to_file_id.items():
-                                if mk.endswith(module_part) or mk.endswith(f".{module_part}"):
-                                    target_file_id = fid
-                                    break
-
-                    if not target_file_id:
-                        continue
-
-                    target_symbols = target_symbols_dict.get(target_file_id, {}).get(
-                        target_name, []
-                    )
+                    mod_alias = module_part.split("/")[-1].split("::")[-1].split(".")[-1]
 
                     for ts in target_symbols:
                         if edges_added_for_file >= max_edges_per_file:
                             break
+
                         for fs in file_symbols:
                             if edges_added_for_file >= max_edges_per_file:
                                 break
                             if fs["symbol_id"] == ts["symbol_id"]:
                                 continue
 
-                            # Precision check: only link if fs references ts or module
                             fs_refs = fs.get("refs")
-                            if (
-                                fs_refs
-                                and ts["name"] not in fs_refs
-                                and module_part.split(".")[-1] not in fs_refs
-                            ):
+                            if fs_refs:
+                                if ts["name"] not in fs_refs and mod_alias not in fs_refs:
+                                    continue
+                            elif target_name and target_name != ts["name"]:
                                 continue
 
                             edge_id = stable_hash(

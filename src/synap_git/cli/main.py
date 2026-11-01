@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -15,6 +16,7 @@ from rich.table import Table
 
 from synap_git.config import LoggingMode, RuntimeMode, RuntimeProfile, SynapSettings
 from synap_git.diagnostics.logger import configure_logging
+from synap_git.git.state import GitRepository
 from synap_git.indexer.daemon import RuntimeDaemon
 from synap_git.indexer.engine import SynapRuntime
 
@@ -58,10 +60,61 @@ app.__call__ = _custom_call  # type: ignore[method-assign]
 
 JSON_OPTION = typer.Option("--json", help="Emit machine-readable JSON.")
 console = Console(stderr=True)
+stdout_console = Console(file=sys.stdout)
+
+
+def _resolve_repo_root(path: str | Path = ".") -> Path:
+    """Find and return the root repository directory or the resolved path if not in Git."""
+    from synap_git.git.state import GitRepository
+
+    p = Path(path).resolve()
+    root = GitRepository.find_root(p)
+    return root if root is not None else p
+
+
+def _resolve_repo_file_path(file_path: str, root: Path) -> str:
+    """Resolve a file path that may be relative to CWD or root into a root-relative posix path."""
+    if not file_path:
+        return ""
+    cand = Path(file_path)
+    if cand.is_absolute():
+        try:
+            return cand.relative_to(root).as_posix()
+        except ValueError:
+            return file_path
+    resolved = cand.resolve()
+    if resolved.exists():
+        try:
+            return resolved.relative_to(root).as_posix()
+        except ValueError:
+            pass
+    if (root / file_path).exists():
+        return Path(file_path).as_posix()
+    return file_path
+
+
+def _emit_json(value: Any) -> None:
+    """Emit clean machine-readable JSON to stdout without ANSI colors, safe for jq."""
+    import sys
+
+    print(json.dumps(_jsonable(value), indent=2, sort_keys=True), file=sys.stdout)
+
+
+def _stdout_print(content: Any) -> None:
+    """Print content to stdout, preserving text cleanliness when piped (non-TTY)."""
+    import sys
+
+    if not sys.stdout.isatty():
+        plain_console = Console(
+            file=sys.stdout, force_terminal=False, no_color=True, highlight=False
+        )
+        plain_console.print(content)
+    else:
+        stdout_console.print(content)
 
 
 def _settings(
-    path: str,
+    path: str | Path,
     *,
     profile: RuntimeProfile | None = None,
     json_output: bool = False,
@@ -78,8 +131,10 @@ def _settings(
         else:
             profile = RuntimeProfile.DEV
 
+    repo_dir = _resolve_repo_root(path)
+
     settings = SynapSettings(
-        repository_path=Path(path),
+        repository_path=repo_dir,
         profile=profile,
         logging_mode=LoggingMode.JSON if json_output else LoggingMode.HUMAN,
         mode=mode,
@@ -88,25 +143,24 @@ def _settings(
     return settings
 
 
-def _verify_is_git(path: str) -> None:
+def _verify_is_git(path: str | Path) -> None:
     from synap_git.git.state import GitRepository
 
-    if not GitRepository(Path(path)).state().is_repository:
+    root = _resolve_repo_root(path)
+    if not GitRepository(root).state().is_repository:
         console.print(f"[bold red]Error:[/bold red] '{path}' is not a valid Git repository.")
         raise typer.Exit(1)
 
 
 def _emit(value: Any, *, json_output: bool) -> None:
     if json_output:
-        import sys
-
-        print(json.dumps(_jsonable(value), indent=2, sort_keys=True), file=sys.stdout)
+        _emit_json(value)
         return
     if isinstance(value, str):
-        console.print(value)
+        _stdout_print(value)
         return
     for key, item in _jsonable(value).items():
-        console.print(f"{key}: {item}")
+        _stdout_print(f"{key}: {item}")
 
 
 def _jsonable(value: Any) -> Any:
@@ -147,6 +201,9 @@ app.add_typer(wiki_app, name="wiki")
 
 usage_app = typer.Typer(help="View AI Usage Tracking.", no_args_is_help=True)
 app.add_typer(usage_app, name="usage")
+
+hooks_app = typer.Typer(help="Manage Git hooks for zero-daemon reindexing.", no_args_is_help=True)
+app.add_typer(hooks_app, name="hooks")
 
 
 @app.command()
@@ -755,7 +812,7 @@ def start(
 
     from synap_git.mcp.server import SynapMCPServer
 
-    abs_path = Path(path).resolve()
+    abs_path = _resolve_repo_root(path)
     pid_file = abs_path / ".synap" / "daemon.pid"
 
     is_running = False
@@ -855,7 +912,7 @@ def daemon_run(
     """Internal command to run the daemon loop foreground inside the detached process."""
     import os
 
-    abs_path = Path(path).resolve()
+    abs_path = _resolve_repo_root(path)
     pid_file = abs_path / ".synap" / "daemon.pid"
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(os.getpid()), encoding="utf-8")
@@ -880,7 +937,7 @@ def stop(
     import signal
     import time
 
-    abs_path = Path(path).resolve()
+    abs_path = _resolve_repo_root(path)
     pid_file = abs_path / ".synap" / "daemon.pid"
 
     if not pid_file.exists():
@@ -973,7 +1030,7 @@ def restart(
     path: Annotated[str, typer.Argument(help="Repository path to restart.")] = ".",
 ) -> None:
     """Restart background daemon services."""
-    abs_path = Path(path).resolve()
+    abs_path = _resolve_repo_root(path)
     console.print("[yellow]Restarting Synap services...[/yellow]")
 
     pid_file = abs_path / ".synap" / "daemon.pid"
@@ -983,7 +1040,9 @@ def restart(
     start(path)
 
 
-def _render_status_content(abs_path: Path, settings: SynapSettings, runtime: SynapRuntime) -> Any:
+def _render_status_content(
+    abs_path: Path, settings: SynapSettings, runtime: SynapRuntime, limit: int | None = None
+) -> Any:
     from rich.console import Group
     from rich.table import Table
 
@@ -1058,6 +1117,19 @@ def _render_status_content(abs_path: Path, settings: SynapSettings, runtime: Syn
         elements.append(
             "[bold yellow]⚠ Warning: Working tree has uncommitted changes. Run git commit to index them.[/bold yellow]"
         )
+        try:
+            dirty_files = list(runtime.git.get_dirty_diff_ranges().keys())
+            if dirty_files:
+                show_files = (
+                    dirty_files[:limit] if (limit is not None and limit >= 0) else dirty_files
+                )
+                elements.append(
+                    f"[dim]Uncommitted files ({len(dirty_files)}): {', '.join(show_files)}[/dim]"
+                )
+                if limit is not None and len(dirty_files) > limit:
+                    elements.append(f"[dim]... and {len(dirty_files) - limit} more files[/dim]")
+        except Exception:
+            pass
 
     return Group(*elements)
 
@@ -1071,13 +1143,22 @@ def status(
     interval: Annotated[
         float, typer.Option("--interval", "-i", help="Refresh interval in seconds for watch mode.")
     ] = 2.0,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", "-n", help="Limit number of uncommitted files displayed."),
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Minimal one-line status output.")
+    ] = False,
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Show current repository context status."""
+    import sys
     import time
 
-    abs_path = Path(path).resolve()
-    settings = _settings(abs_path.as_posix(), json_output=json_output)
+    abs_path = _resolve_repo_root(path)
+    _verify_is_git(abs_path)
+    settings = _settings(abs_path, json_output=json_output)
     runtime = SynapRuntime(settings)
 
     if json_output:
@@ -1086,24 +1167,40 @@ def status(
         daemon_running = bool(hb and _is_process_running(hb.get("pid", 0)))
         out = _jsonable(status_info)
         out["daemon"] = hb if daemon_running else None
-        _emit(out, json_output=True)
+        if limit is not None and limit >= 0:
+            out["limit"] = limit
+        _emit_json(out)
         return
 
-    if not watch:
-        console.print(_render_status_content(abs_path, settings, runtime))
+    if quiet:
+        status_info = runtime.status()
+        hb = _read_daemon_heartbeat(abs_path)
+        daemon_running = bool(hb and _is_process_running(hb.get("pid", 0)))
+        daemon_str = (
+            f"running:{hb.get('pid')}" if (daemon_running and hb is not None) else "stopped"
+        )
+        print(
+            f"repo:{abs_path.name} branch:{status_info.branch} files:{status_info.files} "
+            f"symbols:{status_info.symbols} dirty:{status_info.is_dirty} daemon:{daemon_str}"
+        )
+        return
+
+    content = _render_status_content(abs_path, settings, runtime, limit=limit)
+    if not watch or not sys.stdout.isatty():
+        _stdout_print(content)
         return
 
     from rich.live import Live
 
     with Live(
-        _render_status_content(abs_path, settings, runtime),
-        console=console,
+        content,
+        console=stdout_console,
         refresh_per_second=4,
     ) as live:
         try:
             while True:
                 time.sleep(interval)
-                live.update(_render_status_content(abs_path, settings, runtime))
+                live.update(_render_status_content(abs_path, settings, runtime, limit=limit))
         except KeyboardInterrupt:
             pass
 
@@ -1186,6 +1283,668 @@ def search(
     console.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     console.print(answer)
     console.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+
+@app.command("skeleton")
+def skeleton_cmd(
+    file_path: Annotated[str, typer.Argument(help="Path to file to skeletonize.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository root path.")] = ".",
+) -> None:
+    """Print the structural code skeleton of a file (stripping function/method bodies)."""
+    settings = _settings(path)
+    target = (settings.repository_path / file_path).resolve()
+    if not target.exists() or not target.is_file():
+        console.print(f"[red]File not found: {file_path}[/red]")
+        raise typer.Exit(1)
+
+    from synap_git.parser.registry import CodeParserRegistry
+
+    reg = CodeParserRegistry()
+    skeleton = reg.skeletonize(target)
+    typer.echo(skeleton)
+
+
+@app.command("context")
+def context_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """
+    Print the session startup context preamble.
+
+    Useful for piping directly into any LLM or coding agent CLI
+    (e.g. synap context | llm ... or aider --message-file <(synap context)).
+    """
+    _verify_is_git(path)
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    data = facade.get_session_preamble()
+
+    if json_output:
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    stats = data.get("stats") or {}
+    stats_str = (
+        f" | Indexed: {stats.get('indexed_files', 0)} files, {stats.get('indexed_symbols', 0)} symbols"
+        if stats
+        else ""
+    )
+
+    lines = [
+        "# Synapse Repository Context",
+        f"Branch: {data['branch']} | Commit: {data['git_commit'] or 'unknown'} | Dirty: {data['is_dirty']}{stats_str}",
+        "",
+    ]
+
+    cp = data.get("latest_checkpoint")
+    if cp:
+        lines.append("## Latest Checkpoint (Resume Here)")
+        lines.append(f"- **Doing**: {cp.get('doing', 'N/A')}")
+        lines.append(f"- **Next Step**: {cp.get('next_step', 'N/A')}")
+        if cp.get("blockers") and cp.get("blockers") != "none":
+            lines.append(f"- **Blockers**: {cp.get('blockers')}")
+        files = cp.get("changed_files")
+        if files:
+            files_str = ", ".join(files) if isinstance(files, list) else str(files)
+            lines.append(f"- **Changed Files**: {files_str}")
+        lines.append("")
+
+    blast = data.get("blast_radius") or {}
+    touched = blast.get("touched_symbols", [])
+    if touched:
+        lines.append("## Git Blast Radius (Impacted Callers)")
+        for sym in touched[:4]:
+            name = sym["name"]
+            path_str = sym["path"]
+            line = sym.get("start_line", 1)
+            direct = [
+                f"`{c['name']}` ({c['path']}:{c['start_line']})"
+                for c in blast.get("direct_callers", [])
+                if c.get("impacts") == name
+            ][:2]
+            impacted_tests = [
+                f"`{t['name']}` ({t['path']})"
+                for t in blast.get("impacted_tests", [])
+                if t.get("impacts") == name
+            ][:2]
+            callers_str = ", ".join(direct) if direct else "No internal callers"
+            tests_str = f" | Tests: {', '.join(impacted_tests)}" if impacted_tests else ""
+            lines.append(
+                f"- Touched `{name}` ({path_str}:{line}) -> Callers: {callers_str}{tests_str}"
+            )
+        lines.append("")
+
+    hubs = data.get("architectural_hubs") or []
+    if hubs:
+        lines.append("## Architectural Hubs (PageRank)")
+        for h in hubs[:5]:
+            lines.append(f"- `{h['name']}` ({h['path']}) [{h['score']}]")
+        lines.append("")
+
+    lessons = data.get("approved_lessons", [])
+    if lessons:
+        lines.append("## Approved Negative Constraints (CRITICAL - DO NOT VIOLATE)")
+        for idx, lesson in enumerate(lessons, 1):
+            lines.append(
+                f"{idx}. DO NOT: {lesson.get('what_failed', '')} - REASON: {lesson.get('why_failed', '')}"
+            )
+        lines.append("")
+
+    decisions = data.get("recent_decisions", [])
+    if decisions:
+        lines.append("## Recent Architectural Decisions")
+        for dec in decisions:
+            context_desc = dec.get("context") or dec.get("context_info") or "N/A"
+            lines.append(f"- {dec.get('content', '')} (Context: {context_desc})")
+        lines.append("")
+
+    memories = data.get("recent_memories", [])
+    if memories:
+        lines.append("## Working Memory & Observations")
+        for mem in memories:
+            key_name = mem.get("context_key", "note")
+            summary = mem.get("summary") or mem.get("payload", "")
+            lines.append(f"- **{key_name}**: {summary}")
+        lines.append("")
+
+    typer.echo("\n".join(lines).strip())
+
+
+SYNAPSE_RULES_TEMPLATE = """# Synapse AI Agent Directives
+
+This project uses Synapse for persistent structural context, graph navigation, and memory.
+Follow these operational guidelines:
+
+## 1. Session Start & Context Loading
+- At the start of any conversation or task, call the MCP tool `get_session_preamble()`.
+- Review the active branch, latest checkpoint, and approved negative constraints (lessons).
+- If resuming an existing task, call `restore_checkpoint()`.
+- Never repeat failures listed in approved lessons.
+
+## 2. Progressive Code Navigation & Search
+- When exploring, call `search(query="...", summary_only=True)` first to find relevant symbols with minimal token overhead.
+- Use `get_skeleton(file_path="...")` to inspect function signatures, docstrings, and classes without implementation bodies (85% token savings).
+- Use `get_outline(file_path="...")` to inspect file structure and line ranges.
+- Use `read_symbol(symbol="...", file_path="...")` to read exact symbol code without reading entire files.
+- Before modifying a symbol, use `get_callers(symbol="...")` or `get_neighborhood(symbol="...", direction="upstream")` to check caller blast radius.
+
+## 3. Verification & Testing
+- Use `get_diff()` to review uncommitted code changes.
+- Use `get_test_recommendations()` to identify impacted test files and receive recommended pytest commands.
+
+## 4. Session Checkpointing & Memory
+- Before ending a complex task or when context is high, call `create_checkpoint(doing="...", next_step="...")`.
+- Log key architectural decisions using `log_decision(content="...", context_info="...")`.
+- Save critical environment facts or non-code observations using `remember(key="...", content="...")`, and look up with `recall(key="...")`.
+"""
+
+
+@app.command("preamble")
+def preamble_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Alias for 'synap context'."""
+    context_cmd(path=path, json_output=json_output)
+
+
+@app.command("blast")
+def blast_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    limit: Annotated[
+        int | None, typer.Option("--limit", "-n", help="Maximum items to display.")
+    ] = None,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress decorative tables and output raw impacted symbols/tests.",
+        ),
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Analyze blast radius of uncommitted changes (touched symbols, direct callers, and impacted tests)."""
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    settings = _settings(root, json_output=json_output)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    blast = facade.get_blast_radius()
+
+    touched = blast.get("touched_symbols", [])
+    callers = blast.get("direct_callers", [])
+    tests = blast.get("impacted_tests", [])
+
+    if limit is not None and limit >= 0:
+        touched = touched[:limit]
+        callers = callers[:limit]
+        tests = tests[:limit]
+        blast["touched_symbols"] = touched
+        blast["direct_callers"] = callers
+        blast["impacted_tests"] = tests
+
+    if json_output:
+        _emit_json(blast)
+        return
+
+    if quiet:
+        for s in touched:
+            print(f"symbol:{s['name']}:{s['path']}:{s.get('start_line', 1)}")
+        for t in tests:
+            print(f"test:{t['name']}:{t['path']}")
+        return
+
+    if not touched:
+        _stdout_print(
+            "[green]✓ Clean working tree or no indexed symbols modified in uncommitted diff.[/green]"
+        )
+        return
+
+    table = Table(title="💥 Git Blast Radius (Impacted Callers & Tests)", border_style="red")
+    table.add_column("Modified Symbol", style="bold yellow")
+    table.add_column("Location")
+    table.add_column("Direct Callers", style="cyan")
+    table.add_column("Impacted Tests", style="magenta")
+
+    for sym in touched:
+        name = sym["name"]
+        loc = f"{sym['path']}:{sym.get('start_line', 1)}"
+        sym_callers = [
+            f"{c['name']} ({c['path']}:{c.get('start_line', 1)})"
+            for c in callers
+            if c.get("impacts") == name
+        ]
+        sym_tests = [f"{t['name']} ({t['path']})" for t in tests if t.get("impacts") == name]
+        callers_str = "\n".join(sym_callers) if sym_callers else "[dim]None[/dim]"
+        tests_str = "\n".join(sym_tests) if sym_tests else "[dim]None[/dim]"
+        table.add_row(name, loc, callers_str, tests_str)
+
+    _stdout_print(table)
+
+
+@app.command("hubs")
+def hubs_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Number of hubs to display.")] = 10,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet", "-q", help="Suppress decorative tables and output only symbol names."
+        ),
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Discover top architectural hubs using Personalized PageRank over the code graph."""
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    settings = _settings(root, json_output=json_output)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    active_files = list(runtime.git.get_dirty_diff_ranges().keys())
+    hubs = runtime.store.compute_pagerank(active_files=active_files, limit=limit)
+
+    if json_output:
+        _emit_json(hubs)
+        return
+
+    if quiet:
+        for h in hubs:
+            print(h.get("name", ""))
+        return
+
+    table = Table(title=f"🏛️ Architectural Hubs (PageRank Top {len(hubs)})", border_style="cyan")
+    table.add_column("Rank", justify="right", style="bold")
+    table.add_column("Symbol", style="bold green")
+    table.add_column("Kind", style="yellow")
+    table.add_column("Path", style="dim")
+    table.add_column("Score", justify="right", style="cyan")
+
+    for idx, h in enumerate(hubs, 1):
+        table.add_row(str(idx), h["name"], h["kind"], h["path"], f"{h['score']:.4f}")
+
+    _stdout_print(table)
+
+
+@app.command("outline")
+def outline_cmd(
+    file_path: Annotated[str, typer.Argument(help="Path to file to outline.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    limit: Annotated[
+        int | None, typer.Option("--limit", "-n", help="Maximum symbols to display.")
+    ] = None,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet", "-q", help="Suppress decorative tables and output symbol signatures."
+        ),
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Print structural AST outline (functions, classes, methods, and line ranges) of a file."""
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    resolved_file = _resolve_repo_file_path(file_path, root)
+    settings = _settings(root, json_output=json_output)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    data = facade.get_outline(resolved_file)
+
+    symbols = data.get("symbols", [])
+    if limit is not None and limit >= 0:
+        symbols = symbols[:limit]
+        data["symbols"] = symbols
+
+    if json_output:
+        _emit_json(data)
+        return
+
+    if quiet:
+        for s in symbols:
+            sig = s.get("signature") or s.get("name", "")
+            print(f"{s.get('name')}:{s.get('start_line', 1)}-{s.get('end_line', 1)} {sig}".strip())
+        return
+
+    if not symbols:
+        _stdout_print(f"[yellow]No symbols found in outline for '{file_path}'.[/yellow]")
+        return
+
+    table = Table(
+        title=f"📐 AST Outline: {data.get('file_path') or resolved_file}", border_style="green"
+    )
+    table.add_column("Symbol", style="bold cyan")
+    table.add_column("Kind", style="yellow")
+    table.add_column("Lines", justify="right")
+    table.add_column("Signature", style="dim")
+
+    for s in symbols:
+        lines_str = f"{s.get('start_line', 1)}-{s.get('end_line', 1)}"
+        table.add_row(s.get("name", ""), s.get("kind", ""), lines_str, s.get("signature", "")[:60])
+
+    _stdout_print(table)
+
+
+@app.command("diff")
+def diff_cmd(
+    file_path: Annotated[str, typer.Argument(help="Optional file path to diff.")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    staged: Annotated[bool, typer.Option("--staged", help="Diff staged changes.")] = False,
+    limit: Annotated[
+        int | None, typer.Option("--limit", "-n", help="Maximum diff lines to display.")
+    ] = None,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress informational messages; silent on clean working tree.",
+        ),
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Show raw unified git diff of uncommitted changes."""
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    resolved_file = _resolve_repo_file_path(file_path, root) if file_path else ""
+    settings = _settings(root, json_output=json_output)
+    runtime = SynapRuntime(settings)
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.get_diff(file_path=resolved_file, staged=staged)
+    diff_text = res.get("diff", "")
+
+    if limit is not None and limit >= 0:
+        lines = diff_text.splitlines()
+        if len(lines) > limit:
+            diff_text = "\n".join(lines[:limit]) + f"\n... [truncated to {limit} lines]"
+
+    if json_output:
+        _emit_json({"file_path": resolved_file or None, "staged": staged, "diff": diff_text})
+        return
+
+    if diff_text:
+        print(diff_text)
+    elif not quiet:
+        _stdout_print("[green]✓ No differences found.[/green]")
+
+
+@app.command("test")
+def test_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print recommended test command without running."),
+    ] = False,
+    extra_args: Annotated[
+        str, typer.Option("--args", "-a", help="Extra arguments to forward to pytest.")
+    ] = "",
+) -> None:
+    """Run tests impacted by uncommitted changes using AST blast radius analysis."""
+    import shlex
+    import subprocess
+
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    settings = _settings(root)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    rec = facade.get_test_recommendations()
+    cmd_str = rec.get("recommended_command", ".venv/bin/pytest")
+    test_files = rec.get("test_files", [])
+
+    if extra_args:
+        cmd_str += f" {extra_args}"
+
+    if not test_files:
+        console.print(
+            "[green]Working tree is clean or no specific tests mapped. Running full test suite...[/green]"
+        )
+    else:
+        console.print(
+            f"[bold cyan]Impacted tests ({len(test_files)} files):[/bold cyan] {', '.join(test_files)}"
+        )
+
+    console.print(f"[dim]Command: {cmd_str}[/dim]\n")
+    if dry_run:
+        return
+
+    tokens = shlex.split(cmd_str)
+    res = subprocess.run(tokens, cwd=settings.repository_path)
+    raise typer.Exit(code=res.returncode)
+
+
+@app.command("explain")
+def explain_cmd(
+    symbol: Annotated[str, typer.Argument(help="Symbol or function name to explain.")],
+    file_path: Annotated[
+        str, typer.Option("--file", "-f", help="Optional file path to disambiguate.")
+    ] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+) -> None:
+    """Explain a symbol's definition, callers, dependencies, and test coverage in the code graph."""
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    rel_file = _resolve_repo_file_path(file_path, root) if file_path else None
+    settings = _settings(root)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+
+    try:
+        sym_info = facade.read_symbol(symbol, file_path=rel_file)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    callers_data = facade.get_neighborhood(
+        symbol, file_path=rel_file, direction="upstream", depth=1
+    )
+    callees_data = facade.get_neighborhood(
+        symbol, file_path=rel_file, direction="downstream", depth=1
+    )
+
+    table = Table(title=f"🔍 Structural Symbol Analysis: {sym_info['name']}", border_style="cyan")
+    table.add_column("Property", style="bold")
+    table.add_column("Details")
+    table.add_row("Kind", sym_info["kind"])
+    table.add_row("Location", f"{sym_info['path']}:{sym_info['start_line']}-{sym_info['end_line']}")
+
+    callers = [f"{n['name']} ({n['path']}:{n['lines']})" for n in callers_data.get("neighbors", [])]
+    table.add_row(
+        "Inbound Callers (Upstream)",
+        ", ".join(callers) if callers else "[dim]None detected[/dim]",
+    )
+
+    callees = [f"{n['name']} ({n['path']}:{n['lines']})" for n in callees_data.get("neighbors", [])]
+    table.add_row(
+        "Dependencies (Downstream)",
+        ", ".join(callees) if callees else "[dim]None detected[/dim]",
+    )
+
+    _stdout_print(table)
+    _stdout_print("\n[bold]Code Implementation:[/bold]")
+    _stdout_print(sym_info.get("numbered_code", sym_info.get("code", "")))
+
+
+@app.command("pack")
+def pack_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    max_tokens: Annotated[
+        int, typer.Option("--max-tokens", "-m", help="Maximum token budget.")
+    ] = 8000,
+    output: Annotated[
+        str, typer.Option("--output", "-o", help="Write output to file instead of stdout.")
+    ] = "",
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", "-n", help="Maximum number of hub skeletons to include."),
+    ] = None,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress status messages.")] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Pack token-budgeted repository context (AST skeletons of hubs, dirty blast radius, memory) for LLM prompts."""
+    import tiktoken
+
+    root = _resolve_repo_root(path)
+    _verify_is_git(root)
+    settings = _settings(root, json_output=json_output)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+    from synap_git.parser.registry import CodeParserRegistry
+
+    facade = SynapMCPFacade(runtime)
+    reg = CodeParserRegistry()
+    enc = tiktoken.get_encoding("cl100k_base")
+
+    preamble_data = facade.get_session_preamble()
+    lines = [
+        f"# Synapse Repository Context Pack: {settings.repository_path.name}",
+        f"Branch: {preamble_data['branch']} | Commit: {preamble_data.get('git_commit', 'unknown')}",
+        "",
+        preamble_data.get("compact_preamble", ""),
+        "",
+        "## Architectural Hub Skeletons",
+    ]
+
+    used_tokens = len(enc.encode("\n".join(lines)))
+    hubs = preamble_data.get("architectural_hubs", [])
+    if limit is not None and limit >= 0:
+        hubs = hubs[:limit]
+
+    for h in hubs:
+        fpath = settings.repository_path / h["path"]
+        if fpath.exists() and fpath.is_file():
+            try:
+                skel = reg.skeletonize(fpath)
+                block = f"\n### File Skeleton: {h['path']}\n```\n{skel}\n```\n"
+                b_tokens = len(enc.encode(block))
+                if used_tokens + b_tokens > max_tokens:
+                    break
+                lines.append(block)
+                used_tokens += b_tokens
+            except Exception:
+                pass
+
+    content = "\n".join(lines).strip()
+    if json_output:
+        _emit_json(
+            {
+                "branch": preamble_data.get("branch"),
+                "git_commit": preamble_data.get("git_commit"),
+                "tokens": used_tokens,
+                "max_tokens": max_tokens,
+                "hubs_included": len(hubs),
+                "content": content,
+            }
+        )
+        return
+
+    if output:
+        out_path = Path(output).resolve()
+        out_path.write_text(content, encoding="utf-8")
+        if not quiet:
+            _stdout_print(f"[green]✓ Packed {used_tokens} tokens into {out_path}[/green]")
+    else:
+        print(content)
+
+
+@app.command("rules")
+def rules_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    target: Annotated[
+        str,
+        typer.Option(
+            "--target",
+            "-t",
+            help="Target rules file (all, cursor, claude, agents).",
+        ),
+    ] = "all",
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Overwrite existing Synapse directives."),
+    ] = False,
+    stdout: Annotated[
+        bool,
+        typer.Option("--stdout", help="Print rules to stdout instead of writing files."),
+    ] = False,
+) -> None:
+    """Generate universal agent directives for Cursor (.cursorrules), Claude Code (CLAUDE.md), and AGENTS.md."""
+    if stdout:
+        typer.echo(SYNAPSE_RULES_TEMPLATE.strip())
+        return
+
+    _verify_is_git(path)
+    repo_dir = _resolve_repo_root(path)
+    target_lower = target.lower().strip()
+
+    targets: list[tuple[str, Path]] = []
+    if target_lower in ("all", "cursor"):
+        targets.append((".cursorrules", repo_dir / ".cursorrules"))
+    if target_lower in ("all", "claude"):
+        targets.append(("CLAUDE.md", repo_dir / "CLAUDE.md"))
+    if target_lower in ("all", "agents"):
+        targets.append(("AGENTS.md", repo_dir / "AGENTS.md"))
+
+    if not targets:
+        console.print(
+            f"[red]Unknown target '{target}'. Choose from: all, cursor, claude, agents.[/red]"
+        )
+        raise typer.Exit(1)
+
+    updated_files: list[str] = []
+    for filename, file_path in targets:
+        if file_path.exists():
+            existing = file_path.read_text(encoding="utf-8")
+            marker = "# Synapse AI Agent Directives"
+            if marker in existing:
+                if not force:
+                    continue
+                # Split at marker to retain everything prior
+                before_marker = existing.split(marker)[0].rstrip()
+                if before_marker:
+                    new_content = before_marker + "\n\n" + SYNAPSE_RULES_TEMPLATE.strip() + "\n"
+                else:
+                    new_content = SYNAPSE_RULES_TEMPLATE.strip() + "\n"
+            else:
+                new_content = existing.rstrip() + "\n\n" + SYNAPSE_RULES_TEMPLATE.strip() + "\n"
+        else:
+            new_content = SYNAPSE_RULES_TEMPLATE.strip() + "\n"
+
+        file_path.write_text(new_content, encoding="utf-8")
+        updated_files.append(filename)
+
+    if updated_files:
+        console.print(
+            f"[bold green]✓ Configured Synapse agent directives in: {', '.join(updated_files)}[/bold green]"
+        )
+    else:
+        console.print("[dim]Synapse agent directives already present in all target files.[/dim]")
 
 
 @app.command()
@@ -1371,6 +2130,321 @@ def update(
         raise typer.Exit(1)
 
 
+HOOK_MARKER_START = "# --- SYNAP HOOK START ---"
+HOOK_MARKER_END = "# --- SYNAP HOOK END ---"
+HOOK_SCRIPT = """# --- SYNAP HOOK START ---
+if command -v synap >/dev/null 2>&1; then
+    (synap sync --quiet >/dev/null 2>&1 &)
+fi
+# --- SYNAP HOOK END ---"""
+
+
+def _install_git_hook(hook_file: Path) -> bool:
+    hook_file.parent.mkdir(parents=True, exist_ok=True)
+    if hook_file.exists():
+        content = hook_file.read_text(encoding="utf-8")
+        if HOOK_MARKER_START in content:
+            return False
+        new_content = content.rstrip() + "\n\n" + HOOK_SCRIPT + "\n"
+    else:
+        new_content = "#!/bin/sh\n\n" + HOOK_SCRIPT + "\n"
+
+    hook_file.write_text(new_content, encoding="utf-8")
+    try:
+        hook_file.chmod(hook_file.stat().st_mode | 0o111)
+    except OSError:
+        pass
+    return True
+
+
+def _uninstall_git_hook(hook_file: Path) -> bool:
+    if not hook_file.exists():
+        return False
+    content = hook_file.read_text(encoding="utf-8")
+    if HOOK_MARKER_START not in content:
+        return False
+    before = content.split(HOOK_MARKER_START)[0]
+    after = content.split(HOOK_MARKER_END)[1] if HOOK_MARKER_END in content else ""
+    cleaned = (before + after).strip()
+    if cleaned and not cleaned.startswith("#!/bin/sh"):
+        cleaned = "#!/bin/sh\n" + cleaned
+    if cleaned.strip() in ("", "#!/bin/sh"):
+        hook_file.unlink(missing_ok=True)
+    else:
+        hook_file.write_text(cleaned + "\n", encoding="utf-8")
+    return True
+
+
+@hooks_app.command("install")
+def hooks_install_cmd(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output.")] = False,
+) -> bool:
+    """Install Git hooks (post-commit, post-checkout) for zero-daemon automatic index sync."""
+    repo_dir = _resolve_repo_root(path)
+    dirs = GitRepository.resolve_git_dir(repo_dir)
+    if dirs is None:
+        if not quiet:
+            console.print(f"[red]Directory {repo_dir} is not a Git repository.[/red]")
+        return False
+
+    _, common_dir = dirs
+    hooks_dir = common_dir / "hooks"
+    c1 = _install_git_hook(hooks_dir / "post-commit")
+    c2 = _install_git_hook(hooks_dir / "post-checkout")
+    installed = c1 or c2
+
+    if not quiet:
+        if installed:
+            console.print(
+                "[bold green]✓ Git post-commit & post-checkout hooks installed for automatic reindexing.[/bold green]"
+            )
+        else:
+            console.print("[dim]Git hooks already installed.[/dim]")
+    return installed
+
+
+@hooks_app.command("uninstall")
+def hooks_uninstall_cmd(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress output.")] = False,
+) -> bool:
+    """Remove Synap Git hooks."""
+    repo_dir = _resolve_repo_root(path)
+    dirs = GitRepository.resolve_git_dir(repo_dir)
+    if dirs is None:
+        return False
+    _, common_dir = dirs
+    hooks_dir = common_dir / "hooks"
+    if not hooks_dir.exists():
+        return False
+
+    u1 = _uninstall_git_hook(hooks_dir / "post-commit")
+    u2 = _uninstall_git_hook(hooks_dir / "post-checkout")
+    removed = u1 or u2
+
+    if not quiet:
+        if removed:
+            console.print("[green]✓ Synap Git hooks removed successfully.[/green]")
+        else:
+            console.print("[dim]No Synap Git hooks found to remove.[/dim]")
+    return removed
+
+
+def _strip_json_comments(text: str) -> str:
+    import re
+
+    pattern = r'("(?:\\.|[^"\\])*")|//.*?$|/\*.*?\*/'
+
+    def replace(match: re.Match[str]) -> str:
+        if match.group(1):
+            return match.group(1)
+        return ""
+
+    cleaned = re.sub(pattern, replace, text, flags=re.MULTILINE | re.DOTALL)
+    cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+    return cleaned
+
+
+def _inject_mcp_config(config_path: Path, server_cmd: str, server_args: list[str]) -> bool:
+    try:
+        import shutil
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data: dict[str, Any] = {}
+        if config_path.exists():
+            # Create a .bak backup before reading and modifying existing config
+            bak_path = config_path.with_name(config_path.name + ".bak")
+            try:
+                shutil.copy2(config_path, bak_path)
+            except OSError:
+                pass
+
+            raw = config_path.read_text(encoding="utf-8").strip()
+            if raw:
+                cleaned = _strip_json_comments(raw)
+                try:
+                    loaded: Any = json.loads(cleaned)
+                    if isinstance(loaded, dict):
+                        data = loaded
+                    else:
+                        console.print(
+                            f"[yellow]Warning: {config_path} is not a JSON object. Preserving file.[/yellow]"
+                        )
+                        return False
+                except Exception as parse_err:
+                    console.print(
+                        f"[yellow]Warning: Could not parse {config_path}: {parse_err}. Preserving file.[/yellow]"
+                    )
+                    return False
+
+        if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
+            data["mcpServers"] = {}
+
+        data["mcpServers"]["synap"] = {
+            "command": server_cmd,
+            "args": server_args,
+        }
+
+        config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return True
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not configure {config_path}: {e}[/yellow]")
+        return False
+
+
+@app.command("install")
+def install_cmd(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    ide: Annotated[
+        str,
+        typer.Option(
+            "--ide",
+            "-i",
+            help="Target IDE to configure (all, cursor, claude, windsurf, desktop).",
+        ),
+    ] = "all",
+    global_setup: Annotated[
+        bool,
+        typer.Option(
+            "--global/--local",
+            "-g/-l",
+            help="Install globally across all repositories (recommended) or lock to this repo.",
+        ),
+    ] = True,
+    skip_init: Annotated[
+        bool,
+        typer.Option("--skip-init", help="Skip repository indexing during install."),
+    ] = False,
+) -> None:
+    """Seamless 1-command installer: discovers IDEs, registers Synap MCP server globally, and initializes repository."""
+    import os
+    import shutil
+    import sys
+
+    console.print("\n[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+    console.print("[bold cyan]       Synap Seamless 1-Click Setup       [/bold cyan]")
+    console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n")
+
+    repo_dir = _resolve_repo_root(path)
+    is_git = (repo_dir / ".git").exists()
+
+    synap_bin = shutil.which("synap")
+    if synap_bin:
+        server_cmd = synap_bin
+        server_args = ["mcp", "serve"]
+    else:
+        server_cmd = sys.executable
+        server_args = ["-m", "synap_git.cli", "mcp", "serve"]
+
+    if not global_setup and path != ".":
+        server_args.append(repo_dir.as_posix())
+
+    # 1. Initialize repository if inside Git repo
+    if is_git and not skip_init:
+        console.print(f"[dim]Initializing Synap index in {repo_dir}...[/dim]")
+        try:
+            settings = _settings(path)
+            runtime = SynapRuntime(settings)
+            runtime.initialize_storage()
+            console.print(
+                "[bold green]✓ Local structural repository index initialized[/bold green]"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Warning: Index initialization deferred: {e}[/yellow]")
+
+        # Configure agent directives (AGENTS.md, .cursorrules, CLAUDE.md)
+        try:
+            rules_cmd(path=path, target="all", stdout=False)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Rules generation deferred: {e}[/yellow]")
+
+        # Configure Git hooks (post-commit, post-checkout) for zero-daemon reindexing
+        try:
+            if hooks_install_cmd(path=path, quiet=True):
+                console.print(
+                    "[bold green]✓ Configured Git hooks for zero-daemon automatic reindexing[/bold green]"
+                )
+        except Exception as e:
+            console.print(f"[yellow]Warning: Git hooks generation deferred: {e}[/yellow]")
+
+    # 2. Discover IDE configurations
+    home = Path.home()
+    all_ide_targets: dict[str, list[Path]] = {
+        "cursor": [
+            home / ".cursor" / "mcp.json",
+        ],
+        "claude": [
+            home / ".claude.json",
+            home / ".claude" / "settings.json",
+        ],
+        "windsurf": [
+            home / ".codeium" / "windsurf" / "mcp_config.json",
+            home / ".config" / "Codeium" / "windsurf" / "mcp_config.json",
+        ],
+        "desktop": [],
+    }
+
+    if not global_setup:
+        all_ide_targets["cursor"].append(repo_dir / ".cursor" / "mcp.json")
+
+    if sys.platform == "darwin":
+        all_ide_targets["desktop"].append(
+            home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        )
+    elif sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            all_ide_targets["desktop"].append(
+                Path(appdata) / "Claude" / "claude_desktop_config.json"
+            )
+            all_ide_targets["windsurf"].append(
+                Path(appdata) / "Codeium" / "windsurf" / "mcp_config.json"
+            )
+    else:
+        all_ide_targets["desktop"].append(
+            home / ".config" / "Claude" / "claude_desktop_config.json"
+        )
+
+    ide_choice = ide.lower().strip()
+    selected_targets: list[tuple[str, Path]] = []
+
+    for name, paths in all_ide_targets.items():
+        if ide_choice not in ("all", name):
+            continue
+        for p in paths:
+            if ide_choice == name or p.exists() or p.parent.exists():
+                selected_targets.append((name.capitalize(), p))
+
+    # Fallback to cursor config if no existing IDE files detected
+    if not selected_targets and ide_choice in ("all", "cursor"):
+        fallback_path = (
+            home / ".cursor" / "mcp.json" if global_setup else repo_dir / ".cursor" / "mcp.json"
+        )
+        selected_targets.append(("Cursor", fallback_path))
+
+    configured_count = 0
+    for app_name, cfg_path in selected_targets:
+        if _inject_mcp_config(cfg_path, server_cmd, server_args):
+            console.print(
+                f"[bold green]✓ Configured MCP in {app_name}:[/bold green] [dim]{cfg_path}[/dim]"
+            )
+            configured_count += 1
+
+    if configured_count > 0:
+        scope_str = "globally for all repositories" if global_setup else f"for {repo_dir.name}"
+        console.print(
+            f"\n[bold green]🎉 Synapse successfully installed {scope_str} across {configured_count} IDE configuration(s)![/bold green]"
+        )
+        console.print(
+            "[dim]Every repository you open will now automatically have persistent context and memory.[/dim]\n"
+        )
+    else:
+        console.print(
+            "[yellow]No IDE configs could be updated. Run 'synap mcp config' to inspect manual JSON.[/yellow]\n"
+        )
+
+
 @app.command("uninstall")
 def uninstall_command(
     yes: Annotated[
@@ -1452,8 +2526,9 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option(
@@ -1465,7 +2540,65 @@ def main(
         ),
     ] = False,
 ) -> None:
-    pass
+    if ctx.invoked_subcommand is None:
+        repo_path = Path.cwd()
+        if (repo_path / ".git").exists() or (repo_path / ".synap").exists():
+            try:
+                from synap_git import __version__
+
+                settings = _settings(".")
+                runtime = SynapRuntime(settings)
+                status = runtime.status()
+                state = runtime.git.state()
+
+                table = Table(
+                    title=f"⚡ Synapse v{__version__} — Git-Aware Context Engine",
+                    border_style="cyan",
+                )
+                table.add_column("Property", style="bold")
+                table.add_column("Value")
+                table.add_row("Branch", f"[bold green]{status.branch}[/bold green]")
+                table.add_row(
+                    "Commit", f"`{status.git_commit[:8] if status.git_commit else 'unknown'}`"
+                )
+                table.add_row(
+                    "Working Tree",
+                    "[red]DIRTY[/red]" if state.is_dirty else "[green]CLEAN[/green]",
+                )
+                table.add_row("Indexed Files", str(status.files))
+                table.add_row("Indexed Symbols", str(status.symbols))
+                console.print(table)
+                console.print("\n[bold]Quick Commands:[/bold]")
+                console.print(
+                    "  [cyan]synap context[/cyan]        Print token-bounded session preamble (< 750 tokens)"
+                )
+                console.print(
+                    "  [cyan]synap blast[/cyan]          Analyze blast radius of uncommitted changes"
+                )
+                console.print(
+                    "  [cyan]synap test[/cyan]           Run tests impacted by blast radius"
+                )
+                console.print(
+                    "  [cyan]synap pack[/cyan]           Export token-budgeted prompt pack (< 8k tokens)"
+                )
+                console.print(
+                    "  [cyan]synap explain <sym>[/cyan]  Inspect symbol, callers, dependencies & tests"
+                )
+                console.print(
+                    "  [cyan]synap skeleton <f>[/cyan]  AST skeleton (85% token reduction)"
+                )
+                console.print(
+                    "  [cyan]synap hubs[/cyan]           Top architectural hubs via PageRank"
+                )
+                console.print("  [cyan]synap search <q>[/cyan]    Hybrid structural retrieval")
+                console.print(
+                    "  [cyan]synap doctor[/cyan]         System integrity and diagnostic health check"
+                )
+                console.print("  [dim]Run 'synap --help' for all commands.[/dim]\n")
+                return
+            except Exception:
+                pass
+        console.print(ctx.get_help())
 
 
 @app.command()
@@ -1817,161 +2950,274 @@ def doctor(
     context: Annotated[
         bool, typer.Option("--context", help="Output current LLM injection context.")
     ] = False,
+    limit: Annotated[
+        int | None, typer.Option("--limit", "-n", help="Maximum issues or log lines to display.")
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Only output status summary line.")
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Validate environment and system health."""
-    console.print("[bold cyan]Synap Doctor: System Health Check[/bold cyan]\n")
+    import shutil
+    import socket
+    import sys
 
-    settings = _settings(path)
+    import httpx
+
+    root = _resolve_repo_root(path)
+    settings = _settings(root, json_output=json_output)
     runtime = SynapRuntime(settings)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task_db = progress.add_task("Checking SQLite Database...", total=1)
+    # 1. Database check
+    db_ok = True
+    db_msg = "ok"
+    try:
+        runtime.initialize_storage(auto_recover=False)
+        res = runtime.doctor(auto_recover=False)
+        db_msg = str(res.get("database_integrity", "ok"))
+    except Exception as e:
+        db_ok = False
+        db_msg = str(e)
+
+    # 2. Tree-sitter parsers check
+    parser_ok = True
+    parser_msg = "functional"
+    try:
+        from synap_git.parser.registry import CodeParserRegistry
+
+        registry = CodeParserRegistry()
+        test_file = root / ".synap_test.py"
+        test_file.write_text("def test(): pass", encoding="utf-8")
+        registry.parse(test_file, relative_path=".synap_test.py")
+        test_file.unlink(missing_ok=True)
+    except Exception as e:
+        parser_ok = False
+        parser_msg = str(e)
+
+    # 3. Tokenizer check
+    tok_ok = True
+    tok_msg = "ready"
+    try:
+        import tiktoken
+
+        tiktoken.get_encoding("cl100k_base")
+    except Exception as e:
+        tok_ok = False
+        tok_msg = str(e)
+
+    # 4. CLI tools check
+    git_path = shutil.which("git")
+    gh_path = shutil.which("gh")
+    cli_ok = git_path is not None
+
+    # 5. LLM provider check
+    prov_ok = True
+    prov_msg = "unconfigured"
+    if settings.llm_provider is None:
+        prov_msg = "No LLM Provider configured (running in structural Mode A)"
+    else:
+        errors = settings.validate_configuration()
+        if errors:
+            prov_ok = False
+            prov_msg = f"Config error: {errors[0]}"
+        else:
+            conn_errors = settings.test_connectivity()
+            if conn_errors:
+                prov_ok = False
+                prov_msg = f"Connectivity error: {conn_errors[0]}"
+            else:
+                prov_msg = f"Provider ({settings.llm_provider}) connectivity verified"
+
+    # 6. Daemon & REST API check
+    daemon_info = _read_daemon_heartbeat(root)
+    port = daemon_info.get("port", 9876) if daemon_info else 9876
+    daemon_running = False
+    api_ok = False
+    daemon_msg = "Daemon inactive"
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        port_in_use = s.connect_ex(("127.0.0.1", port)) == 0
+
+    if daemon_info and port_in_use:
+        daemon_running = True
         try:
-            runtime.initialize_storage(auto_recover=False)
-            res = runtime.doctor(auto_recover=False)
+            r = httpx.get(f"http://127.0.0.1:{port}/api/v1/status", timeout=2.0)
+            if r.status_code == 200:
+                api_ok = True
+                daemon_msg = (
+                    f"Daemon active & REST API healthy (PID {daemon_info['pid']}, port {port})"
+                )
+            else:
+                daemon_msg = (
+                    f"Daemon running on port {port} but REST API returned HTTP {r.status_code}"
+                )
+        except Exception as ex:
+            daemon_msg = f"Daemon running on port {port} but API check failed: {ex}"
+    elif daemon_info:
+        daemon_msg = (
+            f"Heartbeat found for PID {daemon_info['pid']} but port {port} is not listening"
+        )
+    else:
+        daemon_msg = f"Daemon inactive (port {port} available). Start using `synap start`"
+
+    overall_healthy = db_ok and parser_ok and tok_ok and cli_ok
+    status_str = "healthy" if overall_healthy else "degraded"
+
+    if json_output:
+        doc_data = {
+            "status": status_str,
+            "database": {"ok": db_ok, "integrity": db_msg},
+            "parsers": {"ok": parser_ok, "status": parser_msg},
+            "tokenizer": {"ok": tok_ok, "status": tok_msg},
+            "cli_tools": {"git": git_path is not None, "gh": gh_path is not None},
+            "llm_provider": {
+                "configured": settings.llm_provider is not None,
+                "provider": settings.llm_provider,
+                "status": prov_msg,
+            },
+            "daemon": {
+                "running": daemon_running,
+                "api_healthy": api_ok,
+                "pid": daemon_info.get("pid") if daemon_info else None,
+                "port": port,
+                "status": daemon_msg,
+            },
+        }
+        _emit_json(doc_data)
+        return
+
+    if quiet:
+        print(
+            f"status:{status_str} db:{'ok' if db_ok else 'err'} "
+            f"parsers:{'ok' if parser_ok else 'err'} git:{'ok' if cli_ok else 'err'} "
+            f"daemon:{'running' if daemon_running else 'stopped'}"
+        )
+        return
+
+    if not sys.stdout.isatty():
+        _stdout_print("[bold cyan]Synap Doctor: System Health Check[/bold cyan]\n")
+        _stdout_print(f"{'✓' if db_ok else '✗'} Database integrity: {db_msg}")
+        _stdout_print(f"{'✓' if parser_ok else '✗'} Tree-sitter parsers: {parser_msg}")
+        _stdout_print(f"{'✓' if tok_ok else '✗'} Tokenizer (tiktoken): {tok_msg}")
+        _stdout_print(
+            f"✓ Git {'and GitHub CLI installed' if gh_path else 'installed (gh missing)'}"
+        )
+        _stdout_print(f"ℹ LLM Provider: {prov_msg}")
+        _stdout_print(f"ℹ Daemon & API: {daemon_msg}")
+        _stdout_print("\nAll checks complete.")
+    else:
+        _stdout_print("[bold cyan]Synap Doctor: System Health Check[/bold cyan]\n")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=stdout_console,
+        ) as progress:
+            task_db = progress.add_task("Checking SQLite Database...", total=1)
             progress.update(
                 task_db,
                 completed=1,
-                description=f"[green]✓ Database integrity: {res['database_integrity']}[/green]",
+                description=(
+                    f"[green]✓ Database integrity: {db_msg}[/green]"
+                    if db_ok
+                    else f"[red]✗ Database error: {db_msg}[/red]"
+                ),
             )
-        except Exception as e:
-            progress.update(task_db, completed=1, description=f"[red]✗ Database error: {e}[/red]")
 
-        task_parsers = progress.add_task("Checking Tree-Sitter Parsers...", total=1)
-        try:
-            from synap_git.parser.registry import CodeParserRegistry
-
-            registry = CodeParserRegistry()
-            test_file = Path(path) / ".synap_test.py"
-            test_file.write_text("def test(): pass", encoding="utf-8")
-            registry.parse(test_file, relative_path=".synap_test.py")
-            test_file.unlink()
+            task_parsers = progress.add_task("Checking Tree-Sitter Parsers...", total=1)
             progress.update(
                 task_parsers,
                 completed=1,
-                description="[green]✓ Tree-sitter parsers functional[/green]",
+                description=(
+                    "[green]✓ Tree-sitter parsers functional[/green]"
+                    if parser_ok
+                    else f"[red]✗ Parser error: {parser_msg}[/red]"
+                ),
             )
-        except Exception as e:
+
+            task_tok = progress.add_task("Checking Tokenizer...", total=1)
             progress.update(
-                task_parsers, completed=1, description=f"[red]✗ Parser error: {e}[/red]"
+                task_tok,
+                completed=1,
+                description=(
+                    "[green]✓ Tokenizer (tiktoken) ready[/green]"
+                    if tok_ok
+                    else f"[red]✗ Tokenizer error: {tok_msg}[/red]"
+                ),
             )
 
-        task_tok = progress.add_task("Checking Tokenizer...", total=1)
-        try:
-            import tiktoken
-
-            tiktoken.get_encoding("cl100k_base")
-            progress.update(
-                task_tok, completed=1, description="[green]✓ Tokenizer (tiktoken) ready[/green]"
+            task_cli = progress.add_task("Checking CLI dependencies...", total=1)
+            desc_cli = (
+                "[green]✓ Git and GitHub CLI installed[/green]"
+                if gh_path
+                else "[green]✓ Git installed[/green] [yellow](gh missing)[/yellow]"
             )
-        except Exception as e:
-            progress.update(task_tok, completed=1, description=f"[red]✗ Tokenizer error: {e}[/red]")
+            progress.update(task_cli, completed=1, description=desc_cli)
 
-        task_cli = progress.add_task("Checking CLI dependencies...", total=1)
-        import shutil
-
-        git_path = shutil.which("git")
-        gh_path = shutil.which("gh")
-        if gh_path:
-            progress.update(task_cli, description="[green]✓ Git and GitHub CLI installed[/green]")
-        else:
-            progress.update(
-                task_cli, description="[green]✓ Git installed[/green] [yellow](gh missing)[/yellow]"
-            )
-        progress.update(task_cli, completed=1)
-
-        task_prov = progress.add_task("Checking LLM Provider...", total=1)
-        try:
+            task_prov = progress.add_task("Checking LLM Provider...", total=1)
             if settings.llm_provider is None:
                 progress.update(
                     task_prov,
                     completed=1,
                     description="[yellow]⚠ No LLM Provider configured (running in structural Mode A)[/yellow]",
                 )
+            elif prov_ok:
+                progress.update(
+                    task_prov,
+                    completed=1,
+                    description=f"[green]✓ Provider ({settings.llm_provider}) connectivity verified[/green]",
+                )
             else:
-                errors = settings.validate_configuration()
-                if errors:
-                    progress.update(
-                        task_prov,
-                        completed=1,
-                        description=f"[red]✗ Config error: {errors[0]}[/red]",
-                    )
-                else:
-                    conn_errors = settings.test_connectivity()
-                    if conn_errors:
-                        progress.update(
-                            task_prov,
-                            completed=1,
-                            description=f"[red]✗ Connectivity error: {conn_errors[0]}[/red]",
-                        )
-                    else:
-                        progress.update(
-                            task_prov,
-                            completed=1,
-                            description=f"[green]✓ Provider ({settings.llm_provider}) connectivity verified[/green]",
-                        )
-        except Exception as e:
-            progress.update(
-                task_prov, completed=1, description=f"[red]✗ Unexpected error: {e}[/red]"
-            )
+                progress.update(
+                    task_prov,
+                    completed=1,
+                    description=f"[red]✗ Provider error: {prov_msg}[/red]",
+                )
 
-        task_daemon = progress.add_task("Checking Daemon & REST API Status...", total=1)
-        try:
-            import socket
-
-            import httpx
-
-            daemon_info = _read_daemon_heartbeat(settings.repository_path)
-            port = daemon_info.get("port", 9876) if daemon_info else 9876
-
-            # Test port availability
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(0.5)
-                port_in_use = s.connect_ex(("127.0.0.1", port)) == 0
-
-            if daemon_info and port_in_use:
-                try:
-                    r = httpx.get(f"http://127.0.0.1:{port}/api/v1/status", timeout=2.0)
-                    if r.status_code == 200:
-                        progress.update(
-                            task_daemon,
-                            completed=1,
-                            description=f"[green]✓ Daemon active & REST API healthy (PID {daemon_info['pid']}, port {port})[/green]",
-                        )
-                    else:
-                        progress.update(
-                            task_daemon,
-                            completed=1,
-                            description=f"[yellow]⚠ Daemon running on port {port} but REST API returned HTTP {r.status_code}[/yellow]",
-                        )
-                except Exception as ex:
-                    progress.update(
-                        task_daemon,
-                        completed=1,
-                        description=f"[yellow]⚠ Daemon running on port {port} but API check failed: {ex}[/yellow]",
-                    )
-            elif daemon_info:
+            task_daemon = progress.add_task("Checking Daemon & REST API Status...", total=1)
+            pid_str = daemon_info.get("pid", "unknown") if daemon_info else "unknown"
+            if daemon_running and api_ok:
                 progress.update(
                     task_daemon,
                     completed=1,
-                    description=f"[yellow]⚠ Heartbeat found for PID {daemon_info['pid']} but port {port} is not listening[/yellow]",
+                    description=f"[green]✓ Daemon active & REST API healthy (PID {pid_str}, port {port})[/green]",
+                )
+            elif daemon_running:
+                progress.update(
+                    task_daemon,
+                    completed=1,
+                    description=f"[yellow]⚠ {daemon_msg}[/yellow]",
                 )
             else:
                 progress.update(
                     task_daemon,
                     completed=1,
-                    description=f"[yellow]⚠ Daemon inactive (port {port} available). Start using `synap start`[/yellow]",
+                    description=f"[yellow]⚠ {daemon_msg}[/yellow]",
                 )
-        except Exception as e:
-            progress.update(
-                task_daemon, completed=1, description=f"[red]✗ Daemon status error: {e}[/red]"
-            )
+        _stdout_print("\n[bold]All checks complete.[/bold]")
 
-    console.print("\n[bold]All checks complete.[/bold]")
+    if fix:
+        console.print("[cyan]Attempting automatic fixes...[/cyan]")
+        runtime.initialize_storage(auto_recover=True)
+        hooks_install_cmd(path=str(root), quiet=True)
+        console.print("[green]✓ Storage verified and Git hooks installed.[/green]")
+
+    if context:
+        console.print("\n[bold cyan]Current Session Context (Preamble):[/bold cyan]")
+        from synap_git.mcp.server import SynapMCPFacade
+
+        facade = SynapMCPFacade(runtime)
+        pre = facade.get_session_preamble()
+        console.print(pre.get("compact_preamble", "No context generated."))
+
+
+app.command(name="ctx", hidden=True)(context_cmd)
+app.command(name="st", hidden=True)(status)
+app.command(name="sk", hidden=True)(skeleton_cmd)
+app.command(name="doc", hidden=True)(doctor)
+app.command(name="t", hidden=True)(test_cmd)
+app.command(name="ex", hidden=True)(explain_cmd)
 
 
 @app.command()
@@ -1987,14 +3233,22 @@ def mcp_serve(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
 ) -> None:
     """Run FastMCP stdio server in foreground for AI agents."""
-    _verify_is_git(path)
     import asyncio
     import os
 
     from synap_git.mcp.server import SynapMCPServer
 
-    settings = _settings(path, json_output=True)
+    repo_dir = _resolve_repo_root(path)
+    settings = _settings(repo_dir, json_output=True)
     runtime = SynapRuntime(settings)
+
+    # Auto-initialize storage on-the-fly for any opened git repository
+    if (repo_dir / ".git").exists():
+        try:
+            runtime.initialize_storage()
+        except Exception:
+            pass
+
     server = SynapMCPServer(runtime)
     try:
         asyncio.run(server.run())
@@ -2012,21 +3266,107 @@ def mcp_start(
 
 @mcp_app.command("config")
 def mcp_config(
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    path: Annotated[
+        str, typer.Argument(help="Repository path (omit for dynamic global setup).")
+    ] = ".",
+    ide: Annotated[
+        str,
+        typer.Option(
+            "--ide",
+            "-i",
+            help="Target IDE/tool format (generic, cursor, windsurf, claude, cline).",
+        ),
+    ] = "generic",
+    global_setup: Annotated[
+        bool,
+        typer.Option(
+            "--global/--local",
+            "-g/-l",
+            help="Configure pathless global setup (works dynamically across all repositories).",
+        ),
+    ] = True,
 ) -> None:
-    """Output the MCP server configuration for manual IDE setup."""
-    abs_path = Path(path).resolve().as_posix()
+    """Output the MCP server configuration for IDE setup (Cursor, Windsurf, Claude, Cline, etc.)."""
+    import shutil
     import sys
+
+    root = _resolve_repo_root(path)
+    synap_bin = shutil.which("synap")
+    if synap_bin:
+        server_cmd = synap_bin
+        server_args = ["mcp", "serve"]
+    else:
+        server_cmd = sys.executable
+        server_args = ["-m", "synap_git.cli", "mcp", "serve"]
+
+    if not global_setup and path != ".":
+        server_args.append(root.as_posix())
 
     config = {
         "mcpServers": {
             "synap": {
-                "command": sys.executable,
-                "args": ["-m", "synap_git.cli", "mcp", "serve", abs_path],
+                "command": server_cmd,
+                "args": server_args,
             }
         }
     }
-    typer.echo(json.dumps(config, indent=2))
+    _emit_json(config)
+
+
+@mcp_app.command("print-config")
+def mcp_print_config(
+    path: Annotated[
+        str, typer.Option("--path", "-p", help="Repository path (omit for dynamic global setup).")
+    ] = ".",
+    ide: Annotated[
+        str,
+        typer.Option(
+            "--ide",
+            "-i",
+            help="Target IDE format (all, cursor, claude, windsurf).",
+        ),
+    ] = "all",
+    global_setup: Annotated[
+        bool,
+        typer.Option(
+            "--global/--local",
+            "-g/-l",
+            help="Configure pathless global setup (works dynamically across all repositories).",
+        ),
+    ] = True,
+) -> None:
+    """Print the exact MCP JSON snippet directly to stdout for copy-pasting."""
+    import shutil
+    import sys
+
+    root = _resolve_repo_root(path)
+    synap_bin = shutil.which("synap")
+    if synap_bin:
+        server_cmd = synap_bin
+        server_args = ["mcp", "serve"]
+    else:
+        server_cmd = sys.executable
+        server_args = ["-m", "synap_git.cli", "mcp", "serve"]
+
+    if not global_setup and path != ".":
+        server_args.append(root.as_posix())
+
+    ide_choice = ide.lower().strip()
+    if ide_choice not in ("all", "cursor", "claude", "windsurf"):
+        console.print(
+            f"[bold red]Error:[/bold red] Unknown IDE '{ide}'. Choose from: all, cursor, claude, windsurf."
+        )
+        raise typer.Exit(1)
+
+    snippet = {
+        "mcpServers": {
+            "synap": {
+                "command": server_cmd,
+                "args": server_args,
+            }
+        }
+    }
+    _emit_json(snippet)
 
 
 @mcp_app.command("verify")
@@ -2266,6 +3606,64 @@ def memory_verify(
         console.print("[dim]Run `synap lessons reject <id>` to clean up stale memory.[/dim]")
     else:
         console.print("\n[green]✓ All approved memory references are valid.[/green]")
+
+
+@memory_app.command("remember")
+def memory_remember(
+    key: Annotated[str, typer.Argument(help="Context key or topic for this memory.")],
+    content: Annotated[str, typer.Argument(help="Fact, note, or observation content.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    summary: Annotated[str, typer.Option("--summary", "-s", help="Optional short summary.")] = "",
+) -> None:
+    """Save an observation or technical fact to persistent memory."""
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.remember(key, content, summary=summary)
+    console.print(
+        f"[bold green]✓ Memory recorded under key '{key}'[/bold green] (ID: {res['memory_id'][:8]}…)"
+    )
+
+
+@memory_app.command("list")
+def memory_list(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    key: Annotated[str, typer.Option("--key", "-k", help="Filter by context key.")] = "",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max entries.")] = 15,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """List persistent agent memories and observations."""
+    settings = _settings(path, json_output=json_output)
+    runtime = SynapRuntime(settings)
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.recall(key=key, limit=limit)
+    memories = res["memories"]
+
+    if json_output:
+        _emit({"memories": memories}, json_output=True)
+        return
+
+    if not memories:
+        console.print(f"[yellow]No memories found{' for key ' + key if key else ''}.[/yellow]")
+        return
+
+    table = Table(title="Persistent Agent Memories", show_header=True, header_style="bold cyan")
+    table.add_column("Key", style="bold")
+    table.add_column("Content")
+    table.add_column("Timestamp", style="dim")
+
+    for m in memories:
+        ts = datetime.fromtimestamp(m.get("timestamp", 0), tz=UTC).strftime("%Y-%m-%d %H:%M")
+        payload = m.get("payload", "")
+        summary_txt = m.get("summary", "")
+        text = f"{summary_txt}\n{payload}" if summary_txt and summary_txt != payload else payload
+        table.add_row(m.get("context_key", ""), text[:80] + ("…" if len(text) > 80 else ""), ts)
+
+    console.print(table)
 
 
 @memory_app.command("decisions")

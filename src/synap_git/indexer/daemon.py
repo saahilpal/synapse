@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
-from synap_git.config import SynapSettings
+from synap_git.config import RuntimeProfile, SynapSettings
 from synap_git.diagnostics.logger import get_logger
 from synap_git.git import GitRepository, GitState
 from synap_git.indexer.engine import SynapRuntime
@@ -23,7 +24,11 @@ class DaemonHealth:
 class RuntimeDaemon:
     """Long-running background daemon hosting watcher and Diagnostic UI in one process."""
 
-    def __init__(self, settings: SynapSettings) -> None:
+    def __init__(
+        self,
+        settings: SynapSettings,
+        debounce_seconds: float | None = None,
+    ) -> None:
         self.settings = settings
         self.runtime = SynapRuntime(settings)
         self.git = GitRepository(settings.repository_path)
@@ -36,116 +41,144 @@ class RuntimeDaemon:
         self._last_cpu_time: float = 0.0
         self._last_prune_time: float = 0.0
         self._fs_changed = False
+        self._last_fs_event_time: float = 0.0
         self._observer: Any = None
+        self._ui_server: Any = None
+
+        if debounce_seconds is not None:
+            self._debounce_seconds = debounce_seconds
+        else:
+            env_debounce = os.getenv("SYNAP_DAEMON_DEBOUNCE_SECONDS")
+            if env_debounce is not None:
+                try:
+                    self._debounce_seconds = float(env_debounce)
+                except ValueError:
+                    self._debounce_seconds = 1.5
+            elif self.settings.profile == RuntimeProfile.TEST:
+                self._debounce_seconds = 0.1
+            else:
+                self._debounce_seconds = 1.5
 
     async def start(self) -> None:
-        self.runtime.initialize_storage()
+        import atexit
+
         self._uptime_start = time.time()
         self._recovery_attempts = 0
-
-        # Retrieve initial git state safely
-        try:
-            self._last_git_state = self.git.state()
-        except Exception:
-            self._last_git_state = None
-
-        # Find an available port for UI hosting to avoid port conflicts
-        self._port = self._find_free_port(9876)
-
-        # Start FastAPI Diagnostic UI via Uvicorn in the same async loop
-        import contextlib
-
-        from uvicorn import Config, Server
-
-        from synap_git.api.app import create_app
-
-        config = Config(
-            app=create_app(self.runtime),
-            host="127.0.0.1",
-            port=self._port,
-            log_level="warning",
-            loop="asyncio",
-            lifespan="off" if self.settings.profile.name == "TEST" else "auto",
-        )
-        self._ui_server = Server(config)
-
-        # Patch uvicorn's signal capturing to allow our daemon to control signal handling
-        @contextlib.contextmanager
-        def dummy_capture_signals() -> Generator[None, None, None]:
-            yield
-
-        self._ui_server.capture_signals = dummy_capture_signals  # type: ignore[method-assign]
-
-        # Initial bootstrap
-        self._write_heartbeat(status="starting")
-        await asyncio.to_thread(self.runtime.bootstrap)
-
-        with self.runtime.store.connect() as conn:
-            failed_count = conn.execute(
-                "SELECT COUNT(*) FROM wiki_queue WHERE status = 'failed'"
-            ).fetchone()[0]
-            if failed_count > 0:
-                print(
-                    f"\n[Synapse] ⚠ Found {failed_count} permanently failed wiki pages. They will not be retried automatically."
-                )
-
-        self._running = True
-        self._write_heartbeat(status="healthy")
         self._install_signal_handlers()
+        atexit.register(self._delete_heartbeat)
 
-        # Start watchdog file observer for event-driven git indexing
-        self._fs_changed = False
-        self._observer = None
+        server_task: asyncio.Task[Any] | None = None
+        wiki_worker_task: asyncio.Task[Any] | None = None
+
         try:
-            from watchdog.events import FileSystemEventHandler
-            from watchdog.observers import Observer
+            self.runtime.initialize_storage()
 
-            daemon_ref = self
+            # Retrieve initial git state safely
+            try:
+                self._last_git_state = self.git.state()
+            except Exception:
+                self._last_git_state = None
 
-            class _WatcherHandler(FileSystemEventHandler):
-                def on_any_event(self, event: Any) -> None:
-                    path_str = str(getattr(event, "src_path", ""))
-                    is_git_ref = any(
-                        ref_marker in path_str
-                        for ref_marker in (
-                            ".git/HEAD",
-                            ".git/refs/heads",
-                            ".git/MERGE_HEAD",
-                            ".git/rebase-apply",
-                            ".git/rebase-merge",
-                        )
-                    )
-                    if not is_git_ref and any(
-                        ignored in path_str
-                        for ignored in (
-                            ".synap",
-                            ".git",
-                            ".venv",
-                            "__pycache__",
-                            "node_modules",
-                            ".next",
-                            "dist",
-                            "build",
-                        )
-                    ):
-                        return
-                    daemon_ref._fs_changed = True
+            # Find an available port for UI hosting to avoid port conflicts
+            self._port = self._find_free_port(9876)
 
-            self._observer = Observer()
-            self._observer.schedule(
-                _WatcherHandler(), str(self.settings.repository_path), recursive=True
+            # Start FastAPI Diagnostic UI via Uvicorn in the same async loop
+            import contextlib
+
+            from uvicorn import Config, Server
+
+            from synap_git.api.app import create_app
+
+            config = Config(
+                app=create_app(self.runtime),
+                host="127.0.0.1",
+                port=self._port,
+                log_level="warning",
+                loop="asyncio",
+                lifespan="off" if self.settings.profile.name == "TEST" else "auto",
             )
-            self._observer.start()
-            self.logger.info("watchdog_observer_started")
-        except Exception as e:
-            self.logger.warning("watchdog_observer_init_failed", error=str(e))
+            self._ui_server = Server(config)
+
+            # Patch uvicorn's signal capturing to allow our daemon to control signal handling
+            @contextlib.contextmanager
+            def dummy_capture_signals() -> Generator[None, None, None]:
+                yield
+
+            self._ui_server.capture_signals = dummy_capture_signals  # type: ignore[method-assign]
+
+            # Initial bootstrap
+            self._write_heartbeat(status="starting")
+            await asyncio.to_thread(self.runtime.bootstrap)
+
+            with self.runtime.store.connect() as conn:
+                failed_count = conn.execute(
+                    "SELECT COUNT(*) FROM wiki_queue WHERE status = 'failed'"
+                ).fetchone()[0]
+                if failed_count > 0:
+                    print(
+                        f"\n[Synapse] ⚠ Found {failed_count} permanently failed wiki pages. They will not be retried automatically."
+                    )
+
+            self._running = True
+            self._write_heartbeat(status="healthy")
+
+            # Start watchdog file observer for event-driven git indexing
+            self._fs_changed = False
             self._observer = None
+            try:
+                from watchdog.events import FileSystemEventHandler
+                from watchdog.observers import Observer
 
-        # Launch Uvicorn and Wiki Worker in background
-        server_task = asyncio.create_task(self._ui_server.serve())
-        wiki_worker_task = asyncio.create_task(self._wiki_worker_loop())
+                daemon_ref = self
 
-        try:
+                class _WatcherHandler(FileSystemEventHandler):
+                    def on_any_event(self, event: Any) -> None:
+                        path_str = str(getattr(event, "src_path", ""))
+                        is_git_ref = any(
+                            ref_marker in path_str
+                            for ref_marker in (
+                                ".git/HEAD",
+                                ".git/refs/heads",
+                                ".git/MERGE_HEAD",
+                                ".git/rebase-apply",
+                                ".git/rebase-merge",
+                            )
+                        )
+                        if not is_git_ref and any(
+                            ignored in path_str
+                            for ignored in (
+                                ".synap",
+                                ".git",
+                                ".venv",
+                                "__pycache__",
+                                "node_modules",
+                                ".next",
+                                "dist",
+                                "build",
+                                ".pytest_cache",
+                                ".mypy_cache",
+                                ".ruff_cache",
+                                ".coverage",
+                            )
+                        ):
+                            return
+                        daemon_ref._last_fs_event_time = time.monotonic()
+                        daemon_ref._fs_changed = True
+
+                self._observer = Observer()
+                self._observer.schedule(
+                    _WatcherHandler(), str(self.settings.repository_path), recursive=True
+                )
+                self._observer.start()
+                self.logger.info("watchdog_observer_started")
+            except Exception as e:
+                self.logger.warning("watchdog_observer_init_failed", error=str(e))
+                self._observer = None
+
+            # Launch Uvicorn and Wiki Worker in background
+            server_task = asyncio.create_task(self._ui_server.serve())
+            wiki_worker_task = asyncio.create_task(self._wiki_worker_loop())
+
             await self._poll_git_loop()
         finally:
             if self._observer:
@@ -157,34 +190,48 @@ class RuntimeDaemon:
 
             self._running = False
             self.logger.info("daemon_shutting_down")
-            self._ui_server.should_exit = True
-            self._ui_server.force_exit = True  # Always force exit since daemon is terminating
+            if hasattr(self, "_ui_server") and self._ui_server is not None:
+                self._ui_server.should_exit = True
+                self._ui_server.force_exit = True  # Always force exit since daemon is terminating
 
             # Allow uvicorn and wiki worker to shut down gracefully
             timeout = 0.5
             self.logger.info("daemon_waiting_for_tasks", timeout=timeout)
 
-            tasks = [server_task, wiki_worker_task]
-            done, pending = await asyncio.wait(
-                tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
-            )
+            tasks = [t for t in (server_task, wiki_worker_task) if t is not None]
+            if tasks:
+                done, pending = await asyncio.wait(
+                    tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
+                )
 
-            for task in pending:
-                self.logger.warning("daemon_force_cancelling_task", task=task.get_coro())
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+                for task in pending:
+                    self.logger.warning("daemon_force_cancelling_task", task=task.get_coro())
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
-            self.runtime.shutdown()
+            try:
+                self.runtime.shutdown()
+            except Exception as e:
+                self.logger.warning("runtime_shutdown_error", error=str(e))
+
             self._delete_heartbeat()
+            try:
+                atexit.unregister(self._delete_heartbeat)
+            except Exception:
+                pass
             self.logger.info("daemon_stopped")
 
     def stop(self, force_exit: bool = False) -> None:
         if not self._stop_event.is_set():
-            self.logger.info("daemon_stop_requested")
+            self.logger.info("daemon_stop_requested", force_exit=force_exit)
             self._stop_event.set()
+        if hasattr(self, "_ui_server") and self._ui_server is not None:
+            self._ui_server.should_exit = True
+            if force_exit:
+                self._ui_server.force_exit = True
 
     def health(self) -> DaemonHealth:
         status = self.runtime.status()
@@ -290,45 +337,52 @@ class RuntimeDaemon:
                 "indexed_files": indexed_files,
                 "memory_nodes": memory_nodes,
             }
-            heartbeat_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            temp_file = heartbeat_file.with_suffix(".tmp")
+            temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            temp_file.replace(heartbeat_file)
         except Exception as e:
             self.logger.error("daemon_write_heartbeat_error", error=str(e))
 
     def _delete_heartbeat(self) -> None:
         heartbeat_file = self.settings.repository_path / ".synap" / "daemon_heartbeat.json"
-        if heartbeat_file.exists():
-            try:
-                heartbeat_file.unlink()
-            except Exception as e:
-                import structlog
-
-                structlog.get_logger().error("suppressed_error_caught", error=str(e))
+        try:
+            heartbeat_file.unlink(missing_ok=True)
+        except Exception as e:
+            self.logger.warning("daemon_delete_heartbeat_failed", error=str(e))
 
         # Cleanup process PID lockfile as well
         pid_file = self.settings.repository_path / ".synap" / "daemon.pid"
-        if pid_file.exists():
-            try:
-                pid_file.unlink()
-            except Exception as e:
-                import structlog
-
-                structlog.get_logger().error("suppressed_error_caught", error=str(e))
+        try:
+            pid_file.unlink(missing_ok=True)
+        except Exception as e:
+            self.logger.warning("daemon_delete_pid_failed", error=str(e))
 
     async def _poll_git_loop(self) -> None:
         backstop_interval = 30.0
-        poll_step = 0.5
+        poll_step = min(0.2, max(0.05, self._debounce_seconds / 2))
         elapsed = backstop_interval  # Force initial check on loop start
 
         while not self._stop_event.is_set():
-            if self._fs_changed or elapsed >= backstop_interval:
+            now = time.monotonic()
+            trigger_check = False
+
+            if elapsed >= backstop_interval:
+                trigger_check = True
                 self._fs_changed = False
                 elapsed = 0.0
+            elif self._fs_changed:
+                quiet_elapsed = now - self._last_fs_event_time
+                if quiet_elapsed >= self._debounce_seconds:
+                    trigger_check = True
+                    self._fs_changed = False
+                    elapsed = 0.0
 
+            if trigger_check:
                 try:
                     # Periodic pruning (once per hour)
-                    now = time.time()
-                    if now - self._last_prune_time > 3600:
-                        self._last_prune_time = now
+                    now_wall = time.time()
+                    if now_wall - self._last_prune_time > 3600:
+                        self._last_prune_time = now_wall
                         count = await asyncio.to_thread(self.runtime.store.prune_expired_lessons)
                         if count > 0:
                             self.logger.info("lessons_pruned", count=count)
@@ -381,12 +435,30 @@ class RuntimeDaemon:
                 elapsed += poll_step
 
     def _install_signal_handlers(self) -> None:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, lambda: self.stop(force_exit=True))
-            except NotImplementedError:
-                continue
+        def _on_signal(sig: int) -> None:
+            sig_name = signal.Signals(sig).name if hasattr(signal, "Signals") else str(sig)
+            self.logger.info("daemon_signal_trapped", signal=sig_name)
+            self.stop(force_exit=True)
+
+        def _fallback_handler(sig: int, _frame: Any) -> None:
+            _on_signal(sig)
+
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, _on_signal, sig)
+                except (NotImplementedError, RuntimeError):
+                    try:
+                        signal.signal(sig, _fallback_handler)
+                    except (ValueError, OSError):
+                        pass
+        except RuntimeError:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    signal.signal(sig, _fallback_handler)
+                except (ValueError, OSError):
+                    pass
 
     async def _wiki_worker_loop(self) -> None:
         self.logger.info("wiki_worker_started")

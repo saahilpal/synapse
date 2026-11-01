@@ -90,3 +90,51 @@ def test_setup_cli_openai_fallback(
     assert 'llm_provider = "openai"' in content
     assert 'llm_model = "gpt-4o"' in content
     assert "sk-testkey" not in content
+
+
+def test_setup_cli_invalid_provider(
+    temp_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir = tmp_path / ".config" / "synap"
+    monkeypatch.setenv("SYNAP_CONFIG", (config_dir / "config.toml").as_posix())
+
+    runner = CliRunner()
+    res = runner.invoke(app, ["setup", temp_repo.as_posix()], input="invalid_provider\n")
+
+    assert res.exit_code == 1
+    assert "Error: Invalid provider 'invalid_provider'." in res.output
+
+
+def test_setup_cli_invalid_ollama_url(
+    temp_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir = tmp_path / ".config" / "synap"
+    monkeypatch.setenv("SYNAP_CONFIG", (config_dir / "config.toml").as_posix())
+
+    runner = CliRunner()
+    res = runner.invoke(
+        app,
+        ["setup", temp_repo.as_posix()],
+        input="ollama\nqwen2.5-coder:14b\nftp://invalid-host\n",
+    )
+
+    assert res.exit_code == 1
+    assert "Error: Ollama URL must start with http:// or https://" in res.output
+
+
+def test_setup_cli_connection_cancelled(
+    temp_repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir = tmp_path / ".config" / "synap"
+    monkeypatch.setenv("SYNAP_CONFIG", (config_dir / "config.toml").as_posix())
+
+    runner = CliRunner()
+    # If connection fails and user says 'n' to saving anyway
+    res = runner.invoke(
+        app,
+        ["setup", temp_repo.as_posix()],
+        input="ollama\nqwen2.5-coder:14b\nhttp://localhost:9999\nn\n",
+    )
+
+    assert res.exit_code == 1
+    assert "Setup cancelled." in res.output
