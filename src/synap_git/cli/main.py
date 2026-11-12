@@ -4148,6 +4148,141 @@ def wiki_list(
     console.print(table)
 
 
+@wiki_app.command("status")
+def wiki_status(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Show whether the engineering wiki is missing, fresh, stale, or invalid."""
+    runtime = SynapRuntime(_settings(path))
+    result = runtime.wiki.status()
+    _emit(result, json_output=json_output)
+    if result["state"] in ("stale", "missing", "invalid"):
+        raise typer.Exit(1)
+
+
+@wiki_app.command("generate")
+def wiki_generate(
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    full: Annotated[bool, typer.Option("--full", help="Regenerate every document.")] = False,
+    incremental: Annotated[
+        bool, typer.Option("--incremental", help="Regenerate only changed documents.")
+    ] = False,
+) -> None:
+    """Generate evidence-grounded engineering documentation with the configured local LLM."""
+    if full and incremental:
+        raise typer.BadParameter("choose either --full or --incremental")
+    runtime = SynapRuntime(_settings(path))
+    with console.status("[yellow]Generating engineering wiki...[/yellow]"):
+        try:
+            result = runtime.wiki.generate(full=full)
+        except Exception as exc:
+            console.print(f"[red]✗ Wiki generation failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    console.print(
+        f"[green]✓ Generated {result['generated']} of {result['files']} file pages.[/green]"
+    )
+
+
+@wiki_app.command("tree")
+def wiki_tree(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """Print the exact generated repository tree."""
+    runtime = SynapRuntime(_settings(path))
+    target = runtime.wiki.wiki_dir / "codebase-tree.md"
+    paths = runtime.wiki._files()
+    runtime.wiki._write_atomic(target, runtime.wiki._tree(paths))
+    runtime.wiki._navigation(paths)
+    evidence = [runtime.wiki._evidence(source_path) for source_path in paths]
+    manifest = runtime.wiki._manifest(paths, evidence)
+    manifest["generation_status"] = "incomplete"
+    manifest["failed_documents"] = ["local LLM not configured"]
+    runtime.wiki._write_atomic(
+        runtime.wiki.wiki_dir / "generated" / "evidence.json",
+        json.dumps(evidence, indent=2) + "\n",
+    )
+    runtime.wiki._write_atomic(
+        runtime.wiki.wiki_dir / "generated" / "generation-manifest.json",
+        json.dumps(manifest, indent=2) + "\n",
+    )
+    _stdout_print(target.read_text(encoding="utf-8"))
+
+
+@wiki_app.command("files")
+def wiki_files(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """List file-level documentation pages."""
+    runtime = SynapRuntime(_settings(path))
+    target = runtime.wiki.wiki_dir / "files"
+    pages = (
+        sorted(p.relative_to(target).as_posix() for p in target.rglob("*.md"))
+        if target.exists()
+        else []
+    )
+    if not pages:
+        console.print("[yellow]No file documentation pages found.[/yellow]")
+        return
+    _stdout_print("\n".join(pages))
+
+
+@wiki_app.command("file")
+def wiki_file(
+    filepath: Annotated[str, typer.Argument(help="Repository-relative source path.")],
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Generate or show one source-file explanation."""
+    runtime = SynapRuntime(_settings(path))
+    target = runtime.wiki.wiki_dir / "files" / f"{filepath}.md"
+    try:
+        runtime.wiki.ensure_wiki_page(f"files/{filepath}.md")
+    except Exception as exc:
+        console.print(f"[red]✗ Could not generate '{filepath}':[/red] {exc}")
+        raise typer.Exit(1) from exc
+    if not target.exists():
+        console.print(f"[red]✗ No documentation for '{filepath}'.[/red]")
+        raise typer.Exit(1)
+    from rich.markdown import Markdown
+
+    console.print(Markdown(target.read_text(encoding="utf-8")))
+
+
+@wiki_app.command("architecture")
+def wiki_architecture(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """Show architecture documentation."""
+    wiki_show("architecture/overview.md", path)
+
+
+@wiki_app.command("flows")
+def wiki_flows(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """Show request lifecycle flow documentation."""
+    wiki_show("flows/request-lifecycle.md", path)
+
+
+@wiki_app.command("flow")
+def wiki_flow(
+    request_name: Annotated[str, typer.Argument(help="Flow page name, such as request-lifecycle.")],
+    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+) -> None:
+    """Show one named request flow."""
+    wiki_show(f"flows/{request_name}.md", path)
+
+
+@wiki_app.command("concepts")
+def wiki_concepts(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """Show project-specific engineering concepts."""
+    wiki_show("concepts/engineering-concepts.md", path)
+
+
+@wiki_app.command("validate")
+def wiki_validate(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
+    """Validate wiki files, Markdown fences, and Mermaid sections."""
+    runtime = SynapRuntime(_settings(path))
+    errors = runtime.wiki.validate()
+    if errors:
+        for error in errors:
+            console.print(f"[red]✗ {error}[/red]")
+        raise typer.Exit(1)
+    console.print("[green]✓ Wiki validation passed.[/green]")
+
+
 @wiki_app.command("show")
 def wiki_show(
     filepath: Annotated[

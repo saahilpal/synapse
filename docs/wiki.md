@@ -1,5 +1,24 @@
 # L2 Semantic Wiki Engine
 
+Synap's engineering wiki has two deliberate inputs: Synap's structural index is the source of truth, and the configured local LLM is the prose author. The generator does not ask the model to infer a repository from a blind file dump.
+
+## Commands
+
+```bash
+synap wiki status
+synap wiki generate --incremental
+synap wiki generate --full
+synap wiki tree
+synap wiki files
+synap wiki file src/synap_git/indexer/wiki.py
+synap wiki architecture
+synap wiki flows
+synap wiki concepts
+synap wiki validate
+```
+
+Generation writes an exact tree, navigation, evidence, file explanations, and focused architecture/flow/concept pages under `.synap/wiki/`. `--incremental` compares SHA-256 source hashes from `generated/generation-manifest.json`; deleted file pages are removed and changed pages are regenerated. A model failure is reported and does not replace a valid explanatory page.
+
 The L2 Semantic layer generates and maintains human-readable markdown documentation for files, modules, and overall project architecture under `.synap/wiki/`, synchronizing continuously with your Git commit history.
 
 ---
@@ -68,14 +87,8 @@ If an agent or user requests a wiki page via CLI (`synap wiki show`), the REST A
 * `ensure_wiki_page` intercepts the request.
 * If the page is missing or marked stale, it triggers synchronous generation on the fly so the caller immediately receives up-to-date documentation.
 
-### 6. Structural Mode A Fallback
-When no LLM provider is configured (or when `--skip-llm` is active):
-* The engine writes a structured placeholder document noting that the project is operating in structural-only mode:
-  ```markdown
-  # src/example.py
-  Structural mode only. No LLM configured.
-  ```
-* This ensures that downstream tools and IDE integrations receive valid documentation files without runtime exceptions.
+### 6. Local-model failure behavior
+When no local LLM provider is configured or Ollama is unavailable, explanatory generation fails with an actionable error. Deterministic tree/navigation/evidence output may still be created, but existing explanatory pages are never replaced by generic placeholders. Retry after configuring the local model with `synap wiki generate --incremental`.
 
 ---
 
