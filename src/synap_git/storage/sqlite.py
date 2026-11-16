@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 try:
-    import sqlite_vec  # type: ignore[import-untyped]
+    import sqlite_vec
 except ImportError:
     sqlite_vec = None
 
