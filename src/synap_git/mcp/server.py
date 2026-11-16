@@ -286,6 +286,7 @@ class SynapMCPFacade:
                 "matches": summaries,
                 "total_matches": len(summaries),
                 "query": query,
+                "trace": debug,
             }
 
         return {"result": result, "context": ctx, "trace": debug}

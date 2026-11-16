@@ -428,6 +428,30 @@ class SynapStore:
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memory_key_unique ON agent_memory(context_key)"
                 )
 
+            # Ensure schema completeness on pre-existing databases regardless of version
+            for tbl, req_cols in [
+                ("checkpoints", [("diff_summary", "TEXT"), ("status", "TEXT DEFAULT 'active'")]),
+                (
+                    "decisions",
+                    [("status", "TEXT DEFAULT 'active'"), ("source_scope", "TEXT DEFAULT 'local'")],
+                ),
+                (
+                    "lessons",
+                    [("status", "TEXT DEFAULT 'active'"), ("source_scope", "TEXT DEFAULT 'local'")],
+                ),
+            ]:
+                t_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
+                ).fetchone()
+                if t_exists:
+                    tbl_info = conn.execute(f"PRAGMA table_info({tbl})").fetchall()
+                    existing_names = {
+                        col["name"] if isinstance(col, sqlite3.Row) else col[1] for col in tbl_info
+                    }
+                    for c_name, c_type in req_cols:
+                        if c_name not in existing_names:
+                            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {c_name} {c_type}")
+
             # Ensure symbols_fts schema has kind and body columns
             fts_exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='symbols_fts'"
