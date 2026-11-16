@@ -51,6 +51,7 @@ def stress_runtime(tmp_path_factory: pytest.TempPathFactory) -> SynapRuntime | N
     tmp = tmp_path_factory.mktemp("stress_db")
     settings = SynapSettings(
         repository_path=repo_root,
+        state_path=tmp / ".synap",
         profile=RuntimeProfile.TEST,
         sqlite_path=tmp / "synap.db",
         object_path=tmp / "objects",

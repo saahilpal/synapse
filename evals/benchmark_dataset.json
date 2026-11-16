@@ -1,0 +1,212 @@
+[
+  {
+    "id": "sym_synap_store",
+    "category": "symbol_lookup",
+    "query": "SynapStore",
+    "expected_symbols": ["SynapStore"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "sym_get_neighborhood",
+    "category": "symbol_lookup",
+    "query": "get_neighborhood",
+    "expected_symbols": ["get_neighborhood"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py", "src/synap_git/mcp/server.py"]
+  },
+  {
+    "id": "sym_classify_intent",
+    "category": "symbol_lookup",
+    "query": "classify_intent",
+    "expected_symbols": ["_classify_intent_fast"],
+    "expected_paths": ["src/synap_git/retrieval/engine.py"]
+  },
+  {
+    "id": "sym_code_parser_registry",
+    "category": "symbol_lookup",
+    "query": "CodeParserRegistry",
+    "expected_symbols": ["CodeParserRegistry"],
+    "expected_paths": ["src/synap_git/parser/registry.py"]
+  },
+  {
+    "id": "sym_hybrid_retrieval_engine",
+    "category": "symbol_lookup",
+    "query": "HybridRetrievalEngine",
+    "expected_symbols": ["HybridRetrievalEngine"],
+    "expected_paths": ["src/synap_git/retrieval/engine.py"]
+  },
+  {
+    "id": "nav_tree_sitter_grammars",
+    "category": "navigation",
+    "query": "where are tree sitter grammars loaded",
+    "expected_symbols": ["_get_parser", "_parse_tree_sitter", "CodeParserRegistry"],
+    "expected_paths": ["src/synap_git/parser/registry.py"]
+  },
+  {
+    "id": "nav_sqlite_wal",
+    "category": "navigation",
+    "query": "where is SQLite WAL configured",
+    "expected_symbols": ["connect", "initialize", "SynapStore"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "nav_daemon_lockfile",
+    "category": "navigation",
+    "query": "where is daemon lockfile and heartbeat managed",
+    "expected_symbols": ["_write_heartbeat", "_delete_heartbeat", "RuntimeDaemon", "daemon_run"],
+    "expected_paths": ["src/synap_git/indexer/daemon.py", "src/synap_git/cli/main.py"]
+  },
+  {
+    "id": "nav_git_hooks",
+    "category": "navigation",
+    "query": "where are git hooks installed and uninstalled",
+    "expected_symbols": ["_install_git_hook", "_uninstall_git_hook", "hooks_install_cmd", "hooks_uninstall_cmd"],
+    "expected_paths": ["src/synap_git/cli/main.py"]
+  },
+  {
+    "id": "nav_mcp_server",
+    "category": "navigation",
+    "query": "where is FastMCP server initialized and registered",
+    "expected_symbols": ["SynapMCPServer", "_register_tools", "run"],
+    "expected_paths": ["src/synap_git/mcp/server.py"]
+  },
+  {
+    "id": "arch_daemon_file_mod",
+    "category": "architecture",
+    "query": "how does daemon detect file modifications",
+    "expected_symbols": ["RuntimeDaemon", "_poll_git_loop", "start"],
+    "expected_paths": ["src/synap_git/indexer/daemon.py"]
+  },
+  {
+    "id": "arch_token_budgeting",
+    "category": "architecture",
+    "query": "how does token budgeting and graceful folding work",
+    "expected_symbols": ["retrieve", "skeletonize", "HybridRetrievalEngine"],
+    "expected_paths": ["src/synap_git/retrieval/engine.py", "src/synap_git/parser/registry.py"]
+  },
+  {
+    "id": "arch_pagerank_centrality",
+    "category": "architecture",
+    "query": "how does PageRank centrality ranking work",
+    "expected_symbols": ["compute_pagerank", "_get_pagerank_data", "_rank_candidates"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py", "src/synap_git/retrieval/engine.py"]
+  },
+  {
+    "id": "arch_skeleton_generation",
+    "category": "architecture",
+    "query": "how are AST skeletons generated",
+    "expected_symbols": ["skeletonize", "walk", "CodeParserRegistry"],
+    "expected_paths": ["src/synap_git/parser/registry.py"]
+  },
+  {
+    "id": "arch_blast_radius",
+    "category": "architecture",
+    "query": "how does git blast radius calculation work",
+    "expected_symbols": ["get_blast_radius"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py", "src/synap_git/mcp/server.py"]
+  },
+  {
+    "id": "dbg_db_locked",
+    "category": "debugging",
+    "query": "OperationalError: database is locked",
+    "expected_symbols": ["connect", "SynapStore"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "dbg_conn_refused",
+    "category": "debugging",
+    "query": "ConnectionRefusedError: [Errno 61] Connect call failed",
+    "expected_symbols": ["_is_process_running", "status", "start"],
+    "expected_paths": ["src/synap_git/cli/main.py", "src/synap_git/api/app.py"]
+  },
+  {
+    "id": "dbg_ambiguous_symbol",
+    "category": "debugging",
+    "query": "AmbiguousSymbolError: multiple symbols match query",
+    "expected_symbols": ["AmbiguousSymbolError", "read_symbol"],
+    "expected_paths": ["src/synap_git/mcp/server.py"]
+  },
+  {
+    "id": "dbg_git_integration",
+    "category": "debugging",
+    "query": "GitIntegrationError: Not a git repository",
+    "expected_symbols": ["GitIntegrationError", "GitState"],
+    "expected_paths": ["src/synap_git/git/state.py"]
+  },
+  {
+    "id": "dbg_token_encoding",
+    "category": "debugging",
+    "query": "KeyError: cl100k_base tokenizer initialization failed",
+    "expected_symbols": ["HybridRetrievalEngine", "__init__"],
+    "expected_paths": ["src/synap_git/retrieval/engine.py"]
+  },
+  {
+    "id": "dec_normal_pragma",
+    "category": "decisions_memory",
+    "query": "why was normal pragma chosen",
+    "expected_symbols": ["connect", "get_decisions", "SynapStore"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "dec_token_budget_12pct",
+    "category": "decisions_memory",
+    "query": "why was 12% token budget chosen",
+    "expected_symbols": ["retrieve", "HybridRetrievalEngine"],
+    "expected_paths": ["src/synap_git/retrieval/engine.py"]
+  },
+  {
+    "id": "dec_replace_wiki_with_ast",
+    "category": "decisions_memory",
+    "query": "why was background wiki generation replaced with AST outlines",
+    "expected_symbols": ["skeletonize", "get_decisions", "CodeParserRegistry"],
+    "expected_paths": ["src/synap_git/parser/registry.py", "src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "dec_pagerank_hubs",
+    "category": "decisions_memory",
+    "query": "why was pure python PageRank chosen over networkx",
+    "expected_symbols": ["compute_pagerank", "get_decisions"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py"]
+  },
+  {
+    "id": "mem_three_layer_arch",
+    "category": "decisions_memory",
+    "query": "what is the 3-layer architecture in memory",
+    "expected_symbols": ["get_recent_memory", "store_memory", "SynapStore"],
+    "expected_paths": ["src/synap_git/storage/sqlite.py", "AGENTS.md"]
+  },
+  {
+    "id": "git_changelog_v260",
+    "category": "git_conventions",
+    "query": "what changed in v2.6.0",
+    "expected_symbols": [],
+    "expected_paths": ["CHANGELOG.md"]
+  },
+  {
+    "id": "git_commit_conventions",
+    "category": "git_conventions",
+    "query": "how are commits formatted",
+    "expected_symbols": [],
+    "expected_paths": ["AGENTS.md", "CLAUDE.md"]
+  },
+  {
+    "id": "git_agent_directives",
+    "category": "git_conventions",
+    "query": "what are the agent operational guidelines",
+    "expected_symbols": ["get_session_preamble", "create_checkpoint"],
+    "expected_paths": ["AGENTS.md", "CLAUDE.md", "src/synap_git/mcp/server.py"]
+  },
+  {
+    "id": "git_verify_standards",
+    "category": "git_conventions",
+    "query": "how to verify code with pytest and ruff",
+    "expected_symbols": [],
+    "expected_paths": ["AGENTS.md", "CLAUDE.md", "pyproject.toml"]
+  },
+  {
+    "id": "git_setup_cli",
+    "category": "git_conventions",
+    "query": "how to run synap setup and start daemon",
+    "expected_symbols": ["setup", "start"],
+    "expected_paths": ["src/synap_git/cli/main.py", "README.md", "AGENTS.md"]
+  }
+]

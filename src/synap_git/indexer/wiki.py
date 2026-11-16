@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -13,6 +14,8 @@ from typing import Any
 from synap_git.config import SynapSettings
 from synap_git.diagnostics.logger import get_logger
 from synap_git.git.state import GitRepository
+from synap_git.indexer.scanner import GitIgnoreSpec, _is_binary_file
+from synap_git.parser.registry import CodeParserRegistry
 from synap_git.provider.factory import get_llm_provider
 from synap_git.storage.sqlite import SynapStore
 
@@ -33,7 +36,11 @@ _EXCLUDED_PARTS = {
     ".mypy_cache",
     ".ruff_cache",
     ".tox",
+    ".cache",
+    "vendor",
+    "target",
 }
+
 _EXCLUDED_SUFFIXES = {
     ".pyc",
     ".pyo",
@@ -46,16 +53,17 @@ _EXCLUDED_SUFFIXES = {
     ".gif",
     ".ico",
     ".webp",
-}
-_PROJECT_PAGES = {
-    "overview.md": "architecture/overview.md",
-    "architecture.md": "architecture/system-architecture.md",
-    "schema.md": "concepts/storage-and-data-model.md",
+    ".lock",
+    ".min.js",
+    ".min.css",
 }
 
 
 class WikiEngine:
-    """Generate evidence-grounded engineering documentation with a local LLM."""
+    """
+    Generate evidence-grounded engineering documentation mirroring the repository
+    1:1 under `.synap/wiki/` with deterministic Zero-LLM fallback from SQLite AST tables.
+    """
 
     def __init__(self, settings: SynapSettings, store: SynapStore) -> None:
         self.settings = settings
@@ -63,44 +71,28 @@ class WikiEngine:
         self.provider = get_llm_provider(settings)
         self.wiki_dir = self.settings.state_path / "wiki"
         self.wiki_dir.mkdir(parents=True, exist_ok=True)
+        self.manifest_path = self.wiki_dir / ".manifest.json"
 
     def generate_file_wiki(self, file_id: str, file_path: str, content: str) -> None:
+        """Enqueue file for background wiki generation."""
         self.store.enqueue_wiki(file_path)
 
+    def generate_file_wiki_sync(self, file_path: str, content: str, git_oid: str) -> None:
+        """Synchronously generate or update a single file wiki page."""
+        self.ensure_wiki_page(file_path)
+
     def generate_module_wiki(self, dir_path: str) -> None:
-        self.store.enqueue_wiki(dir_path)
+        """No-op: synthetic module documentation is disallowed."""
 
     def generate_project_wiki(self) -> None:
-        for page in ("overview.md", "architecture.md", "schema.md"):
-            self.store.enqueue_wiki(page)
+        """Synchronously regenerate documentation for repository files."""
+        self.generate(full=False)
 
-    def _files(self) -> list[str]:
-        """Return tracked and relevant untracked paths, in deterministic order."""
-        try:
-            result = subprocess.run(
-                ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-                cwd=self.settings.repository_path,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            paths = result.stdout.splitlines()
-        except (OSError, subprocess.CalledProcessError) as exc:
-            logger.warning("wiki_git_file_scan_failed", error=str(exc))
-            paths = [
-                p.relative_to(self.settings.repository_path).as_posix()
-                for p in self.settings.repository_path.rglob("*")
-            ]
-        return sorted(
-            p
-            for p in paths
-            if p
-            and not any(part in _EXCLUDED_PARTS for part in Path(p).parts)
-            and Path(p).suffix.lower() not in _EXCLUDED_SUFFIXES
-            and (self.settings.repository_path / p).is_file()
-        )
+    def generate_project_wiki_page_sync(self, page_name: str) -> None:
+        """No-op: synthetic project documentation is disallowed."""
 
     def _safe_source_path(self, path: str) -> str:
+        """Ensure path is repository-relative and does not escape root."""
         candidate = Path(path)
         if candidate.is_absolute():
             raise ValueError("source path must be repository-relative")
@@ -111,111 +103,17 @@ class WikiEngine:
         except ValueError as exc:
             raise ValueError("source path escapes the repository") from exc
 
-    def _tree(self, paths: list[str]) -> str:
-        root: dict[str, Any] = {}
-        for path in paths:
-            cursor = root
-            parts = Path(path).parts
-            for part in parts[:-1]:
-                cursor = cursor.setdefault(part, {})
-            cursor.setdefault(parts[-1], None)
-        lines = [
-            "# Exact codebase tree",
-            "",
-            "This tree is generated from Git-visible repository paths. Generated state, caches, dependencies, and binary build outputs are excluded.",
-            "",
-            "```text",
-            f"{self.settings.repository_path.name}/",
-        ]
-
-        def render(node: dict[str, Any], prefix: str = "") -> None:
-            entries = sorted(node.items())
-            for index, (name, child) in enumerate(entries):
-                last = index == len(entries) - 1
-                lines.append(
-                    f"{prefix}{'└── ' if last else '├── '}{name}{'/' if isinstance(child, dict) else ''}"
-                )
-                if isinstance(child, dict):
-                    render(child, prefix + ("    " if last else "│   "))
-
-        render(root)
-        lines.extend(
-            [
-                "```",
-                "",
-                "## Exclusion policy",
-                "",
-                "`.git/`, `.synap/`, virtual environments, dependency installs, caches, build outputs, and binary/minified artifacts are excluded so the tree describes the maintainable repository rather than generated state.",
-                "",
-                "## File reference index",
-                "",
-                "| Exact path | Documentation |",
-                "|---|---|",
-            ]
-        )
-        lines.extend(f"| `{path}` | [File explanation](files/{path}.md) |" for path in paths)
-        lines.append("")
-        return "\n".join(lines) + "\n"
-
-    def _evidence(self, path: str) -> dict[str, Any]:
-        source = self.settings.repository_path / path
-        content = source.read_text(encoding="utf-8", errors="replace")
-        entry = self.store.get_file_by_path(path)
-        symbols = self.store.get_symbols_by_file(entry["file_id"]) if entry else []
-        imports = [
-            line.strip()
-            for line in content.splitlines()
-            if re.match(r"^(import |from |require\(|#include )", line.strip())
-        ]
-        relationships: list[dict[str, Any]] = []
-        for symbol in symbols[:30]:
-            for direction in ("upstream", "downstream"):
-                for neighbor in self.store.get_neighborhood(
-                    symbol["symbol_id"], depth=1, max_neighbors=20, direction=direction
-                )[1:]:
-                    relationships.append(
-                        {
-                            "symbol": symbol["name"],
-                            "direction": direction,
-                            "name": neighbor["name"],
-                            "path": neighbor["source_path"],
-                        }
-                    )
-        return {
-            "path": path,
-            "sha256": hashlib.sha256(content.encode()).hexdigest(),
-            "lines": len(content.splitlines()),
-            "language": entry.get("language") if entry else source.suffix.lstrip(".") or "unknown",
-            "git_oid": entry.get("git_oid") if entry else None,
-            "symbols": [
-                {"name": s["name"], "kind": s["kind"], "lines": [s["start_line"], s["end_line"]]}
-                for s in symbols
-            ],
-            "imports": imports[:80],
-            "relationships": relationships[:120],
-            "source": content[:12000],
-        }
-
-    def _manifest(self, paths: list[str], evidence: list[dict[str, Any]]) -> dict[str, Any]:
-        git_state = GitRepository(self.settings.repository_path).state(force=True)
-        return {
-            "repository_revision": git_state.head_commit,
-            "branch": git_state.effective_branch,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "generation_model": getattr(self.provider, "default_model", None),
-            "directories": len({str(Path(p).parent) for p in paths}),
-            "discovered_files": len(paths),
-            "documented_files": len(evidence),
-            "coverage": 1.0 if not paths else len(evidence) / len(paths),
-            "excluded_paths": sorted(_EXCLUDED_PARTS),
-            "unsupported_files": [],
-            "files": {
-                item["path"]: {"sha256": item["sha256"], "lines": item["lines"]}
-                for item in evidence
-            },
-        }
+    def _resolve_source_path(self, path_str: str) -> str:
+        """Normalize input path to a clean relative source path."""
+        cleaned = path_str.strip()
+        if cleaned.startswith("files/"):
+            cleaned = cleaned.removeprefix("files/")
+        if cleaned.endswith(".md"):
+            cleaned = cleaned[:-3]
+        return self._safe_source_path(cleaned)
 
     def _write_atomic(self, path: Path, content: str) -> None:
+        """Write content atomically via temporary file replacement."""
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
         try:
@@ -229,263 +127,670 @@ class WikiEngine:
                 pass
             raise
 
-    def _generate(self, target: str, evidence: dict[str, Any], instruction: str) -> str:
-        if self.provider is None:
-            raise RuntimeError(
-                "Local LLM is unavailable. Configure Ollama and retry; existing wiki files were preserved."
+    def _load_manifest(self) -> dict[str, Any]:
+        """Load manifest tracking file hashes and generation metadata."""
+        if not self.manifest_path.exists():
+            return {}
+        try:
+            data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("wiki_manifest_read_failed", error=str(exc))
+            return {}
+
+    def _save_manifest(self, manifest: dict[str, Any]) -> None:
+        """Persist manifest atomically."""
+        self._write_atomic(self.manifest_path, json.dumps(manifest, indent=2) + "\n")
+
+    def _compute_sha256(self, rel_path: str) -> str:
+        """Compute sha256 hex digest of source file."""
+        abs_path = self.settings.repository_path / rel_path
+        try:
+            return hashlib.sha256(abs_path.read_bytes()).hexdigest()
+        except OSError:
+            return ""
+
+    def _files(self) -> list[str]:
+        """Return tracked and relevant untracked paths, filtered and deterministically sorted."""
+        root = self.settings.repository_path.resolve()
+        paths: list[str] = []
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                cwd=root,
+                capture_output=True,
+                check=True,
             )
-        system = "You are Synap's local engineering-documentation author. Write clear professional English. Use only supplied evidence. Never invent files, symbols, calls, routes, or relationships. Cite supplied paths and line ranges for factual claims. Mark uncertainty as unknown or inferred. Return Markdown only."
-        prompt = f"Target: {target}\nTask: {instruction}\nEvidence JSON:\n{json.dumps(evidence, indent=2)}"
-        last_error = "empty response"
-        for attempt in range(2):
+            for raw_path in result.stdout.split(b"\0"):
+                if raw_path:
+                    try:
+                        paths.append(raw_path.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        pass
+        except (OSError, subprocess.CalledProcessError) as exc:
+            logger.warning("wiki_git_file_scan_failed", error=str(exc))
+            gitignore = None
+            gitignore_path = root / ".gitignore"
+            if gitignore_path.exists():
+                try:
+                    gitignore = GitIgnoreSpec(root, gitignore_path.read_text("utf-8").splitlines())
+                except Exception:
+                    pass
+            for file_entry_path in root.rglob("*"):
+                if file_entry_path.is_file():
+                    try:
+                        rel = file_entry_path.relative_to(root).as_posix()
+                        if gitignore and gitignore.matches(file_entry_path, is_dir=False):
+                            continue
+                        paths.append(rel)
+                    except ValueError:
+                        pass
+
+        filtered: list[str] = []
+        for str_path in paths:
+            if not str_path:
+                continue
+            path_obj = Path(str_path)
+            if any(part in _EXCLUDED_PARTS for part in path_obj.parts):
+                continue
+            if path_obj.suffix.lower() in _EXCLUDED_SUFFIXES:
+                continue
+            abs_p = root / path_obj
+            if not abs_p.is_file():
+                continue
+            try:
+                stat = abs_p.stat()
+                if stat.st_size > self.settings.max_file_bytes:
+                    continue
+            except OSError:
+                continue
+            if _is_binary_file(abs_p):
+                continue
+            filtered.append(str_path)
+
+        return sorted(set(filtered))
+
+    def _extract_module_docstring(self, content: str) -> str | None:
+        """Extract module-level docstring from Python code."""
+        try:
+            parsed_ast = ast.parse(content)
+            return ast.get_docstring(parsed_ast)
+        except Exception:
+            return None
+
+    def _extract_leading_comment(self, content: str) -> str | None:
+        """Extract leading comment block as purpose fallback for non-Python or docstringless files."""
+        lines = content.splitlines()
+        comment_lines: list[str] = []
+        in_block = False
+        for line in lines[:40]:
+            stripped = line.strip()
+            if not stripped:
+                if comment_lines:
+                    break
+                continue
+            if stripped.startswith("/*"):
+                in_block = True
+                cleaned = stripped.removeprefix("/*").removesuffix("*/").strip()
+                if cleaned:
+                    comment_lines.append(cleaned)
+                if "*/" in stripped and stripped != "/*":
+                    in_block = False
+                continue
+            if in_block:
+                if "*/" in stripped:
+                    in_block = False
+                    cleaned = stripped.removesuffix("*/").strip()
+                    if cleaned:
+                        comment_lines.append(cleaned)
+                    break
+                comment_lines.append(stripped.lstrip("* ").strip())
+                continue
+            if stripped.startswith("//") or stripped.startswith("#"):
+                if stripped.startswith("#!"):
+                    continue
+                comment_lines.append(stripped.lstrip("/# ").strip())
+            else:
+                break
+        return "\n".join(comment_lines) if comment_lines else None
+
+    def _extract_signature(
+        self, lines: list[str], start_line: int, end_line: int, language: str
+    ) -> str:
+        """Extract clean symbol signature with parameter types and return type."""
+        s_idx = max(0, start_line - 1)
+        if s_idx >= len(lines):
+            return ""
+        sig_lines: list[str] = []
+        for i in range(s_idx, min(len(lines), s_idx + 8)):
+            line = lines[i]
+            sig_lines.append(line)
+            stripped = line.strip()
+            if language == "python" and stripped.endswith(":"):
+                break
+            if language != "python" and (stripped.endswith("{") or stripped.endswith(";")):
+                break
+            if i >= end_line - 1:
+                break
+        return "\n".join(sig_lines).strip()
+
+    def _evidence(self, path: str) -> dict[str, Any]:
+        """Gather structural AST evidence, imports, dependencies, callers, and decisions."""
+        abs_path = self.settings.repository_path / path
+        content = abs_path.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+        sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        file_entry = self.store.get_file_by_path(path)
+        raw_lang = file_entry.get("language") if file_entry else None
+        language = str(raw_lang) if raw_lang else (abs_path.suffix.lstrip(".") or "unknown")
+        file_id = file_entry["file_id"] if file_entry else None
+
+        # Extract module docstring or comment purpose
+        module_docstring = (
+            self._extract_module_docstring(content)
+            if language == "python"
+            else self._extract_leading_comment(content)
+        )
+
+        # Extract symbols
+        symbols: list[dict[str, Any]] = []
+        if file_id:
+            symbols = self.store.get_symbols_by_file(file_id)
+        if not symbols:
+            parsed = CodeParserRegistry().parse(abs_path, relative_path=path, text=content)
+            symbols = [
+                {
+                    "name": s.name,
+                    "kind": s.kind,
+                    "start_line": s.start_line,
+                    "end_line": s.end_line,
+                }
+                for s in parsed.symbols
+            ]
+
+        # Extract function/class docstrings if Python
+        symbol_docstrings: dict[tuple[str, int], str] = {}
+        if language == "python":
+            try:
+                tree = ast.parse(content)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                        ds = ast.get_docstring(node)
+                        if ds:
+                            symbol_docstrings[(node.name, node.lineno)] = ds
+            except Exception:
+                pass
+
+        # Filter public symbols
+        public_symbols: list[dict[str, Any]] = []
+        for s in symbols:
+            name = s["name"]
+            if name.startswith("_") and not name.startswith("__init__"):
+                continue
+            sig = self._extract_signature(lines, s["start_line"], s["end_line"], language)
+            ds = symbol_docstrings.get((name, s["start_line"]))
+            public_symbols.append(
+                {
+                    "name": name,
+                    "kind": s["kind"],
+                    "start_line": s["start_line"],
+                    "end_line": s["end_line"],
+                    "signature": sig,
+                    "docstring": ds,
+                }
+            )
+
+        # Direct imports in file
+        direct_imports = [
+            line.strip()
+            for line in lines
+            if re.match(r"^(import |from |require\(|#include |use |export )", line.strip())
+        ]
+
+        # Graph dependencies (callees) and callers
+        callees: list[dict[str, str]] = []
+        callers: list[dict[str, str]] = []
+        if file_id:
+            try:
+                with self.store.connect() as conn:
+                    callee_rows = conn.execute(
+                        """
+                        SELECT DISTINCT s.name as symbol, t.name as callee_symbol, tf.path as callee_file
+                        FROM edges e
+                        JOIN symbols s ON e.source_symbol = s.symbol_id
+                        JOIN symbols t ON e.target_symbol = t.symbol_id
+                        JOIN files tf ON t.file_id = tf.file_id
+                        WHERE s.file_id = ?
+                        ORDER BY tf.path, t.name
+                        LIMIT 50
+                        """,
+                        (file_id,),
+                    ).fetchall()
+                    callees = [dict(r) for r in callee_rows]
+
+                    caller_rows = conn.execute(
+                        """
+                        SELECT DISTINCT s.name as caller_symbol, sf.path as caller_file, t.name as symbol
+                        FROM edges e
+                        JOIN symbols s ON e.source_symbol = s.symbol_id
+                        JOIN files sf ON s.file_id = sf.file_id
+                        JOIN symbols t ON e.target_symbol = t.symbol_id
+                        WHERE t.file_id = ?
+                        ORDER BY sf.path, s.name
+                        LIMIT 50
+                        """,
+                        (file_id,),
+                    ).fetchall()
+                    callers = [dict(r) for r in caller_rows]
+            except Exception as exc:
+                logger.warning("wiki_edge_query_failed", path=path, error=str(exc))
+
+        # Architectural decisions impacting this file
+        decisions: list[dict[str, Any]] = []
+        try:
+            with self.store.connect() as conn:
+                d_rows = conn.execute(
+                    """
+                    SELECT decision_id, branch, commit_hash, content, context, created_at
+                    FROM decisions
+                    WHERE context LIKE ? OR content LIKE ?
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                    """,
+                    (f"%{path}%", f"%{path}%"),
+                ).fetchall()
+                if not d_rows and abs_path.name:
+                    d_rows = conn.execute(
+                        """
+                        SELECT decision_id, branch, commit_hash, content, context, created_at
+                        FROM decisions
+                        WHERE context LIKE ? OR content LIKE ?
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                        """,
+                        (f"%{abs_path.name}%", f"%{abs_path.name}%"),
+                    ).fetchall()
+                decisions = [dict(r) for r in d_rows]
+        except Exception as exc:
+            logger.warning("wiki_decisions_query_failed", path=path, error=str(exc))
+
+        return {
+            "path": path,
+            "sha256": sha256,
+            "language": language,
+            "lines": len(lines),
+            "git_oid": file_entry.get("git_oid") if file_entry else None,
+            "module_docstring": module_docstring,
+            "public_symbols": public_symbols,
+            "imports": direct_imports[:60],
+            "callees": callees,
+            "callers": callers,
+            "decisions": decisions,
+        }
+
+    def _render_page(
+        self,
+        evidence: dict[str, Any],
+        llm_summary: str | None = None,
+    ) -> str:
+        """Deterministically render high-signal markdown page with optional LLM augmentation."""
+        path = evidence["path"]
+        language = evidence["language"]
+        lines = evidence["lines"]
+        docstring = evidence["module_docstring"]
+        symbols = evidence["public_symbols"]
+        imports = evidence["imports"]
+        callees = evidence["callees"]
+        callers = evidence["callers"]
+        decisions = evidence["decisions"]
+
+        parts: list[str] = [f"# `{path}`", ""]
+
+        # File purpose & module docstring
+        if docstring:
+            parts.extend(["> " + "\n> ".join(docstring.splitlines()), ""])
+        else:
+            parts.extend([f"Source file for `{path}` ({language}).", ""])
+
+        # Overview
+        parts.extend(
+            [
+                "## Overview",
+                f"- **Path**: `{path}`",
+                f"- **Language**: `{language}`",
+                f"- **Lines**: {lines}",
+                "",
+            ]
+        )
+
+        # Optional LLM-synthesized behavioral summary and gotchas
+        if llm_summary:
+            parts.extend([llm_summary.strip(), ""])
+
+        # Public Symbols, classes, functions with signatures & types
+        parts.extend(["## Public Symbols & Interfaces", ""])
+        if symbols:
+            for s in symbols:
+                kind = s["kind"].replace("_definition", "").replace("_declaration", "")
+                parts.append(f"### `{kind}` `{s['name']}`")
+                parts.append(f"- **Lines**: L{s['start_line']}-L{s['end_line']}")
+                if s["signature"]:
+                    parts.extend([f"```{language}", s["signature"], "```"])
+                if s["docstring"]:
+                    parts.extend(["", s["docstring"].strip()])
+                parts.append("")
+        else:
+            parts.extend(["No public classes or functions declared in this file.", ""])
+
+        # Imports & dependencies
+        parts.extend(["## Imports & Dependencies", ""])
+        if imports:
+            parts.append("### Direct Imports")
+            for imp in imports:
+                parts.append(f"- `{imp}`")
+            parts.append("")
+
+        if callees:
+            parts.append("### Graph Dependencies (Callees)")
+            for c in callees:
+                parts.append(
+                    f"- `{c['callee_file']}`: `{c['callee_symbol']}` (via `{c['symbol']}`)"
+                )
+            parts.append("")
+
+        if not imports and not callees:
+            parts.extend(["No external dependencies identified.", ""])
+
+        # Callers & Callees
+        parts.extend(["## Callers & Callees", ""])
+        parts.append("### Callers (Dependants)")
+        if callers:
+            for cl in callers:
+                parts.append(
+                    f"- `{cl['caller_file']}`: `{cl['caller_symbol']}` -> calls `{cl['symbol']}`"
+                )
+        else:
+            parts.append("No external callers recorded in the graph.")
+        parts.append("")
+
+        parts.append("### Callees (Dependencies)")
+        if callees:
+            for c in callees:
+                parts.append(
+                    f"- `{c['callee_file']}`: `{c['callee_symbol']}` (from `{c['symbol']}`)"
+                )
+        else:
+            parts.append("No external callees recorded in the graph.")
+        parts.append("")
+
+        # Architectural decisions impacting this file
+        parts.extend(["## Architectural Decisions", ""])
+        if decisions:
+            for d in decisions:
+                commit = d.get("commit_hash", "")[:7]
+                parts.append(f"- **Decision** (`{commit}`): {d['content']}")
+                if d.get("context"):
+                    parts.append(f"  * Context: {d['context']}")
+            parts.append("")
+        else:
+            parts.extend(["No architectural decisions recorded for this file.", ""])
+
+        return "\n".join(parts) + "\n"
+
+    def _augment_with_llm(self, evidence: dict[str, Any]) -> str | None:
+        """Synthesize behavioral summary and gotchas if local LLM is available."""
+        if self.provider is None:
+            return None
+
+        prompt_evidence = {
+            "path": evidence["path"],
+            "language": evidence["language"],
+            "symbols": [s["name"] for s in evidence["public_symbols"][:20]],
+            "imports": evidence["imports"][:15],
+            "callees": [
+                f"{c['callee_symbol']} in {c['callee_file']}" for c in evidence["callees"][:10]
+            ],
+            "callers": [
+                f"{c['caller_symbol']} in {c['caller_file']}" for c in evidence["callers"][:10]
+            ],
+        }
+        system = (
+            "You are Synapse's engineering documentation author. Write concise, precise documentation. "
+            "Synthesize a Behavioral Summary explaining runtime responsibilities and an Edge Cases & Gotchas section. "
+            "Do not invent unevidenced facts. Return clean Markdown."
+        )
+        prompt = (
+            f"Target: {evidence['path']}\n"
+            "Task: Synthesize behavioral summary and gotchas for this file.\n"
+            f"Evidence JSON:\n{json.dumps(prompt_evidence, indent=2)}"
+        )
+        try:
             response = self.provider.generate(
                 system_prompt=system,
-                user_prompt=prompt
-                if attempt == 0
-                else prompt + "\nReturn a concise Markdown document now.",
-                max_tokens=900,
+                user_prompt=prompt,
+                max_tokens=600,
             )
             content = response.content.strip()
-            if content:
-                return content + "\n"
-            last_error = "empty response"
-        raise ValueError(f"Local LLM returned invalid Markdown for {target}: {last_error}")
+            return content if content else None
+        except Exception as exc:
+            logger.warning("wiki_llm_augmentation_failed", path=evidence["path"], error=str(exc))
+            raise
 
-    def _file_doc(self, evidence: dict[str, Any]) -> str:
-        return self._generate(
-            evidence["path"],
-            evidence,
-            "Explain what this file is, why it exists, exact responsibilities, symbols, dependencies, callers if evidenced, data and side effects, execution participation, and modification risks. Include source references.",
-        )
+    def _render_file_doc(self, evidence: dict[str, Any]) -> str:
+        """Render documentation page, applying LLM augmentation when available."""
+        llm_summary = self._augment_with_llm(evidence)
+        return self._render_page(evidence, llm_summary=llm_summary)
 
-    def _navigation(self, paths: list[str]) -> None:
-        rows = [f"| `{path}` | [Explanation](files/{path}.md) |" for path in paths]
-        self._write_atomic(
-            self.wiki_dir / "README.md",
-            "# Synap engineering wiki\n\nThis wiki is generated from Synap's structural index and the configured local LLM. Start with the exact [codebase tree](codebase-tree.md), then read the [architecture overview](architecture/overview.md), [request flows](flows/request-lifecycle.md), and [engineering concepts](concepts/engineering-concepts.md). File explanations live under `files/`; generation evidence and freshness metadata live under `generated/`. Regenerate with `synap wiki generate --incremental` or rebuild with `synap wiki generate --full`.\n",
-        )
-        self._write_atomic(
-            self.wiki_dir / "file-index.md",
-            "# File index\n\n| Exact source path | Documentation |\n|---|---|\n"
-            + "\n".join(rows)
-            + "\n",
-        )
-        for directory, title, body in (
-            ("architecture", "Architecture", "Architecture explanations and system boundaries."),
-            ("flows", "Request flows", "Execution paths for CLI, API, and MCP requests."),
-            (
-                "modules",
-                "Modules",
-                "Directory-level explanations generated from grouped source evidence.",
-            ),
-            ("files", "Files", "One evidence-grounded explanation per relevant source file."),
-            (
-                "concepts",
-                "Engineering concepts",
-                "Project-specific explanations of concepts used by Synap.",
-            ),
-            (
-                "integrations",
-                "Integrations",
-                "External services and integration boundaries found in the repository.",
-            ),
-        ):
-            self._write_atomic(self.wiki_dir / directory / "README.md", f"# {title}\n\n{body}\n")
+    def _cleanup_orphans(self, current_source_paths: set[str]) -> list[str]:
+        """Delete orphaned .md pages and remove empty directories under wiki_dir."""
+        deleted: list[str] = []
+        if not self.wiki_dir.exists():
+            return deleted
+
+        # Remove any synthetic category directories if they exist
+        synthetic_dirs = ("architecture", "flows", "concepts", "integrations", "modules", "files")
+        for syn_name in synthetic_dirs:
+            syn_dir = self.wiki_dir / syn_name
+            if syn_dir.is_dir():
+                for sub in list(syn_dir.rglob("*")):
+                    if sub.is_file():
+                        sub.unlink(missing_ok=True)
+                for sub_dir in sorted(syn_dir.glob("**/*"), reverse=True):
+                    if sub_dir.is_dir():
+                        try:
+                            sub_dir.rmdir()
+                        except OSError:
+                            pass
+                try:
+                    syn_dir.rmdir()
+                except OSError:
+                    pass
+
+        # Remove legacy synthetic root files if any
+        synthetic_files = ("codebase-tree.md", "file-index.md")
+        for syn_file in synthetic_files:
+            syn_p = self.wiki_dir / syn_file
+            if syn_p.is_file():
+                syn_p.unlink(missing_ok=True)
+
+        # Remove orphaned .md pages
+        for md_path in list(self.wiki_dir.rglob("*.md")):
+            rel_to_wiki = md_path.relative_to(self.wiki_dir).as_posix()
+            source_rel_path = rel_to_wiki[:-3] if rel_to_wiki.endswith(".md") else rel_to_wiki
+            if source_rel_path not in current_source_paths:
+                try:
+                    md_path.unlink(missing_ok=True)
+                    deleted.append(rel_to_wiki)
+                except OSError as exc:
+                    logger.warning("wiki_orphan_unlink_failed", path=rel_to_wiki, error=str(exc))
+
+        # Bottom-up removal of empty directories
+        for dirpath in sorted(self.wiki_dir.glob("**/*"), reverse=True):
+            if dirpath.is_dir() and dirpath != self.wiki_dir:
+                try:
+                    if not any(dirpath.iterdir()):
+                        dirpath.rmdir()
+                except OSError:
+                    pass
+
+        return deleted
 
     def generate(self, *, full: bool = False) -> dict[str, Any]:
-        """Generate the complete wiki or only changed file pages."""
+        """
+        Generate or incrementally update 1:1 documentation pages under .synap/wiki/.
+        Never generates README files, index files, or synthetic categories.
+        """
         paths = self._files()
-        evidence = [self._evidence(path) for path in paths]
-        manifest = self._manifest(paths, evidence)
-        manifest_path = self.wiki_dir / "generated" / "generation-manifest.json"
-        old_manifest: dict[str, Any] = {}
-        if manifest_path.exists() and not full:
-            try:
-                old_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                logger.warning("wiki_manifest_read_failed", error=str(exc))
-        if self.provider is None:
-            raise RuntimeError(
-                "Local LLM is unavailable. Configure Ollama and retry; existing wiki files were preserved."
-            )
-        self._write_atomic(self.wiki_dir / "codebase-tree.md", self._tree(paths))
-        self._navigation(paths)
-        self._write_atomic(
-            self.wiki_dir / "generated" / "evidence.json", json.dumps(evidence, indent=2) + "\n"
-        )
-        changed = [
-            item
-            for item in evidence
-            if full
-            or old_manifest.get("files", {}).get(item["path"], {}).get("sha256") != item["sha256"]
-        ]
+        current_paths_set = set(paths)
+
+        # Cleanup deleted or renamed files
+        self._cleanup_orphans(current_paths_set)
+
+        manifest = self._load_manifest() if not full else {}
+        old_files = manifest.get("files", {})
+
+        changed_items: list[tuple[str, str]] = []
+        for p in paths:
+            sha256 = self._compute_sha256(p)
+            target_md = self.wiki_dir / f"{p}.md"
+            # Must regenerate if full, target .md is missing, or hash changed
+            if full or not target_md.exists() or old_files.get(p, {}).get("sha256") != sha256:
+                changed_items.append((p, sha256))
+
         failures: list[str] = []
-        pending_pages: dict[Path, str] = {}
-        for item in changed:
+        new_files_manifest: dict[str, Any] = dict(old_files) if not full else {}
+
+        # Remove deleted files from manifest
+        for old_p in list(new_files_manifest.keys()):
+            if old_p not in current_paths_set:
+                new_files_manifest.pop(old_p, None)
+
+        for p, sha256 in changed_items:
             try:
-                pending_pages[self.wiki_dir / "files" / f"{item['path']}.md"] = self._file_doc(item)
+                evidence = self._evidence(p)
+                doc = self._render_file_doc(evidence)
+                target_md = self.wiki_dir / f"{p}.md"
+                self._write_atomic(target_md, doc)
+                new_files_manifest[p] = {
+                    "sha256": sha256,
+                    "lines": evidence["lines"],
+                }
+                self.store.set_wiki_status(p, evidence.get("git_oid"), "completed")
             except Exception as exc:
-                failures.append(f"{item['path']}: {exc}")
-                logger.error("wiki_generation_failed", path=item["path"], error=str(exc))
-        if full or changed:
-            project_evidence = {"repository": manifest, "files": evidence[:80]}
-            targets = {
-                "architecture/overview.md": "Describe actual architecture, entry points, and reading order.",
-                "architecture/system-architecture.md": "Explain components, boundaries, dependencies, and runtime responsibilities.",
-                "architecture/component-map.md": "Map actual components to their source files and responsibilities.",
-                "architecture/dependency-map.md": "Explain verified import and symbol relationships. Do not infer missing edges.",
-                "architecture/data-flow.md": "Explain actual data movement and storage interactions.",
-                "flows/application-startup.md": "Trace application and daemon startup from real entry points.",
-                "flows/request-lifecycle.md": "Trace important CLI, API, and MCP request paths with Mermaid diagrams and source references.",
-                "flows/authentication-flow.md": "Document authentication or explicitly state that no authentication flow is evidenced.",
-                "flows/database-flow.md": "Trace SQLite initialization, reads, writes, and WAL behavior with source references.",
-                "flows/error-handling-flow.md": "Trace provider, CLI, API, and worker failure paths with source references.",
-                "concepts/engineering-concepts.md": "Explain only engineering concepts evidenced by this repository, in project context with limits.",
-                "concepts/architecture-decisions.md": "Extract only decisions evidenced by comments, docs, or code. Mark inferred decisions.",
-                "concepts/design-patterns.md": "Explain patterns actually used by the code, not generic textbook patterns.",
-                "concepts/storage-and-data-model.md": "Explain actual SQLite tables, relationships, and persistence behavior.",
-                "integrations/overview.md": "Describe actual external services, providers, MCP, Git, and filesystem boundaries.",
-            }
-            for target, instruction in targets.items():
-                try:
-                    pending_pages[self.wiki_dir / target] = self._generate(
-                        target, project_evidence, instruction
-                    )
-                except Exception as exc:
-                    failures.append(f"{target}: {exc}")
-                    logger.error("wiki_project_generation_failed", page=target, error=str(exc))
-            module_paths = sorted(
-                {
-                    str(Path(item["path"]).parent)
-                    for item in evidence
-                    if str(Path(item["path"]).parent) != "."
-                }
-            )
-            for module_path in module_paths:
-                module_evidence = {
-                    "module": module_path,
-                    "files": [
-                        item for item in evidence if str(Path(item["path"]).parent) == module_path
-                    ],
-                }
-                target = f"modules/{module_path}.md"
-                try:
-                    pending_pages[self.wiki_dir / target] = self._generate(
-                        target,
-                        module_evidence,
-                        "Explain this module's purpose, boundaries, public entry points, dependencies, data, callers, and safe modification points.",
-                    )
-                except Exception as exc:
-                    failures.append(f"{target}: {exc}")
-                    logger.error("wiki_module_generation_failed", page=target, error=str(exc))
+                failures.append(f"{p}: {exc}")
+                logger.error("wiki_page_generation_failed", path=p, error=str(exc))
+
+        git_state = GitRepository(self.settings.repository_path).state(force=True)
+        head_commit = git_state.head_commit
+
+        updated_manifest = {
+            "repository_revision": head_commit,
+            "branch": git_state.effective_branch,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "generation_status": "failed" if failures else "complete",
+            "files": new_files_manifest,
+        }
+        self._save_manifest(updated_manifest)
+
         if failures:
-            manifest["generation_status"] = "failed"
-            manifest["failed_documents"] = failures
-            self._write_atomic(manifest_path, json.dumps(manifest, indent=2) + "\n")
             raise RuntimeError("Wiki generation completed with failures:\n" + "\n".join(failures))
-        for page, content in pending_pages.items():
-            self._write_atomic(page, content)
-        if not full:
-            current_paths = {item["path"] for item in evidence}
-            for removed in set(old_manifest.get("files", {})) - current_paths:
-                removed_page = self.wiki_dir / "files" / f"{removed}.md"
-                try:
-                    removed_page.unlink(missing_ok=True)
-                except OSError as exc:
-                    logger.warning("wiki_removed_page_cleanup_failed", path=removed, error=str(exc))
-        manifest["generation_status"] = "complete"
-        manifest["failed_documents"] = []
-        self._write_atomic(manifest_path, json.dumps(manifest, indent=2) + "\n")
+
         return {
             "files": len(paths),
-            "generated": len(changed),
-            "revision": manifest["repository_revision"],
+            "generated": len(changed_items),
+            "revision": head_commit,
         }
 
     def status(self) -> dict[str, Any]:
+        """Check whether wiki pages are fresh, stale, or missing."""
         paths = self._files()
-        manifest_path = self.wiki_dir / "generated" / "generation-manifest.json"
-        if not manifest_path.exists():
-            return {"state": "missing", "files": len(paths), "stale": len(paths)}
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {"state": "invalid", "files": len(paths), "stale": len(paths)}
-        if manifest.get("generation_status") != "complete":
-            return {
-                "state": "stale",
-                "files": len(paths),
-                "stale": manifest.get("failed_documents", paths),
-                "revision": manifest.get("repository_revision"),
-            }
-        current = {p: self._evidence(p)["sha256"] for p in paths}
-        stale = [
-            p
-            for p, digest in current.items()
-            if manifest.get("files", {}).get(p, {}).get("sha256") != digest
-        ]
-        stale.extend(sorted(set(manifest.get("files", {})) - set(current)))
+        manifest = self._load_manifest()
+        if not manifest or "files" not in manifest:
+            return {"state": "missing", "files": len(paths), "stale": paths, "revision": None}
+
+        stale: list[str] = []
+        manifest_files = manifest.get("files", {})
+        for p in paths:
+            target_md = self.wiki_dir / f"{p}.md"
+            if not target_md.exists():
+                stale.append(p)
+                continue
+            if manifest_files.get(p, {}).get("sha256") != self._compute_sha256(p):
+                stale.append(p)
+
+        # Removed source files
+        current_paths_set = set(paths)
+        for old_p in manifest_files:
+            if old_p not in current_paths_set:
+                stale.append(old_p)
+
+        git_state = GitRepository(self.settings.repository_path).state(force=True)
         return {
             "state": "stale" if stale else "fresh",
             "files": len(paths),
-            "stale": stale,
-            "revision": manifest.get("repository_revision"),
+            "stale": sorted(set(stale)),
+            "revision": git_state.head_commit,
         }
 
     def validate(self) -> list[str]:
+        """Validate markdown fences and ensure all source files have 1:1 documentation pages."""
         errors: list[str] = []
-        if not (self.wiki_dir / "generated" / "generation-manifest.json").exists():
-            errors.append("missing generated/generation-manifest.json")
-        if not (self.wiki_dir / "codebase-tree.md").exists():
-            errors.append("missing codebase-tree.md")
-        try:
-            manifest_data = json.loads(
-                (self.wiki_dir / "generated" / "generation-manifest.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            if manifest_data.get("generation_status") != "complete":
-                errors.append("generation manifest is not complete")
-            for source_path in manifest_data.get("files", {}):
-                if not (self.wiki_dir / "files" / f"{source_path}.md").exists():
-                    errors.append(f"missing file documentation: {source_path}")
-        except (OSError, json.JSONDecodeError):
-            pass
+        manifest = self._load_manifest()
+        if not manifest:
+            errors.append("missing .manifest.json")
+
+        paths = self._files()
+        for p in paths:
+            target_md = self.wiki_dir / f"{p}.md"
+            if not target_md.exists():
+                errors.append(f"missing file documentation: {p}")
+
         for page in self.wiki_dir.rglob("*.md"):
-            text = page.read_text(encoding="utf-8", errors="replace")
-            if text.count("```") % 2:
-                errors.append(f"unbalanced Markdown fences: {page.relative_to(self.wiki_dir)}")
-            if (
-                text.count("```mermaid") > 0
-                and "flowchart " not in text
-                and "sequenceDiagram" not in text
-                and "classDiagram" not in text
-                and "erDiagram" not in text
-            ):
-                errors.append(
-                    f"Mermaid fence has no recognized diagram: {page.relative_to(self.wiki_dir)}"
-                )
+            try:
+                text = page.read_text(encoding="utf-8", errors="replace")
+                if text.count("```") % 2 != 0:
+                    errors.append(f"unbalanced Markdown fences: {page.relative_to(self.wiki_dir)}")
+                if (
+                    text.count("```mermaid") > 0
+                    and "flowchart " not in text
+                    and "sequenceDiagram" not in text
+                    and "classDiagram" not in text
+                    and "erDiagram" not in text
+                ):
+                    errors.append(
+                        f"Mermaid fence has no recognized diagram: {page.relative_to(self.wiki_dir)}"
+                    )
+            except OSError:
+                pass
+
         return errors
 
     def ensure_wiki_page(self, wiki_filepath: str) -> None:
-        target = wiki_filepath if wiki_filepath.endswith(".md") else f"{wiki_filepath}.md"
-        if target.startswith("files/"):
-            source_path = self._safe_source_path(target.removeprefix("files/")[:-3])
-            target_path = self.wiki_dir / "files" / f"{source_path}.md"
-        elif target in _PROJECT_PAGES:
-            target_path, source_path = self.wiki_dir / _PROJECT_PAGES[target], target
-        else:
-            source_path = self._safe_source_path(target[:-3])
-            target_path = self.wiki_dir / f"{source_path}.md"
-        if target_path.exists() and self.status().get("state") == "fresh":
+        """Ensure a single wiki page is generated and fresh."""
+        source_path = self._resolve_source_path(wiki_filepath)
+        abs_source = self.settings.repository_path / source_path
+        if not abs_source.is_file():
+            logger.warning("wiki_source_file_missing", path=source_path)
             return
-        if (self.settings.repository_path / source_path).is_file():
-            self._write_atomic(target_path, self._file_doc(self._evidence(source_path)))
+
+        target_path = self.wiki_dir / f"{source_path}.md"
+        current_sha = self._compute_sha256(source_path)
+        manifest = self._load_manifest()
+
+        if (
+            target_path.exists()
+            and manifest.get("files", {}).get(source_path, {}).get("sha256") == current_sha
+        ):
             return
-        self.generate(full=False)
 
-    def generate_file_wiki_sync(self, file_path: str, content: str, git_oid: str) -> None:
-        self.ensure_wiki_page(f"files/{file_path}.md")
+        evidence = self._evidence(source_path)
+        doc = self._render_file_doc(evidence)
+        self._write_atomic(target_path, doc)
 
-    def generate_project_wiki_page_sync(self, page_name: str) -> None:
-        self.generate(full=False)
+        manifest.setdefault("files", {})[source_path] = {
+            "sha256": current_sha,
+            "lines": evidence["lines"],
+        }
+        self._save_manifest(manifest)
+        self.store.set_wiki_status(source_path, evidence.get("git_oid"), "completed")

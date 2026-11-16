@@ -1454,6 +1454,186 @@ def preamble_cmd(
     context_cmd(path=path, json_output=json_output)
 
 
+@app.command("ctx")
+def ctx_cmd(
+    task: Annotated[str, typer.Argument(help="Task or implementation goal.")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Output high-density, token-bounded context preamble for coding agents and tasks."""
+    _verify_is_git(path)
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    from synap_git.mcp.server import SynapMCPFacade
+
+    facade = SynapMCPFacade(runtime)
+    data = facade.get_session_preamble()
+
+    if task.strip():
+        data["task"] = task.strip()
+        try:
+            search_res = facade.search(task.strip(), max_tokens=1500, summary_only=True)
+            data["task_matches"] = search_res.get("matches", [])
+        except Exception:
+            pass
+
+    if json_output:
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    compact = data.get("compact_preamble", "")
+    if task.strip():
+        typer.echo(f"# TASK: {task.strip()}\n")
+    typer.echo(compact if compact else json.dumps(data, indent=2))
+
+
+@app.command("remember")
+def remember_cmd(
+    key: Annotated[str, typer.Argument(help="Topic key for this memory (e.g. 'auth_policy').")],
+    content: Annotated[str, typer.Argument(help="Detailed observation or rule to persist.")],
+    summary: Annotated[str, typer.Option("--summary", "-s", help="Concise summary.")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Save an architectural decision or fact into local persistent memory."""
+    from synap_git.mcp.server import SynapMCPFacade
+
+    _verify_is_git(path)
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.remember(key=key, content=content, summary=summary)
+
+    if json_output:
+        _emit_json(res)
+        return
+
+    console.print(
+        f"[bold green]✔ Memory recorded[/bold green] under key '[cyan]{key}[/cyan]' (ID: {res['memory_id'][:8]})."
+    )
+
+
+@app.command("recall")
+def recall_cmd(
+    key: Annotated[str, typer.Argument(help="Optional topic key filter.")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum memories to return.")] = 10,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Recall saved memories from local persistent memory."""
+    from synap_git.mcp.server import SynapMCPFacade
+
+    _verify_is_git(path)
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.recall(key=key, limit=limit)
+
+    if json_output:
+        _emit_json(res)
+        return
+
+    memories = res.get("memories", [])
+    if not memories:
+        console.print(f"[yellow]No memories found{' for key ' + key if key else ''}.[/yellow]")
+        return
+
+    table = Table(
+        title=f"Repository Memories{' — key: ' + key if key else ''}",
+        border_style="cyan",
+    )
+    table.add_column("Key", style="bold cyan")
+    table.add_column("Content / Summary", style="white")
+    table.add_column("Recorded", style="dim")
+
+    for m in memories:
+        payload = m.get("payload", "")
+        summary_txt = m.get("summary", "")
+        preview = summary_txt or payload[:80]
+        ts = m.get("timestamp")
+        time_str = datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts else "unknown"
+        table.add_row(m.get("context_key", ""), preview, time_str)
+
+    console.print(table)
+
+
+@app.command("global")
+def global_cmd(
+    query: Annotated[str, typer.Argument(help="Optional search query.")] = "",
+    tag: Annotated[str, typer.Option("--tag", "-t", help="Tag filter.")] = "",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Limit results.")] = 10,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Inspect cross-project global developer habits and preferences (~/.synap/global_memory.db)."""
+    from synap_git.storage.global_memory import GlobalMemoryStore
+
+    store = GlobalMemoryStore()
+    memories = store.list_memories(query=query, tag=tag, limit=limit)
+
+    if json_output:
+        _emit_json({"memories": memories, "count": len(memories)})
+        return
+
+    if not memories:
+        console.print(
+            "[yellow]No global memories found.[/yellow] (Database: ~/.synap/global_memory.db)"
+        )
+        return
+
+    table = Table(title="Global Memories (~/.synap/global_memory.db)", border_style="green")
+    table.add_column("Global ID", style="dim", no_wrap=True)
+    table.add_column("Context Key", style="bold cyan")
+    table.add_column("Category", style="yellow")
+    table.add_column("Summary / Content", style="white")
+    table.add_column("Usage", style="magenta")
+
+    for m in memories:
+        preview = (m.get("summary") or m.get("content", ""))[:60]
+        table.add_row(
+            m["global_id"][:8],
+            m["context_key"],
+            m["category"],
+            preview,
+            str(m.get("usage_count", 0)),
+        )
+
+    console.print(table)
+
+
+@app.command("ingest")
+def ingest_cmd(
+    global_id: Annotated[str, typer.Argument(help="Global memory ID or prefix to ingest.")],
+    category: Annotated[str, typer.Option("--as", "-a", help="Category assignment.")] = "note",
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Promote/clone a global memory from ~/.synap/global_memory.db into the local repository."""
+    from synap_git.mcp.server import SynapMCPFacade
+
+    _verify_is_git(path)
+    settings = _settings(path)
+    runtime = SynapRuntime(settings)
+    runtime.initialize_storage()
+
+    facade = SynapMCPFacade(runtime)
+    res = facade.ingest_global_memory(global_id=global_id, as_category=category)
+
+    if json_output:
+        _emit_json(res)
+        return
+
+    console.print(
+        f"[bold green]✔ Ingested global memory[/bold green] '{res['global_id'][:8]}' "
+        f"(key: '[cyan]{res['key']}[/cyan]') into repository memory."
+    )
+
+
 @app.command("blast")
 def blast_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
@@ -3212,7 +3392,7 @@ def doctor(
         console.print(pre.get("compact_preamble", "No context generated."))
 
 
-app.command(name="ctx", hidden=True)(context_cmd)
+# Alias aliases
 app.command(name="st", hidden=True)(status)
 app.command(name="sk", hidden=True)(skeleton_cmd)
 app.command(name="doc", hidden=True)(doctor)
@@ -4184,105 +4364,6 @@ def wiki_generate(
     )
 
 
-@wiki_app.command("tree")
-def wiki_tree(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """Print the exact generated repository tree."""
-    runtime = SynapRuntime(_settings(path))
-    target = runtime.wiki.wiki_dir / "codebase-tree.md"
-    paths = runtime.wiki._files()
-    runtime.wiki._write_atomic(target, runtime.wiki._tree(paths))
-    runtime.wiki._navigation(paths)
-    evidence = [runtime.wiki._evidence(source_path) for source_path in paths]
-    manifest = runtime.wiki._manifest(paths, evidence)
-    manifest["generation_status"] = "incomplete"
-    manifest["failed_documents"] = ["local LLM not configured"]
-    runtime.wiki._write_atomic(
-        runtime.wiki.wiki_dir / "generated" / "evidence.json",
-        json.dumps(evidence, indent=2) + "\n",
-    )
-    runtime.wiki._write_atomic(
-        runtime.wiki.wiki_dir / "generated" / "generation-manifest.json",
-        json.dumps(manifest, indent=2) + "\n",
-    )
-    _stdout_print(target.read_text(encoding="utf-8"))
-
-
-@wiki_app.command("files")
-def wiki_files(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """List file-level documentation pages."""
-    runtime = SynapRuntime(_settings(path))
-    target = runtime.wiki.wiki_dir / "files"
-    pages = (
-        sorted(p.relative_to(target).as_posix() for p in target.rglob("*.md"))
-        if target.exists()
-        else []
-    )
-    if not pages:
-        console.print("[yellow]No file documentation pages found.[/yellow]")
-        return
-    _stdout_print("\n".join(pages))
-
-
-@wiki_app.command("file")
-def wiki_file(
-    filepath: Annotated[str, typer.Argument(help="Repository-relative source path.")],
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-) -> None:
-    """Generate or show one source-file explanation."""
-    runtime = SynapRuntime(_settings(path))
-    target = runtime.wiki.wiki_dir / "files" / f"{filepath}.md"
-    try:
-        runtime.wiki.ensure_wiki_page(f"files/{filepath}.md")
-    except Exception as exc:
-        console.print(f"[red]✗ Could not generate '{filepath}':[/red] {exc}")
-        raise typer.Exit(1) from exc
-    if not target.exists():
-        console.print(f"[red]✗ No documentation for '{filepath}'.[/red]")
-        raise typer.Exit(1)
-    from rich.markdown import Markdown
-
-    console.print(Markdown(target.read_text(encoding="utf-8")))
-
-
-@wiki_app.command("architecture")
-def wiki_architecture(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """Show architecture documentation."""
-    wiki_show("architecture/overview.md", path)
-
-
-@wiki_app.command("flows")
-def wiki_flows(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """Show request lifecycle flow documentation."""
-    wiki_show("flows/request-lifecycle.md", path)
-
-
-@wiki_app.command("flow")
-def wiki_flow(
-    request_name: Annotated[str, typer.Argument(help="Flow page name, such as request-lifecycle.")],
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-) -> None:
-    """Show one named request flow."""
-    wiki_show(f"flows/{request_name}.md", path)
-
-
-@wiki_app.command("concepts")
-def wiki_concepts(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """Show project-specific engineering concepts."""
-    wiki_show("concepts/engineering-concepts.md", path)
-
-
-@wiki_app.command("validate")
-def wiki_validate(path: Annotated[str, typer.Argument(help="Repository path.")] = ".") -> None:
-    """Validate wiki files, Markdown fences, and Mermaid sections."""
-    runtime = SynapRuntime(_settings(path))
-    errors = runtime.wiki.validate()
-    if errors:
-        for error in errors:
-            console.print(f"[red]✗ {error}[/red]")
-        raise typer.Exit(1)
-    console.print("[green]✓ Wiki validation passed.[/green]")
-
-
 @wiki_app.command("show")
 def wiki_show(
     filepath: Annotated[
@@ -4301,32 +4382,25 @@ def wiki_show(
     if not target.endswith(".md"):
         target += ".md"
 
-    # Enforce lazy loading and refresh stale/missing pages on request
-    with console.status(f"[yellow]Loading and refreshing '{target}'...[/yellow]"):
-        try:
-            runtime.wiki.ensure_wiki_page(target)
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not refresh wiki page: {e}[/yellow]")
-
     wiki_path = wiki_dir / target
     if not wiki_path.exists():
         wiki_path = wiki_dir / filepath
+
+    if not wiki_path.exists():
+        # Enforce lazy loading and generate missing page on request
+        with console.status(f"[yellow]Loading and generating '{target}'...[/yellow]"):
+            try:
+                runtime.wiki.ensure_wiki_page(target)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not refresh wiki page: {e}[/yellow]")
+
         if not wiki_path.exists():
-            console.print(f"[red]✗ Wiki page '{filepath}' not found.[/red]")
-            raise typer.Exit(1)
+            wiki_path = wiki_dir / target
+            if not wiki_path.exists():
+                wiki_path = wiki_dir / filepath
+                if not wiki_path.exists():
+                    console.print(f"[red]✗ Wiki page '{filepath}' not found.[/red]")
+                    raise typer.Exit(1)
 
     content = wiki_path.read_text(encoding="utf-8")
     console.print(Markdown(content))
-
-
-@wiki_app.command("retry")
-def wiki_retry(
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-) -> None:
-    """Requeue all permanently failed wiki tasks back to pending state."""
-    runtime = SynapRuntime(_settings(path))
-    count = runtime.store.retry_failed_wiki_queue()
-    if count > 0:
-        console.print(f"[green]✓ Requeued {count} failed wiki tasks to pending state.[/green]")
-    else:
-        console.print("[yellow]No failed wiki tasks found in queue.[/yellow]")

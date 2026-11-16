@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
 from pathlib import Path
@@ -8,7 +7,6 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp.types import TextContent
 
 from synap_git.api.app import create_app
 from synap_git.config import RuntimeProfile, SynapSettings
@@ -391,22 +389,14 @@ async def test_signal_low_context_thresholds(
     server = SynapMCPServer(runtime)
 
     # 1. 61% usage (over 60% threshold)
-    results = await server.mcp.call_tool("signal_low_context", {"token_count": 61, "capacity": 100})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-    assert res["data"]["should_checkpoint"] is True
+    res = server.facade.signal_low_context(61, 100)
+    assert res["should_checkpoint"] is True
     captured = capsys.readouterr()
     assert "checkpoint recommended" in captured.err
 
     # 2. 50% usage (under 60% threshold)
-    results2 = await server.mcp.call_tool(
-        "signal_low_context", {"token_count": 50, "capacity": 100}
-    )
-    content2 = results2[0]
-    assert isinstance(content2, TextContent)
-    res2 = json.loads(content2.text)
-    assert res2["data"]["should_checkpoint"] is False
+    res2 = server.facade.signal_low_context(50, 100)
+    assert res2["should_checkpoint"] is False
 
     # 3. Change threshold to 80%
     settings_high = SynapSettings(
@@ -418,13 +408,8 @@ async def test_signal_low_context_thresholds(
     runtime_high = SynapRuntime(settings_high)
     server_high = SynapMCPServer(runtime_high)
 
-    results3 = await server_high.mcp.call_tool(
-        "signal_low_context", {"token_count": 70, "capacity": 100}
-    )
-    content3 = results3[0]
-    assert isinstance(content3, TextContent)
-    res3 = json.loads(content3.text)
-    assert res3["data"]["should_checkpoint"] is False
+    res3 = server_high.facade.signal_low_context(70, 100)
+    assert res3["should_checkpoint"] is False
 
 
 def test_lesson_expiry_configurable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

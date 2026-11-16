@@ -15,9 +15,15 @@ logger = structlog.get_logger(__name__)
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation."""
 
-    def __init__(self, api_key: str, default_model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        api_key: str = "none",
+        default_model: str = "gpt-4o-mini",
+        base_url: str = "https://api.openai.com/v1",
+    ) -> None:
         self.api_key = api_key
         self.default_model = default_model
+        self.base_url = base_url.rstrip("/")
 
     def generate(
         self,
@@ -29,7 +35,7 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.2,
     ) -> LLMResponse:
         model_name = model or self.default_model
-        url = "https://api.openai.com/v1/chat/completions"
+        url = f"{self.base_url}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -71,7 +77,7 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.2,
     ) -> Iterator[str]:
         model_name = model or self.default_model
-        url = "https://api.openai.com/v1/chat/completions"
+        url = f"{self.base_url}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -116,7 +122,7 @@ class OpenAIProvider(LLMProvider):
         model: str | None = None,
     ) -> list[float]:
         model_name = model or "text-embedding-3-small"
-        url = "https://api.openai.com/v1/embeddings"
+        url = f"{self.base_url}/embeddings"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",

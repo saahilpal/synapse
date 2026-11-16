@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
-from synap_git.config import SynapSettings
+from synap_git.config import RuntimeProfile, SynapSettings
 from synap_git.provider.anthropic import AnthropicProvider
 from synap_git.provider.base import LLMProvider, LLMResponse
 from synap_git.provider.gemini import GeminiProvider
@@ -48,6 +48,10 @@ def _wrap(provider: LLMProvider, calls_per_second: float | None = None) -> LLMPr
     if isinstance(provider, OllamaProvider):
         # Local Ollama provider running on localhost does not need artificial rate limiting
         return provider
+    if isinstance(provider, OpenAIProvider) and (
+        "127.0.0.1" in provider.base_url or "localhost" in provider.base_url
+    ):
+        return provider
     rate = calls_per_second if calls_per_second is not None else 15.0
     return RateLimitedProvider(provider, calls_per_second=rate)
 
@@ -55,13 +59,82 @@ def _wrap(provider: LLMProvider, calls_per_second: float | None = None) -> LLMPr
 def get_llm_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an LLM provider based on runtime settings.
 
-    Strictly enforces provider configuration. Returns None for explicit Mode A
-    (structural only).
+    Strictly enforces provider configuration. If not explicitly set,
+    auto-discovers running local runtimes. Returns None for Mode A (structural only).
     """
     if not settings.llm_provider:
+        cache_path = settings.state_path / "provider_cache.json"
+        if not cache_path.exists() and settings.profile == RuntimeProfile.TEST:
+            return None
+        from synap_git.provider.discovery import probe_local_runtimes
+
+        discovered = probe_local_runtimes(cache_path=cache_path)
+        if discovered is not None:
+            if discovered.name == "ollama":
+                model = settings.llm_model or discovered.chat_model or "llama3"
+                return _wrap(
+                    OllamaProvider(
+                        base_url=discovered.host,
+                        default_model=model,
+                    )
+                )
+            else:
+                model = settings.llm_model or discovered.chat_model or ""
+                base_url = f"{discovered.host.rstrip('/')}/v1"
+                return _wrap(
+                    OpenAIProvider(
+                        api_key="none",
+                        default_model=model,
+                        base_url=base_url,
+                    )
+                )
         return None
 
     provider_name = str(settings.llm_provider).lower().strip()
+
+    if provider_name in ("lm_studio", "lmstudio"):
+        url = getattr(settings, "lm_studio_url", "http://127.0.0.1:1234")
+        base_url = f"{url.rstrip('/')}/v1"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=settings.llm_model or "",
+                base_url=base_url,
+            )
+        )
+
+    if provider_name in ("llama_cpp", "llamacpp"):
+        url = getattr(settings, "llama_cpp_url", "http://127.0.0.1:8080")
+        base_url = f"{url.rstrip('/')}/v1"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=settings.llm_model or "",
+                base_url=base_url,
+            )
+        )
+
+    if provider_name == "vllm":
+        url = getattr(settings, "vllm_url", "http://127.0.0.1:8000")
+        base_url = f"{url.rstrip('/')}/v1"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=settings.llm_model or "",
+                base_url=base_url,
+            )
+        )
+
+    if provider_name == "jan":
+        url = getattr(settings, "jan_url", "http://127.0.0.1:1337")
+        base_url = f"{url.rstrip('/')}/v1"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=settings.llm_model or "",
+                base_url=base_url,
+            )
+        )
 
     if provider_name == "openai":
         if not settings.openai_api_key:
@@ -132,9 +205,80 @@ def get_embed_provider(settings: SynapSettings) -> LLMProvider | None:
     """Create an embedding provider based on runtime settings."""
     provider_val = settings.embedding_provider or settings.llm_provider
     if not provider_val:
+        cache_path = settings.state_path / "provider_cache.json"
+        if not cache_path.exists() and settings.profile == RuntimeProfile.TEST:
+            return None
+        from synap_git.provider.discovery import probe_local_runtimes
+
+        discovered = probe_local_runtimes(cache_path=cache_path)
+        if discovered and discovered.embedding_model:
+            if discovered.name == "ollama":
+                return _wrap(
+                    OllamaProvider(
+                        base_url=discovered.host,
+                        default_model=discovered.embedding_model,
+                    )
+                )
+            else:
+                base_url = f"{discovered.host.rstrip('/')}/v1"
+                return _wrap(
+                    OpenAIProvider(
+                        api_key="none",
+                        default_model=discovered.embedding_model,
+                        base_url=base_url,
+                    )
+                )
         return None
 
     provider_name = str(provider_val).lower().strip()
+
+    if provider_name in ("lm_studio", "lmstudio"):
+        url = getattr(settings, "lm_studio_url", "http://127.0.0.1:1234")
+        base_url = f"{url.rstrip('/')}/v1"
+        model = settings.embedding_model or settings.llm_model or "text-embedding-3-small"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=model,
+                base_url=base_url,
+            )
+        )
+
+    if provider_name in ("llama_cpp", "llamacpp"):
+        url = getattr(settings, "llama_cpp_url", "http://127.0.0.1:8080")
+        base_url = f"{url.rstrip('/')}/v1"
+        model = settings.embedding_model or settings.llm_model or "text-embedding-3-small"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=model,
+                base_url=base_url,
+            )
+        )
+
+    if provider_name == "vllm":
+        url = getattr(settings, "vllm_url", "http://127.0.0.1:8000")
+        base_url = f"{url.rstrip('/')}/v1"
+        model = settings.embedding_model or settings.llm_model or "text-embedding-3-small"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=model,
+                base_url=base_url,
+            )
+        )
+
+    if provider_name == "jan":
+        url = getattr(settings, "jan_url", "http://127.0.0.1:1337")
+        base_url = f"{url.rstrip('/')}/v1"
+        model = settings.embedding_model or settings.llm_model or "text-embedding-3-small"
+        return _wrap(
+            OpenAIProvider(
+                api_key="none",
+                default_model=model,
+                base_url=base_url,
+            )
+        )
 
     if provider_name == "openai":
         if not settings.openai_api_key:

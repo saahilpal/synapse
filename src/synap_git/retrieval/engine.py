@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -105,6 +108,106 @@ def _is_test_candidate(path: str, name: str) -> bool:
     )
 
 
+class QueryIntent(str, Enum):
+    SYMBOL_LOOKUP = "symbol_lookup"
+    NAVIGATION = "navigation"
+    ARCHITECTURE = "architecture"
+    DEBUGGING = "debugging"
+    PAST_DECISIONS = "past_decisions"
+
+
+def classify_intent_5tier(query: str) -> QueryIntent:
+    """
+    5-tier query intent router:
+    1. Past Decisions: architectural choices, decisions, history, ADRs.
+    2. Debugging: errors, failures, bugs, reverts, why something failed.
+    3. Architecture: high-level design, overview, conceptual system diagrams.
+    4. Navigation: callers, callees, file paths, imports, references.
+    5. Symbol Lookup: exact symbols, declarations, function/class lookups.
+    """
+    q_lower = query.lower()
+
+    # Tier 1: Past Decisions
+    decision_markers = (
+        "decision",
+        "decisions",
+        "why did we",
+        "why was",
+        "rationale",
+        "tradeoff",
+        "trade-off",
+        "adr",
+        "past choice",
+    )
+    if any(m in q_lower for m in decision_markers):
+        return QueryIntent.PAST_DECISIONS
+
+    # Tier 2: Debugging
+    debugging_markers = (
+        "fail",
+        "failing",
+        "error",
+        "bug",
+        "crash",
+        "exception",
+        "broken",
+        "fix",
+        "revert",
+        "reverted",
+        "why does",
+        "why did",
+        "issue",
+        "traceback",
+    )
+    if any(m in q_lower for m in debugging_markers):
+        return QueryIntent.DEBUGGING
+
+    # Tier 3: Architecture
+    architecture_markers = (
+        "architecture",
+        "overview",
+        "design",
+        "concept",
+        "high level",
+        "system",
+        "pattern",
+        "summary",
+        "structure",
+        "what is",
+        "what are",
+        "what does",
+        "how does",
+        "explain",
+    )
+    if any(m in q_lower for m in architecture_markers):
+        return QueryIntent.ARCHITECTURE
+
+    # Tier 4: Navigation
+    navigation_markers = (
+        "where is",
+        "where are",
+        "callers",
+        "callees",
+        "imports",
+        "imported",
+        "references",
+        "referenced by",
+        "find file",
+        "path to",
+        "dependencies",
+        "/",
+        ".py",
+        ".ts",
+        ".rs",
+        ".go",
+    )
+    if any(m in q_lower for m in navigation_markers):
+        return QueryIntent.NAVIGATION
+
+    # Tier 5: Symbol Lookup
+    return QueryIntent.SYMBOL_LOOKUP
+
+
 def _classify_intent_fast(query: str) -> str:
     """
     Classify query intent into 'conceptual', 'structural', or 'logic'.
@@ -179,6 +282,107 @@ class HybridRetrievalEngine:
         self.trace_store = trace_store
         self._pagerank_cache: dict[str, float] | None = None
         self._hub_ranks: dict[str, int] | None = None
+        try:
+            self.index_docs()
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().warning("doc_indexing_failed", error=str(e))
+
+    def index_docs(self) -> int:
+        """
+        Index documentation files (CHANGELOG.md, README.md, CLAUDE.md, AGENTS.md)
+        into symbols_fts so documentation queries don't suffer a 100% miss rate.
+        """
+        doc_names = {"changelog.md", "readme.md", "claude.md", "agents.md"}
+        indexed = 0
+        if not self.repo_path.exists():
+            return 0
+
+        for path in self.repo_path.glob("*.md"):
+            if path.name.lower() in doc_names:
+                try:
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                except OSError as e:
+                    import structlog
+
+                    structlog.get_logger().warning("doc_read_failed", path=str(path), error=str(e))
+                    continue
+
+                rel_path = str(path.relative_to(self.repo_path))
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+                file_id = hashlib.sha256((rel_path + content_hash).encode()).hexdigest()
+
+                lines = content.splitlines()
+                sections: list[dict[str, Any]] = []
+                cur_header = path.name
+                cur_start = 1
+                cur_lines: list[str] = []
+
+                for idx, line in enumerate(lines, 1):
+                    if line.startswith("#"):
+                        if cur_lines:
+                            sections.append(
+                                {
+                                    "name": cur_header,
+                                    "start_line": cur_start,
+                                    "end_line": idx - 1,
+                                    "text": "\n".join(cur_lines),
+                                }
+                            )
+                        cur_header = line.lstrip("#").strip() or path.name
+                        cur_start = idx
+                        cur_lines = [line]
+                    else:
+                        cur_lines.append(line)
+
+                if cur_lines:
+                    sections.append(
+                        {
+                            "name": cur_header,
+                            "start_line": cur_start,
+                            "end_line": len(lines),
+                            "text": "\n".join(cur_lines),
+                        }
+                    )
+
+                symbols = []
+                for s_idx, sec in enumerate(sections):
+                    sym_id = hashlib.sha256(f"{file_id}:{s_idx}:{sec['name']}".encode()).hexdigest()
+                    symbols.append(
+                        {
+                            "symbol_id": sym_id,
+                            "name": sec["name"],
+                            "kind": "doc_section",
+                            "start_line": sec["start_line"],
+                            "end_line": sec["end_line"],
+                            "ast_hash": hashlib.sha256(sec["text"].encode()).hexdigest()[:16],
+                            "metadata": {"doc": True, "body": sec["text"]},
+                        }
+                    )
+
+                self.store.upsert_file_and_symbols(
+                    file_id=file_id,
+                    path=rel_path,
+                    git_oid=content_hash[:8],
+                    content_hash=content_hash,
+                    language="markdown",
+                    symbols=symbols,
+                )
+
+                with self.store.connect() as conn:
+                    for sym in symbols:
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO symbols_fts (symbol_id, name, kind, body)
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (sym["symbol_id"], sym["name"], sym["kind"], sym["metadata"]["body"]),
+                        )
+
+                indexed += len(symbols)
+
+        return indexed
 
     def _get_pagerank_data(
         self, force_refresh: bool = False
@@ -212,7 +416,16 @@ class HybridRetrievalEngine:
         trace_id = str(uuid4())
         start_time = datetime.now(UTC)
 
-        # M1: Fast Deterministic Query Intent Classification (sub-millisecond)
+        # Ensure documentation files are indexed into symbols_fts
+        try:
+            self.index_docs()
+        except Exception as e:
+            import structlog
+
+            structlog.get_logger().warning("doc_indexing_failed", error=str(e))
+
+        # 5-tier query intent routing
+        intent_5tier = classify_intent_5tier(query)
         intent = _classify_intent_fast(query)
 
         # 2. Lexical Matches (BM25) with sub-tokenization & short identifier preservation
@@ -289,8 +502,10 @@ class HybridRetrievalEngine:
         if is_dirty:
             self._get_pagerank_data(force_refresh=True)
 
-        # 4. RRF Ranking with Intent weighting, Graph Centrality, and Casing Calibration
-        ranked = self._rank_candidates(query, list(combined.values()), intent)
+        # 4. RRF Ranking with 5-tier intent weighting, Graph Centrality, and Casing Calibration
+        ranked = self._rank_candidates(
+            query, list(combined.values()), intent, intent_5tier=intent_5tier
+        )
 
         t_ranking = time.perf_counter()
 
@@ -300,12 +515,27 @@ class HybridRetrievalEngine:
             max(100, max_tokens - reserved_buffer) if max_tokens > 100 else max_tokens
         )
 
-        # 5. Token-Aware Context Packing with Graceful Folding
+        # 5. Token-Aware Context Packing with Contextual Chunk Enrichment
         packed_blocks = []
         tokens_used = 0
         repo_path = self.repo_path
         grounding_sources = []
         trace_elements = []
+
+        # Ingestion of Past Decisions if intent matches
+        if intent_5tier == QueryIntent.PAST_DECISIONS:
+            decisions = self.store.get_decisions(limit=5)
+            if decisions:
+                dec_blocks = ["# PAST ARCHITECTURAL DECISIONS"]
+                for d in decisions:
+                    dec_blocks.append(
+                        f"- [{d['decision_id'][:8]}] {d['content']} (Context: {d.get('context', 'none')})"
+                    )
+                dec_str = "\n".join(dec_blocks)
+                dec_toks = len(self.tokenizer.encode(dec_str))
+                if tokens_used + dec_toks <= retrieval_budget:
+                    packed_blocks.append(dec_str)
+                    tokens_used += dec_toks
 
         included_files = set()
         for cand, score in ranked:
@@ -319,6 +549,29 @@ class HybridRetrievalEngine:
             end = cand.get("end_line", 1)
             reason = cand["reason"]
 
+            # Contextual chunk enrichment
+            module = cand.get("module_key")
+            if not module:
+                stem = Path(path).with_suffix("")
+                parts = [p for p in stem.parts if p not in ("src", "lib", "app", "packages")]
+                module = ".".join(parts) if parts else stem.name
+
+            metadata_raw = cand.get("metadata_json") or cand.get("metadata")
+            scope = ""
+            if isinstance(metadata_raw, str):
+                try:
+                    meta_dict = json.loads(metadata_raw)
+                    scope = meta_dict.get("scope", "") if isinstance(meta_dict, dict) else ""
+                except Exception:
+                    scope = ""
+            elif isinstance(metadata_raw, dict):
+                scope = metadata_raw.get("scope", "")
+
+            symbol_repr = f"{scope}.{name}" if scope else name
+            enrichment_header = (
+                f"# File: {path} | Module: {module} | Symbol: {symbol_repr} ({kind})"
+            )
+
             snippet = _get_snippet(repo_path, path, start, end)
             if not snippet:
                 continue
@@ -327,7 +580,14 @@ class HybridRetrievalEngine:
                 f"{start + i:4d} | {line}" for i, line in enumerate(snippet.splitlines())
             ]
             numbered_snippet = "\n".join(numbered_lines) if numbered_lines else snippet
-            block = f"### File: {path}\nSymbol: {name} ({kind})\nLines: {start}-{end}\nReason: {reason}\n```\n{numbered_snippet}\n```\n"
+            block = (
+                f"{enrichment_header}\n"
+                f"### File: {path}\n"
+                f"Symbol: {name} ({kind})\n"
+                f"Lines: {start}-{end}\n"
+                f"Reason: {reason}\n"
+                f"```\n{numbered_snippet}\n```\n"
+            )
             block_tokens = len(self.tokenizer.encode(block))
 
             if tokens_used + block_tokens > retrieval_budget:
@@ -352,6 +612,7 @@ class HybridRetrievalEngine:
                         "\n".join(numbered_skel_lines) if numbered_skel_lines else skel_snippet
                     )
                     folded_block = (
+                        f"{enrichment_header}\n"
                         f"### File: {path}\n"
                         f"Symbol: {name} ({kind}) [AST Skeleton]\n"
                         f"Lines: {start}-{end}\n"
@@ -374,6 +635,50 @@ class HybridRetrievalEngine:
                                 tokens=skel_tokens,
                             )
                         )
+                    else:
+                        # Truncate skeleton to fit remaining budget if possible; NEVER append uncompressed code!
+                        remaining = retrieval_budget - tokens_used
+                        if remaining >= 30:
+                            skel_lines = numbered_skel.splitlines()
+                            trunc_lines: list[str] = []
+                            for sline in skel_lines:
+                                cand_folded = (
+                                    f"{enrichment_header}\n"
+                                    f"### File: {path}\n"
+                                    f"Symbol: {name} ({kind}) [AST Skeleton]\n"
+                                    f"Lines: {start}-{end}\n"
+                                    f"Reason: {reason}+folded_skeleton\n"
+                                    f"```\n"
+                                    + "\n".join(trunc_lines + [sline, "    ..."])
+                                    + "\n```\n"
+                                )
+                                if len(self.tokenizer.encode(cand_folded)) > remaining:
+                                    break
+                                trunc_lines.append(sline)
+                            if trunc_lines:
+                                trunc_block = (
+                                    f"{enrichment_header}\n"
+                                    f"### File: {path}\n"
+                                    f"Symbol: {name} ({kind}) [AST Skeleton]\n"
+                                    f"Lines: {start}-{end}\n"
+                                    f"Reason: {reason}+folded_skeleton\n"
+                                    f"```\n" + "\n".join(trunc_lines + ["    ..."]) + "\n```\n"
+                                )
+                                t_toks = len(self.tokenizer.encode(trunc_block))
+                                packed_blocks.append(trunc_block)
+                                grounding_sources.append(cand)
+                                tokens_used += t_toks
+                                included_files.add(path)
+                                trace_elements.append(
+                                    TraceElement(
+                                        stable_id=cand["symbol_id"],
+                                        name=name,
+                                        path=path,
+                                        score=score,
+                                        reason=f"{reason}+folded_skeleton",
+                                        tokens=t_toks,
+                                    )
+                                )
                 continue
 
             packed_blocks.append(block)
@@ -401,7 +706,8 @@ class HybridRetrievalEngine:
 
                 skel = CodeParserRegistry().skeletonize(repo_path / path)
             except Exception:
-                skel = _get_full_file(repo_path, path)
+                # CRITICAL BUG FIX: Do NOT load full uncompressed file when skeletonize fails!
+                skel = None
             if not skel:
                 continue
 
@@ -410,6 +716,29 @@ class HybridRetrievalEngine:
             if tokens_used + block_tokens <= retrieval_budget:
                 packed_blocks.append(block)
                 tokens_used += block_tokens
+            else:
+                remaining = retrieval_budget - tokens_used
+                if remaining > 50:
+                    skel_lines = skel.splitlines()
+                    skel_trunc_lines: list[str] = []
+                    for line in skel_lines:
+                        cand_b = (
+                            f"### File Structural Skeleton: {path}\n```\n"
+                            + "\n".join(skel_trunc_lines + [line, "    ..."])
+                            + "\n```\n"
+                        )
+                        if len(self.tokenizer.encode(cand_b)) > remaining:
+                            break
+                        skel_trunc_lines.append(line)
+                    if skel_trunc_lines:
+                        final_trunc = (
+                            f"### File Structural Skeleton: {path}\n```\n"
+                            + "\n".join(skel_trunc_lines + ["    ..."])
+                            + "\n```\n"
+                        )
+                        f_toks = len(self.tokenizer.encode(final_trunc))
+                        packed_blocks.append(final_trunc)
+                        tokens_used += f_toks
 
         context_str = "\n".join(packed_blocks)
 
@@ -531,9 +860,13 @@ class HybridRetrievalEngine:
         return answer_content, grounding_sources, trace
 
     def _rank_candidates(
-        self, query: str, candidates: list[dict[str, Any]], intent: str = "logic"
+        self,
+        query: str,
+        candidates: list[dict[str, Any]],
+        intent: str = "logic",
+        intent_5tier: QueryIntent | str | None = None,
     ) -> list[tuple[dict[str, Any], float]]:
-        """Rank candidates using Reciprocal Rank Fusion (RRF), Graph Centrality, and casing-invariant signals."""
+        """Rank candidates using Reciprocal Rank Fusion (RRF k=60), Graph Centrality, and casing-invariant signals."""
         k = 60
         ranked: list[tuple[dict[str, Any], float]] = []
         pagerank_scores, hub_ranks = self._get_pagerank_data()
@@ -555,7 +888,32 @@ class HybridRetrievalEngine:
             structural_w = 1.0
             hub_w = 1.0
 
-            if intent == "structural":
+            if intent_5tier == QueryIntent.SYMBOL_LOOKUP or intent_5tier == "symbol_lookup":
+                lexical_w = 3.0
+                semantic_w = 0.5
+                structural_w = 0.8
+                hub_w = 1.0
+            elif intent_5tier == QueryIntent.NAVIGATION or intent_5tier == "navigation":
+                structural_w = 2.5
+                lexical_w = 1.5
+                semantic_w = 0.6
+                hub_w = 1.2
+            elif intent_5tier == QueryIntent.ARCHITECTURE or intent_5tier == "architecture":
+                semantic_w = 2.5
+                hub_w = 2.0
+                structural_w = 1.0
+                lexical_w = 0.8
+            elif intent_5tier == QueryIntent.DEBUGGING or intent_5tier == "debugging":
+                lexical_w = 2.2
+                semantic_w = 1.5
+                structural_w = 1.2
+                hub_w = 1.0
+            elif intent_5tier == QueryIntent.PAST_DECISIONS or intent_5tier == "past_decisions":
+                lexical_w = 1.5
+                semantic_w = 2.0
+                hub_w = 0.8
+                structural_w = 0.8
+            elif intent == "structural":
                 structural_w = 2.0
                 semantic_w = 0.5
                 hub_w = 1.2

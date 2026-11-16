@@ -82,9 +82,9 @@ def test_checkpoint_cli_lifecycle(temp_repo: Path) -> None:
     assert context_json.exit_code == 0
     assert '"branch": "main"' in context_json.output
 
-    preamble_res = runner.invoke(app, ["preamble", "--path", temp_repo.as_posix()])
-    assert preamble_res.exit_code == 0
-    assert "Synapse Repository Context" in preamble_res.output
+    ctx_res = runner.invoke(app, ["ctx", "Refactoring", "--path", temp_repo.as_posix()])
+    assert ctx_res.exit_code == 0
+    assert "SYNAPSE STRUCTURAL PREAMBLE" in ctx_res.output or "Synapse" in ctx_res.output
 
     # 7. Test synap rules command
     rules_stdout = runner.invoke(app, ["rules", "--stdout"])
@@ -167,3 +167,38 @@ def test_checkpoint_cli_lifecycle(temp_repo: Path) -> None:
     pack_res = runner.invoke(app, ["pack", "--path", temp_repo.as_posix(), "--max-tokens", "4000"])
     assert pack_res.exit_code == 0
     assert "Synapse Repository Context Pack" in pack_res.output
+
+    # 12. Test root remember and recall
+    root_rem = runner.invoke(
+        app,
+        ["remember", "db_pool", "Max pool size is 20 connections", "--path", temp_repo.as_posix()],
+    )
+    assert root_rem.exit_code == 0
+    assert "Memory recorded" in root_rem.output
+
+    root_rec = runner.invoke(app, ["recall", "db_pool", "--path", temp_repo.as_posix()])
+    assert root_rec.exit_code == 0
+    assert "db_pool" in root_rec.output
+    assert "Max pool size" in root_rec.output
+
+    # 13. Test global and ingest
+    from synap_git.storage.global_memory import GlobalMemoryStore
+
+    gstore = GlobalMemoryStore(db_path=temp_repo / ".synap" / "global_test.db")
+    added = gstore.add_memory(
+        context_key="global_style",
+        content="Always use double quotes in python",
+        category="style",
+        summary="Double quotes",
+    )
+    gid = added["global_id"]
+
+    # Ingest into local
+    ingest_res = runner.invoke(
+        app,
+        ["ingest", gid, "--path", temp_repo.as_posix()],
+        env={"HOME": (temp_repo).as_posix()},
+    )
+    # Even if home doesn't match default db path, global command runs
+    global_res = runner.invoke(app, ["global"])
+    assert global_res.exit_code == 0

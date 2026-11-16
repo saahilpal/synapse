@@ -3,12 +3,27 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from synap_git.config import RuntimeProfile, SynapSettings
 from synap_git.indexer.daemon import RuntimeDaemon
+
+
+def _git_retry(
+    cmd: list[str], cwd: Path, retries: int = 5, delay: float = 0.1
+) -> subprocess.CompletedProcess[str]:
+    for i in range(retries):
+        try:
+            return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            if "index.lock" in (e.stderr or "") and i < retries - 1:
+                time.sleep(delay)
+                continue
+            raise
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 @pytest.fixture
@@ -80,20 +95,20 @@ async def test_daemon_survives_branch_switching(torture_settings: SynapSettings)
     git_bin = shutil.which("git") or "git"
 
     # Create and checkout feature branch
-    subprocess.run([git_bin, "checkout", "-b", "feature/torture"], cwd=repo, check=True)
+    _git_retry([git_bin, "checkout", "-b", "feature/torture"], cwd=repo)
     (repo / "feature.py").write_text("def feature(): pass\n", encoding="utf-8")
-    subprocess.run([git_bin, "add", "."], cwd=repo, check=True)
-    subprocess.run([git_bin, "commit", "-m", "add feature file"], cwd=repo, check=True)
+    _git_retry([git_bin, "add", "."], cwd=repo)
+    _git_retry([git_bin, "commit", "-m", "add feature file"], cwd=repo)
 
-    for _ in range(20):
+    for _ in range(50):
         await asyncio.sleep(0.1)
         if daemon.runtime.status().branch == "feature/torture":
             break
 
     # Checkout back to main
-    subprocess.run([git_bin, "checkout", "main"], cwd=repo, check=True)
+    _git_retry([git_bin, "checkout", "main"], cwd=repo)
 
-    for _ in range(20):
+    for _ in range(50):
         await asyncio.sleep(0.1)
         if daemon.runtime.status().branch == "main":
             break

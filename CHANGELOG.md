@@ -5,20 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.7.0] - 2026-11-12
+## [2.8.0] - 2026-11-16
+
+### Added
+- **Two-Tier Fast Vector Search & BLOB Storage**: Implemented native `sqlite-vec` integration with seamless NumPy BLAS in-memory dot product fallback (<1.1ms for 10k vectors, 214x speedup over SQLite Python callbacks); vectors stored as compact binary float32 BLOBs with automatic schema migration (v7).
+- **Runtime Port Probing & Auto-Discovery**: Automatic parallel port probing for local LLM runtimes (Ollama 11434, LM Studio 1234, llama.cpp 8080, vLLM 8000, Jan 1337) with smart capability ranking and 1-hour cache in `.synap/provider_cache.json`.
+- **First-Class Zero-LLM Mode A**: Deterministic, 100% offline structural indexing, AST skeleton generation, and markdown wiki generation with zero reliance on cloud APIs or local model availability.
+- **1:1 Mirroring Engineering Wiki**: Rebuilt wiki engine to mirror repository file tree 1:1 under `.synap/wiki/<path>.md` with deterministic AST inspection; eliminated synthetic category directories and ungrounded pages; automated SHA256 manifest caching and orphan pruning.
+- **Isolated Global Memory Vault**: Strict zero-leakage cross-repo isolation with dedicated SQLite database at `~/.synap/global_memory.db`. Exposed only via explicit `/global` inspection and `/ingest` commands.
+- **Interactive Slash-Command TUI / REPL**: Streamlined `prompt_toolkit` + `rich` interactive shell when invoked without arguments in interactive terminals (`/init`, `/status`, `/find`, `/remember`, `/forget`, `/wiki`, `/global`, `/ingest`, `/model`, `/skill`, `/doctor`, `/help`, `/exit`) with history and tab completion.
+- **Agent Skill & Rule Auto-Installer**: Packaged `SKILL.md` in distribution wheel with non-destructive installer for `CLAUDE.md`, `AGENTS.md`, and `.cursor/rules/synap.mdc` using versioned sentinel markers (`<!-- SYNAP_MANAGED_START: v1.0 -->`).
+- **Retrieval Quality & Intent Routing**: 5-tier query intent classifier, Reciprocal Rank Fusion (RRF $k=60$), contextual chunk headers with file path and symbol hierarchy, documentation FTS indexing, and fixed token budget overflow logic.
 
 ### Changed
+- **MCP Server Tool Diet**: Consolidated 24 MCP tools down to 8 high-signal core tools (`get_session_preamble`, `search`, `get_outline`, `get_skeleton`, `read_symbol`, `create_checkpoint`, `remember`, `recall`) + 2 explicit global memory tools (`list_global_memories`, `ingest_global_memory`).
+- **CLI Subcommand Simplification**: Pruned redundant and duplicate subcommands (aliased `sync` -> `index`, `run` -> `start`, `preamble` -> `context`, cleaned 9 verbose wiki subcommands down to `generate`, `status`, `show`, `list`).
+- **Conflict Marker & Revert Safeguards**: Indexer automatically guards against unresolved git conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) and deduplicates automated revert lessons in L3 memory.
 
-- **Engineering wiki generation**: Replaced count-only/short prompts with structured Git-visible evidence containing exact paths, hashes, indexed symbols, line ranges, source excerpts, revision, and model metadata.
-- **Grounded documentation**: Added focused local-LLM generation for file explanations, architecture, data flow, request lifecycle, and project-specific engineering concepts. Prompts prohibit invented symbols, routes, relationships, and unsupported certainty.
-- **Exact tree and freshness**: Added `.synap/wiki/codebase-tree.md`, file indexes, evidence snapshots, generation manifests, coverage counts, exclusion policy, incremental hashing, stale-page cleanup, and atomic writes that preserve valid pages on failure.
-- **Wiki CLI**: Added `wiki status`, `generate [--full|--incremental]`, `tree`, `files`, `file`, `architecture`, `flows`, `flow`, `concepts`, and `validate` while retaining `list`, `show`, and `retry`.
-- **Validation**: Added Markdown/Mermaid fence checks, complete-generation checks, file-page coverage checks, and tests for unavailable models, incremental changes, exact trees, and preservation on failure.
-
-### Known limitations
-
-- The local Ollama model must be available for explanatory pages; when unavailable, Synap creates only deterministic navigation/evidence state and leaves existing explanatory pages untouched.
-- PyPI version/remote state could not be verified in this environment because external DNS/network access is unavailable.
+### Removed
+- **Dead Code Purge**: Removed obsolete `src/synap_git/security/validator.py` (`InputValidator`), unreferenced wrappers, and accidental state directories in package tree.
 
 ## [2.6.0] - 2026-11-01
 

@@ -63,6 +63,8 @@ def configure_logging(settings: SynapSettings) -> None:
     root_logger.addHandler(stream_handler)
 
     root_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    for quiet_logger in ("markdown_it", "asyncio", "httpcore", "httpx"):
+        logging.getLogger(quiet_logger).setLevel(logging.WARNING)
 
     structlog.configure(
         processors=[*shared_processors, renderer],

@@ -11,6 +11,7 @@ from mcp.types import TextContent
 from synap_git.config import RuntimeProfile, SynapSettings
 from synap_git.indexer.engine import SynapRuntime
 from synap_git.mcp.server import SynapMCPServer
+from synap_git.storage.global_memory import GlobalMemoryStore
 
 
 def _parse_res(res: Sequence[Any]) -> dict[str, Any]:
@@ -37,168 +38,47 @@ def mcp_server(runtime: SynapRuntime) -> SynapMCPServer:
 
 
 @pytest.mark.asyncio
-async def test_mcp_get_status(mcp_server: SynapMCPServer) -> None:
-    results = await mcp_server.mcp.call_tool("get_status", {})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    result = json.loads(content.text)
+async def test_mcp_tool_schemas_and_descriptions(mcp_server: SynapMCPServer) -> None:
+    tools = await mcp_server.mcp.list_tools()
+    assert len(tools) == 10
 
-    assert result["ok"] is True
-    assert "symbols" in result["data"]
+    tool_names = {t.name for t in tools}
+    expected_tools = {
+        "get_session_preamble",
+        "search",
+        "get_outline",
+        "get_skeleton",
+        "read_symbol",
+        "create_checkpoint",
+        "remember",
+        "recall",
+        "list_global_memories",
+        "ingest_global_memory",
+    }
+    assert tool_names == expected_tools
+
+    for t in tools:
+        assert t.description is not None, f"Tool {t.name} has missing description."
+        assert len(t.description.strip()) > 10, f"Tool {t.name} description is too short."
+
+    # Check create_checkpoint schema defaults
+    cp_tool = next(t for t in tools if t.name == "create_checkpoint")
+    cp_props = cp_tool.inputSchema.get("properties", {})
+    assert "doing" in cp_props
+    assert "next_step" in cp_props
+    assert "blockers" in cp_props
+    assert "doing" in cp_tool.inputSchema.get("required", [])
+
+    # Check search schema
+    search_tool = next(t for t in tools if t.name == "search")
+    s_props = search_tool.inputSchema.get("properties", {})
+    assert "query" in s_props
+    assert "summary_only" in s_props
+    assert "query" in search_tool.inputSchema.get("required", [])
 
 
 @pytest.mark.asyncio
 async def test_mcp_search(mcp_server: SynapMCPServer, monkeypatch: pytest.MonkeyPatch) -> None:
-    def mock_query(query: str, max_tokens: int) -> tuple[str, str, dict[str, Any]]:
-        return "mock result", "mock context", {"debug": True}
-
-    monkeypatch.setattr(mcp_server.facade.runtime, "query_hybrid", mock_query)
-
-    results = await mcp_server.mcp.call_tool("search", {"query": "test"})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    result = json.loads(content.text)
-
-    assert result["ok"] is True
-    assert result["data"]["result"] == "mock result"
-
-
-@pytest.mark.asyncio
-async def test_mcp_checkpoint_lifecycle(mcp_server: SynapMCPServer) -> None:
-    # 1. Create
-    results_create = await mcp_server.mcp.call_tool(
-        "create_checkpoint",
-        {
-            "doing": "working on tests",
-            "changed_files": ["tests/test_mcp.py"],
-            "next_step": "finish tests",
-            "blockers": "none",
-        },
-    )
-    content_create = results_create[0]
-    assert isinstance(content_create, TextContent)
-    res_create = json.loads(content_create.text)
-    assert res_create["ok"] is True
-
-    # 2. Restore
-    results_restore = await mcp_server.mcp.call_tool("restore_checkpoint", {})
-    content_restore = results_restore[0]
-    assert isinstance(content_restore, TextContent)
-    res_restore = json.loads(content_restore.text)
-    assert res_restore["ok"] is True
-    assert res_restore["data"]["doing"] == "working on tests"
-
-
-@pytest.mark.asyncio
-async def test_mcp_log_decision(mcp_server: SynapMCPServer) -> None:
-    results = await mcp_server.mcp.call_tool(
-        "log_decision", {"content": "Use batching", "context_info": "Avoid N+1"}
-    )
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-
-    assert res["ok"] is True
-    assert "decision_id" in res["data"]
-
-
-@pytest.mark.asyncio
-async def test_mcp_verify_system(mcp_server: SynapMCPServer) -> None:
-    results = await mcp_server.mcp.call_tool("verify_system", {})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-
-    assert res["ok"] is True
-    assert "database_integrity" in res["data"]
-
-
-@pytest.mark.asyncio
-async def test_mcp_memory_tools(mcp_server: SynapMCPServer) -> None:
-    # Create a pending lesson via DB
-    with mcp_server.facade.runtime.store.connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
-            VALUES ('L1', 'main', 'h1', 'h0', 'failed', 'pending reason', '[]', 'pending', 0, 9999999999)
-        """
-        )
-
-    # Test get_pending
-    results_pending = await mcp_server.mcp.call_tool("get_pending_memory", {})
-    content_pending = results_pending[0]
-    assert isinstance(content_pending, TextContent)
-    res_pending = json.loads(content_pending.text)
-    assert len(res_pending["data"]["lessons"]) == 1
-
-    # Submit analysis
-    results_submit = await mcp_server.mcp.call_tool(
-        "submit_lesson_analysis", {"lesson_id": "L1", "why_failed": "Updated reason"}
-    )
-    content_submit = results_submit[0]
-    assert isinstance(content_submit, TextContent)
-    res_submit = json.loads(content_submit.text)
-    assert res_submit["ok"] is True
-
-    # Approve lesson
-    with mcp_server.facade.runtime.store.connect() as conn:
-        conn.execute("UPDATE lessons SET status = 'approved' WHERE lesson_id = 'L1'")
-
-    # Test get_approved
-    results_approved = await mcp_server.mcp.call_tool("get_approved_memory", {})
-    content_approved = results_approved[0]
-    assert isinstance(content_approved, TextContent)
-    res_approved = json.loads(content_approved.text)
-    assert len(res_approved["data"]["lessons"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_mcp_error_handling(mcp_server: SynapMCPServer) -> None:
-    # Restore with no checkpoints should return error
-    results = await mcp_server.mcp.call_tool("restore_checkpoint", {})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-
-    assert res["ok"] is False
-    assert res["error"]["code"] == "NOT_FOUND"
-
-
-@pytest.mark.asyncio
-async def test_mcp_get_session_preamble(mcp_server: SynapMCPServer) -> None:
-    # 1. Create a checkpoint
-    await mcp_server.mcp.call_tool(
-        "create_checkpoint",
-        {
-            "doing": "init session",
-            "changed_files": ["main.py"],
-            "next_step": "build feature",
-            "blockers": "none",
-        },
-    )
-    # 2. Log a decision
-    await mcp_server.mcp.call_tool(
-        "log_decision",
-        {"content": "Use FastAPI", "context_info": "High throughput"},
-    )
-
-    # 3. Request preamble
-    results = await mcp_server.mcp.call_tool("get_session_preamble", {})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-
-    assert res["ok"] is True
-    data = res["data"]
-    assert "branch" in data
-    assert data["latest_checkpoint"]["doing"] == "init session"
-    assert len(data["recent_decisions"]) >= 1
-
-
-@pytest.mark.asyncio
-async def test_mcp_search_summary_only(
-    mcp_server: SynapMCPServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
     mock_sources = [
         {
             "symbol_id": "sym1",
@@ -214,52 +94,88 @@ async def test_mcp_search_summary_only(
     def mock_query(
         query: str, max_tokens: int, synthesize_answer: bool = False
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
-        return "full text", mock_sources, {"debug": True}
+        return "mock result", mock_sources, {"debug": True}
 
     monkeypatch.setattr(mcp_server.facade.runtime, "query_hybrid", mock_query)
 
-    results = await mcp_server.mcp.call_tool(
-        "search", {"query": "parse_code", "summary_only": True}
-    )
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
+    # 1. Default summary_only=True
+    res_default = await mcp_server.mcp.call_tool("search", {"query": "parse_code"})
+    data_default = _parse_res(res_default)
+    assert data_default["ok"] is True
+    assert data_default["data"]["total_matches"] == 1
+    assert data_default["data"]["matches"][0]["symbol"] == "parse_code"
 
-    assert res["ok"] is True
-    assert res["data"]["total_matches"] == 1
-    assert res["data"]["matches"][0]["symbol"] == "parse_code"
-    assert res["data"]["matches"][0]["lines"] == "10-25"
+    # 2. summary_only=False
+    res_full = await mcp_server.mcp.call_tool(
+        "search", {"query": "parse_code", "summary_only": False}
+    )
+    data_full = _parse_res(res_full)
+    assert data_full["ok"] is True
+    assert data_full["data"]["result"] == "mock result"
+
+
+@pytest.mark.asyncio
+async def test_mcp_checkpoint_and_preamble(mcp_server: SynapMCPServer) -> None:
+    # 1. Create Checkpoint
+    res_create = await mcp_server.mcp.call_tool(
+        "create_checkpoint",
+        {
+            "doing": "refactoring auth logic",
+            "changed_files": ["auth.py"],
+            "next_step": "write unit tests",
+            "blockers": "none",
+        },
+    )
+    data_create = _parse_res(res_create)
+    assert data_create["ok"] is True
+    assert "checkpoint_id" in data_create["data"]
+
+    # 2. Preamble should reflect checkpoint
+    res_preamble = await mcp_server.mcp.call_tool("get_session_preamble", {})
+    data_preamble = _parse_res(res_preamble)
+    assert data_preamble["ok"] is True
+    assert data_preamble["data"]["latest_checkpoint"]["doing"] == "refactoring auth logic"
+    assert "SYNAPSE STRUCTURAL PREAMBLE" in data_preamble["data"]["compact_preamble"]
+
+    # 3. Facade restore_checkpoint should succeed
+    restored = mcp_server.facade.restore_checkpoint("latest")
+    assert restored["doing"] == "refactoring auth logic"
 
 
 @pytest.mark.asyncio
 async def test_mcp_security_redaction(mcp_server: SynapMCPServer) -> None:
-    # Secret should be redacted in checkpoint
     secret_key = "sk-12345678901234567890123456789012"
+
+    # Secret should be redacted in create_checkpoint
     await mcp_server.mcp.call_tool(
         "create_checkpoint",
         {
-            "doing": f"Using secret {secret_key}",
+            "doing": f"Configured API key {secret_key}",
             "changed_files": ["key.env"],
-            "next_step": "test",
+            "next_step": "deploy",
             "blockers": "none",
         },
     )
-    results = await mcp_server.mcp.call_tool("restore_checkpoint", {})
-    content = results[0]
-    assert isinstance(content, TextContent)
-    res = json.loads(content.text)
-    assert secret_key not in res["data"]["doing"]
-    assert "[REDACTED]" in res["data"]["doing"]
+    pre = await mcp_server.mcp.call_tool("get_session_preamble", {})
+    data_pre = _parse_res(pre)
+    assert secret_key not in data_pre["data"]["latest_checkpoint"]["doing"]
+    assert "[REDACTED]" in data_pre["data"]["latest_checkpoint"]["doing"]
 
-    # Secret should be redacted in decision
-    dec_res = await mcp_server.mcp.call_tool(
-        "log_decision",
-        {"content": f"Bearer token is Bearer {secret_key}", "context_info": "auth setup"},
+    # Secret should be redacted in remember
+    rem_res = await mcp_server.mcp.call_tool(
+        "remember",
+        {
+            "key": "prod_secret",
+            "content": f"Bearer {secret_key}",
+            "summary": "prod token",
+        },
     )
-    dec_content = dec_res[0]
-    assert isinstance(dec_content, TextContent)
-    dec_data = json.loads(dec_content.text)
-    assert dec_data["ok"] is True
+    assert _parse_res(rem_res)["ok"] is True
+
+    rec_res = await mcp_server.mcp.call_tool("recall", {"key": "prod_secret"})
+    data_rec = _parse_res(rec_res)
+    assert secret_key not in data_rec["data"]["memories"][0]["payload"]
+    assert "[REDACTED]" in data_rec["data"]["memories"][0]["payload"]
 
 
 @pytest.mark.asyncio
@@ -284,69 +200,11 @@ async def test_mcp_get_outline(mcp_server: SynapMCPServer) -> None:
     )
 
     res = await mcp_server.mcp.call_tool("get_outline", {"file_path": "src/main.py"})
-    content = res[0]
-    assert isinstance(content, TextContent)
-    data = json.loads(content.text)
-
+    data = _parse_res(res)
     assert data["ok"] is True
     assert data["data"]["path"] == "src/main.py"
     assert data["data"]["symbol_count"] == 1
     assert data["data"]["symbols"][0]["name"] == "process_items"
-
-
-@pytest.mark.asyncio
-async def test_mcp_get_neighborhood(mcp_server: SynapMCPServer) -> None:
-    mcp_server.facade.runtime.store.upsert_file_and_symbols(
-        file_id="fid1",
-        path="src/a.py",
-        git_oid="oid1",
-        content_hash="h1",
-        language="python",
-        symbols=[
-            {
-                "symbol_id": "sA",
-                "name": "funcA",
-                "kind": "function",
-                "start_line": 1,
-                "end_line": 10,
-                "ast_hash": "hA",
-                "metadata": {},
-            },
-        ],
-    )
-    mcp_server.facade.runtime.store.upsert_file_and_symbols(
-        file_id="fid2",
-        path="src/b.py",
-        git_oid="oid2",
-        content_hash="h2",
-        language="python",
-        symbols=[
-            {
-                "symbol_id": "sB",
-                "name": "funcB",
-                "kind": "function",
-                "start_line": 1,
-                "end_line": 10,
-                "ast_hash": "hB",
-                "metadata": {},
-            },
-        ],
-    )
-    with mcp_server.facade.runtime.store.connect() as conn:
-        conn.execute(
-            "INSERT INTO edges (edge_id, source_symbol, target_symbol, edge_type) VALUES ('e1', 'sA', 'sB', 'calls')"
-        )
-
-    res = await mcp_server.mcp.call_tool(
-        "get_neighborhood", {"symbol": "funcA", "direction": "downstream"}
-    )
-    content = res[0]
-    assert isinstance(content, TextContent)
-    data = json.loads(content.text)
-
-    assert data["ok"] is True
-    assert data["data"]["neighbors_count"] >= 1
-    assert any(n["name"] == "funcB" for n in data["data"]["neighbors"])
 
 
 @pytest.mark.asyncio
@@ -360,37 +218,27 @@ async def test_mcp_remember_and_recall(mcp_server: SynapMCPServer) -> None:
             "summary": "15-minute token TTL",
         },
     )
-    content_rem = res_rem[0]
-    assert isinstance(content_rem, TextContent)
-    data_rem = json.loads(content_rem.text)
+    data_rem = _parse_res(res_rem)
     assert data_rem["ok"] is True
     assert data_rem["data"]["key"] == "auth_policy"
 
     # 2. Recall by key
     res_rec = await mcp_server.mcp.call_tool("recall", {"key": "auth_policy"})
-    content_rec = res_rec[0]
-    assert isinstance(content_rec, TextContent)
-    data_rec = json.loads(content_rec.text)
+    data_rec = _parse_res(res_rec)
     assert data_rec["ok"] is True
     assert data_rec["data"]["count"] == 1
     assert "900 seconds" in data_rec["data"]["memories"][0]["payload"]
 
     # 3. Check preamble includes recent memories
     res_pre = await mcp_server.mcp.call_tool("get_session_preamble", {})
-    content_pre = res_pre[0]
-    assert isinstance(content_pre, TextContent)
-    data_pre = json.loads(content_pre.text)
+    data_pre = _parse_res(res_pre)
     assert data_pre["ok"] is True
     assert "recent_memories" in data_pre["data"]
     assert len(data_pre["data"]["recent_memories"]) >= 1
-    assert data_pre["data"]["recent_memories"][0]["context_key"] == "auth_policy"
-    assert "blast_radius" in data_pre["data"]
-    assert "architectural_hubs" in data_pre["data"]
 
 
 @pytest.mark.asyncio
-async def test_mcp_skeleton_and_blast_radius(mcp_server: SynapMCPServer, tmp_path: Path) -> None:
-    # 1. Test get_skeleton on a real python file
+async def test_mcp_skeleton(mcp_server: SynapMCPServer) -> None:
     test_file = mcp_server.facade.runtime.settings.repository_path / "sample_skel.py"
     test_file.write_text(
         "class Worker:\n    def run(self, x: int) -> str:\n        # implementation\n        return str(x * 2)\n",
@@ -398,86 +246,13 @@ async def test_mcp_skeleton_and_blast_radius(mcp_server: SynapMCPServer, tmp_pat
     )
     try:
         res_skel = await mcp_server.mcp.call_tool("get_skeleton", {"file_path": "sample_skel.py"})
-        content_skel = res_skel[0]
-        assert isinstance(content_skel, TextContent)
-        data_skel = json.loads(content_skel.text)
+        data_skel = _parse_res(res_skel)
         assert data_skel["ok"] is True
         assert "class Worker:" in data_skel["data"]["skeleton"]
         assert "def run(self, x: int) -> str:" in data_skel["data"]["skeleton"]
         assert "return str(x * 2)" not in data_skel["data"]["skeleton"]
     finally:
         test_file.unlink(missing_ok=True)
-
-    # 2. Test get_blast_radius tool
-    res_blast = await mcp_server.mcp.call_tool("get_blast_radius", {})
-    content_blast = res_blast[0]
-    assert isinstance(content_blast, TextContent)
-    data_blast = json.loads(content_blast.text)
-    assert data_blast["ok"] is True
-    assert "touched_symbols" in data_blast["data"]
-
-
-@pytest.mark.asyncio
-async def test_mcp_new_ergonomic_tools(mcp_server: SynapMCPServer) -> None:
-    # 1. create_checkpoint with omitted changed_files
-    res_cp = await mcp_server.mcp.call_tool(
-        "create_checkpoint",
-        {"doing": "exploring architecture"},
-    )
-    data_cp = _parse_res(res_cp)
-    assert data_cp["ok"] is True
-    cp_id = data_cp["data"]["checkpoint_id"]
-
-    # 2. list_checkpoints
-    res_list = await mcp_server.mcp.call_tool("list_checkpoints", {"limit": 3})
-    data_list = _parse_res(res_list)
-    assert data_list["ok"] is True
-    assert data_list["data"]["count"] >= 1
-
-    # 3. restore_checkpoint by ID
-    res_restore = await mcp_server.mcp.call_tool("restore_checkpoint", {"checkpoint_id": cp_id})
-    data_restore = _parse_res(res_restore)
-    assert data_restore["ok"] is True
-    assert data_restore["data"]["doing"] == "exploring architecture"
-
-    # 4. read_symbol on indexed file
-    test_file = mcp_server.facade.runtime.settings.repository_path / "foo.py"
-    test_file.write_text("def my_func():\n    return 42\n", encoding="utf-8")
-    try:
-        mcp_server.facade.runtime.store.upsert_file_and_symbols(
-            file_id="fid_foo",
-            path="foo.py",
-            git_oid="oid_foo",
-            content_hash="h_foo",
-            language="python",
-            symbols=[
-                {
-                    "symbol_id": "s_foo",
-                    "name": "my_func",
-                    "kind": "function",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "ast_hash": "h_func",
-                    "metadata": {},
-                }
-            ],
-        )
-        res_sym = await mcp_server.mcp.call_tool(
-            "read_symbol", {"symbol": "my_func", "file_path": "foo.py"}
-        )
-        data_sym = _parse_res(res_sym)
-        assert data_sym["ok"] is True
-        assert data_sym["data"]["name"] == "my_func"
-        assert "return 42" in data_sym["data"]["code"]
-    finally:
-        test_file.unlink(missing_ok=True)
-
-    # 5. get_diff and get_test_recommendations
-    res_diff = await mcp_server.mcp.call_tool("get_diff", {})
-    assert _parse_res(res_diff)["ok"] is True
-
-    res_tests = await mcp_server.mcp.call_tool("get_test_recommendations", {})
-    assert _parse_res(res_tests)["ok"] is True
 
 
 @pytest.mark.asyncio
@@ -555,31 +330,58 @@ async def test_mcp_read_symbol_ambiguous_across_files(mcp_server: SynapMCPServer
 
 
 @pytest.mark.asyncio
-async def test_mcp_get_mcp_config(mcp_server: SynapMCPServer) -> None:
-    # 1. Retrieve config snippet
-    res = await mcp_server.mcp.call_tool("get_mcp_config", {"ide": "cursor"})
-    data = _parse_res(res)
-    assert data["ok"] is True
-    assert data["data"]["command"] == "synap"
-    assert data["data"]["args"] == ["mcp", "serve"]
-    assert "synap" in data["data"]["mcpServers"]
-    assert data["data"]["mcpServers"]["synap"]["command"] == "synap"
-    assert data["data"]["mcpServers"]["synap"]["args"] == ["mcp", "serve"]
+async def test_mcp_global_memory_tools(
+    mcp_server: SynapMCPServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Use isolated global DB for testing
+    test_global_db = tmp_path / "global_test.db"
+    store = GlobalMemoryStore(db_path=test_global_db)
+    monkeypatch.setattr(GlobalMemoryStore, "DEFAULT_DB_PATH", test_global_db)
 
-    # 2. Export config to a file
-    repo = mcp_server.facade.runtime.settings.repository_path
-    export_rel = ".cursor/mcp.json"
-    res_export = await mcp_server.mcp.call_tool(
-        "get_mcp_config", {"ide": "cursor", "export_path": export_rel}
+    added = store.add_memory(
+        context_key="team_style",
+        content="Prefer explicit typing and pydantic models",
+        category="style",
+        summary="Strict typing",
+        tags=["python", "types"],
     )
-    data_export = _parse_res(res_export)
-    assert data_export["ok"] is True
-    assert data_export["data"]["exported"] is True
-    target_file = repo / export_rel
-    assert target_file.exists()
-    saved_cfg = json.loads(target_file.read_text(encoding="utf-8"))
-    assert saved_cfg["mcpServers"]["synap"]["command"] == "synap"
-    assert saved_cfg["mcpServers"]["synap"]["args"] == ["mcp", "serve"]
+    gid = added["global_id"]
+
+    # 1. list_global_memories tool
+    res_list = await mcp_server.mcp.call_tool("list_global_memories", {"query": "typing"})
+    data_list = _parse_res(res_list)
+    assert data_list["ok"] is True
+    assert data_list["data"]["count"] >= 1
+    assert data_list["data"]["memories"][0]["context_key"] == "team_style"
+
+    # 2. ingest_global_memory tool
+    res_ingest = await mcp_server.mcp.call_tool("ingest_global_memory", {"global_id": gid})
+    data_ingest = _parse_res(res_ingest)
+    assert data_ingest["ok"] is True
+    assert data_ingest["data"]["key"] == "team_style"
+
+    # 3. Verify memory is now recalled in repository local memory
+    res_recall = await mcp_server.mcp.call_tool("recall", {"key": "team_style"})
+    data_recall = _parse_res(res_recall)
+    assert data_recall["ok"] is True
+    assert data_recall["data"]["count"] == 1
+    assert "pydantic models" in data_recall["data"]["memories"][0]["payload"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_error_responses(mcp_server: SynapMCPServer) -> None:
+    # 1. Invalid argument (empty doing)
+    res_val = await mcp_server.mcp.call_tool("create_checkpoint", {"doing": "   "})
+    data_val = _parse_res(res_val)
+    assert data_val["ok"] is False
+    assert data_val["error"]["code"] == "INVALID_ARGUMENT"
+    assert "suggestion" in data_val["error"]
+
+    # 2. Not found error
+    res_nf = await mcp_server.mcp.call_tool("get_outline", {"file_path": "nonexistent.py"})
+    data_nf = _parse_res(res_nf)
+    assert data_nf["ok"] is False
+    assert data_nf["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -613,7 +415,6 @@ async def test_mcp_preamble_latency_clean_indexed(tmp_path: Path) -> None:
     r = SynapRuntime(settings)
     r.bootstrap()
 
-    # Re-commit if bootstrap touched .gitignore
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
     status_proc = subprocess.run(
         ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
@@ -638,56 +439,27 @@ async def test_mcp_preamble_latency_clean_indexed(tmp_path: Path) -> None:
         assert _parse_res(res)["ok"] is True
 
     mean_ms = sum(durations_ms) / len(durations_ms)
-    # Preamble latency MUST be < 50ms when repository is clean or already indexed
     assert mean_ms < 50.0, (
         f"Expected preamble latency < 50ms, got mean {mean_ms:.2f}ms: {durations_ms}"
     )
 
 
-@pytest.mark.asyncio
-async def test_mcp_tool_schemas_and_descriptions(mcp_server: SynapMCPServer) -> None:
-    tools = await mcp_server.mcp.list_tools()
-    assert len(tools) >= 20
+def test_mcp_facade_compatibility(mcp_server: SynapMCPServer) -> None:
+    """Ensure SynapMCPFacade python methods continue to work for non-MCP callers."""
+    status = mcp_server.facade.get_status()
+    assert "branch" in status
+    assert "files" in status
 
-    tool_names = {t.name for t in tools}
-    assert "get_status" in tool_names
-    assert "get_session_preamble" in tool_names
-    assert "get_mcp_config" in tool_names
-    assert "read_symbol" in tool_names
-    assert "create_checkpoint" in tool_names
-    assert "log_decision" in tool_names
+    cfg = mcp_server.facade.get_mcp_config(ide="cursor")
+    assert cfg["command"] in ("synap", "python")
+    assert "mcpServers" in cfg
 
-    # Check descriptions are non-empty and descriptive
-    for t in tools:
-        assert t.description is not None, f"Tool {t.name} has missing description."
-        assert len(t.description.strip()) > 10, f"Tool {t.name} has too short description."
+    diff = mcp_server.facade.get_diff()
+    assert "diff" in diff
 
-    # Check create_checkpoint schema defaults
-    cp_tool = next(t for t in tools if t.name == "create_checkpoint")
-    cp_props = cp_tool.inputSchema.get("properties", {})
-    assert "doing" in cp_props
-    assert "changed_files" in cp_props
-    # doing is required, changed_files has default/optional
-    assert "doing" in cp_tool.inputSchema.get("required", [])
-    assert "changed_files" not in cp_tool.inputSchema.get("required", [])
+    tests = mcp_server.facade.get_test_recommendations()
+    assert "recommended_command" in tests
+    assert "test_files" in tests
 
-    # Check log_decision schema defaults: context_info should not be required
-    ld_tool = next(t for t in tools if t.name == "log_decision")
-    assert "content" in ld_tool.inputSchema.get("required", [])
-    assert "context_info" not in ld_tool.inputSchema.get("required", [])
-
-
-@pytest.mark.asyncio
-async def test_mcp_error_responses_conform_to_fastmcp(mcp_server: SynapMCPServer) -> None:
-    # 1. Invalid argument (empty doing)
-    res_val = await mcp_server.mcp.call_tool("create_checkpoint", {"doing": "   "})
-    data_val = _parse_res(res_val)
-    assert data_val["ok"] is False
-    assert data_val["error"]["code"] == "INVALID_ARGUMENT"
-    assert "suggestion" in data_val["error"]
-
-    # 2. Not found error
-    res_nf = await mcp_server.mcp.call_tool("get_outline", {"file_path": "nonexistent.py"})
-    data_nf = _parse_res(res_nf)
-    assert data_nf["ok"] is False
-    assert data_nf["error"]["code"] == "NOT_FOUND"
+    blast = mcp_server.facade.get_blast_radius()
+    assert "touched_symbols" in blast

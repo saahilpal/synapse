@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import json
 import multiprocessing
+import re
 import subprocess
 import time
 import uuid
@@ -27,6 +28,7 @@ from synap_git.indexer.wiki import WikiEngine
 from synap_git.parser.registry import CodeParserRegistry
 from synap_git.provider.factory import get_embed_provider, get_llm_provider
 from synap_git.retrieval.engine import HybridRetrievalEngine
+from synap_git.security.sanitizer import IngestionSanitizer
 from synap_git.storage.sqlite import SynapStore
 from synap_git.utils.serialization import stable_hash
 
@@ -151,6 +153,16 @@ def _is_stdlib_module(mod: str) -> bool:
     return root in STDLIB_MODULES or mod in STDLIB_MODULES
 
 
+_CONFLICT_MARKER_REGEX = re.compile(r"^(<{7}|={7}|>{7})(?:\s.*)?$", re.MULTILINE)
+
+
+def _has_conflict_markers(text: str) -> bool:
+    """Check if file content contains unresolved git conflict markers."""
+    if "<<<<<<<" not in text:
+        return False
+    return bool(_CONFLICT_MARKER_REGEX.search(text))
+
+
 def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
     path, rel_path = args
     registry = CodeParserRegistry()
@@ -158,6 +170,14 @@ def _parse_worker(args: tuple[Path, str]) -> dict[str, Any]:
         content = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         content = ""
+    if _has_conflict_markers(content):
+        return {
+            "path": rel_path,
+            "language": "unknown",
+            "symbols": [],
+            "imports": [],
+            "syntax_error": "conflict_markers_detected",
+        }
     res = registry.parse(path, relative_path=rel_path, text=content)
     return {
         "path": res.path,
@@ -382,38 +402,69 @@ class SynapRuntime:
         except Exception as e:
             self.logger.warning("failed_to_auto_protect_synap", error=str(e))
 
+    def _is_in_progress_operation(self, git_state: GitState) -> bool:
+        """Check whether merge, rebase, cherry-pick, revert, bisect, or unmerged conflicts are in progress."""
+        dirs = GitRepository.resolve_git_dir(self.git.path)
+        git_dir = dirs[0] if dirs else self.git.path / ".git"
+        common_dir = dirs[1] if dirs else git_dir
+
+        merge_conflict = (
+            git_state.merge_in_progress
+            or (git_dir / "MERGE_HEAD").exists()
+            or (git_dir / "CHERRY_PICK_HEAD").exists()
+            or (git_dir / "REVERT_HEAD").exists()
+            or (git_dir / "AUTO_MERGE").exists()
+            or (common_dir / "MERGE_HEAD").exists()
+            or (common_dir / "AUTO_MERGE").exists()
+        )
+        rebase_in_progress = (
+            git_state.rebase_in_progress
+            or (git_dir / "rebase-merge").exists()
+            or (git_dir / "rebase-apply").exists()
+            or (common_dir / "rebase-merge").exists()
+            or (common_dir / "rebase-apply").exists()
+        )
+        bisect_in_progress = (
+            git_state.bisect_in_progress
+            or (git_dir / "BISECT_LOG").exists()
+            or (git_dir / "BISECT_START").exists()
+            or (common_dir / "BISECT_LOG").exists()
+            or (common_dir / "BISECT_START").exists()
+        )
+
+        unmerged_conflict = False
+        if git_state.is_repository:
+            try:
+                res = subprocess.run(
+                    ["git", "ls-files", "-u"],
+                    cwd=self.settings.repository_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                )
+                if res.returncode == 0 and bool(res.stdout.strip()):
+                    unmerged_conflict = True
+            except Exception:
+                pass
+
+        if merge_conflict or rebase_in_progress or bisect_in_progress or unmerged_conflict:
+            self.logger.warning(
+                "indexing_suspended_in_progress_operation",
+                merge=merge_conflict or unmerged_conflict,
+                rebase=rebase_in_progress,
+                bisect=bisect_in_progress,
+                unmerged=unmerged_conflict,
+            )
+            return True
+        return False
+
     def bootstrap(self, *, force: bool = False) -> str | None:
         self.initialize_storage()
         self._auto_protect_synap()
         git_state = self.git.state(force=True)
         branch = git_state.effective_branch
 
-        dirs = GitRepository.resolve_git_dir(self.git.path)
-        git_dir = dirs[0] if dirs else self.git.path / ".git"
-        merge_conflict = (
-            git_state.merge_in_progress
-            or (git_dir / "MERGE_HEAD").exists()
-            or (git_dir / "CHERRY_PICK_HEAD").exists()
-            or (git_dir / "REVERT_HEAD").exists()
-        )
-        rebase_in_progress = (
-            git_state.rebase_in_progress
-            or (git_dir / "rebase-merge").exists()
-            or (git_dir / "rebase-apply").exists()
-        )
-        bisect_in_progress = (
-            git_state.bisect_in_progress
-            or (git_dir / "BISECT_LOG").exists()
-            or (git_dir / "BISECT_START").exists()
-        )
-
-        if merge_conflict or rebase_in_progress or bisect_in_progress:
-            self.logger.warning(
-                "indexing_suspended_in_progress_operation",
-                merge=merge_conflict,
-                rebase=rebase_in_progress,
-                bisect=bisect_in_progress,
-            )
+        if self._is_in_progress_operation(git_state):
             return git_state.head_commit
 
         last_indexed = self.store.get_last_indexed_commit()
@@ -486,9 +537,37 @@ class SynapRuntime:
 
         why_failed = f"Automated revert analysis: {summary}"
 
+        clean_what_failed, clean_why_failed = IngestionSanitizer.sanitize_lesson(
+            what_failed, why_failed
+        )
+
         now = int(datetime.now(UTC).timestamp())
 
         with self.store.connect() as conn:
+            # Deduplication check: avoid duplicate lessons for the same revert commit
+            if revert_commit != "unknown":
+                existing = conn.execute(
+                    "SELECT lesson_id FROM lessons WHERE revert_commit = ?",
+                    (revert_commit,),
+                ).fetchone()
+            else:
+                existing = conn.execute(
+                    "SELECT lesson_id FROM lessons WHERE revert_commit = 'unknown' AND reverted_from = ? AND what_failed = ?",
+                    (reverted_from, clean_what_failed),
+                ).fetchone()
+
+            if existing:
+                self.logger.info(
+                    "lesson_duplicate_skipped",
+                    revert_commit=revert_commit,
+                    reverted_from=reverted_from,
+                    lesson_id=existing["lesson_id"]
+                    if hasattr(existing, "__getitem__")
+                    else existing[0],
+                )
+                self.index_repository(git_state=current_state)
+                return
+
             conn.execute(
                 """
                 INSERT INTO lessons (lesson_id, branch, revert_commit, reverted_from, what_failed, why_failed, files_affected, status, created_at, expires_at)
@@ -499,8 +578,8 @@ class SynapRuntime:
                     current_state.effective_branch,
                     revert_commit,
                     reverted_from,
-                    what_failed,
-                    why_failed,
+                    clean_what_failed,
+                    clean_why_failed,
                     json.dumps(affected),
                     now,
                     now + (86400 * self.settings.lesson_expiry_days),
@@ -516,32 +595,7 @@ class SynapRuntime:
         git_state = git_state or self.git.state(force=True)
         branch = git_state.effective_branch
 
-        dirs = GitRepository.resolve_git_dir(self.git.path)
-        git_dir = dirs[0] if dirs else self.git.path / ".git"
-        merge_conflict = (
-            git_state.merge_in_progress
-            or (git_dir / "MERGE_HEAD").exists()
-            or (git_dir / "CHERRY_PICK_HEAD").exists()
-            or (git_dir / "REVERT_HEAD").exists()
-        )
-        rebase_in_progress = (
-            git_state.rebase_in_progress
-            or (git_dir / "rebase-merge").exists()
-            or (git_dir / "rebase-apply").exists()
-        )
-        bisect_in_progress = (
-            git_state.bisect_in_progress
-            or (git_dir / "BISECT_LOG").exists()
-            or (git_dir / "BISECT_START").exists()
-        )
-
-        if merge_conflict or rebase_in_progress or bisect_in_progress:
-            self.logger.warning(
-                "indexing_suspended_in_progress_operation",
-                merge=merge_conflict,
-                rebase=rebase_in_progress,
-                bisect=bisect_in_progress,
-            )
+        if self._is_in_progress_operation(git_state):
             return git_state.head_commit
 
         # Determine last commit indexed in SQLite
@@ -1020,6 +1074,25 @@ class SynapRuntime:
 
                 content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
+
+                if _has_conflict_markers(content):
+                    self.logger.warning("conflict_markers_detected_in_file", path=rel_path)
+                    self.store.upsert_file_and_symbols(
+                        file_id=file_id_hash,
+                        path=rel_path,
+                        git_oid=git_oids.get(rel_path, ""),
+                        content_hash=content_hash,
+                        language="unknown",
+                        symbols=[],
+                    )
+                    if self.settings.enable_file_wiki:
+                        self.store.set_wiki_status(rel_path, None, "stale")
+                    with self.store.connect() as conn:
+                        conn.execute(
+                            "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                            (file_id_hash,),
+                        )
+                    continue
 
                 parse_result = registry.parse(p, relative_path=rel_path, text=content)
                 symbols_list = [

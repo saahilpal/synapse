@@ -256,7 +256,7 @@ class SynapMCPFacade:
         query: str,
         max_tokens: int = 4000,
         synthesize_answer: bool = False,
-        summary_only: bool = False,
+        summary_only: bool = True,
     ) -> dict[str, Any]:
         sig = inspect.signature(self.runtime.query_hybrid)
         if "synthesize_answer" in sig.parameters:
@@ -709,6 +709,44 @@ class SynapMCPFacade:
             "lines": len(skeleton_text.splitlines()),
         }
 
+    def list_global_memories(
+        self, query: str = "", tag: str = "", limit: int = 10
+    ) -> dict[str, Any]:
+        from synap_git.storage.global_memory import GlobalMemoryStore
+
+        store = GlobalMemoryStore()
+        memories = store.list_memories(query=query, tag=tag, limit=limit)
+        return {"memories": memories, "count": len(memories)}
+
+    def ingest_global_memory(self, global_id: str, as_category: str = "note") -> dict[str, Any]:
+        from synap_git.storage.global_memory import GlobalMemoryStore
+
+        store = GlobalMemoryStore()
+        m = store.get_memory(global_id)
+        if not m:
+            matches = store.list_memories(query=global_id, limit=2)
+            if matches and matches[0]["global_id"].startswith(global_id):
+                m = matches[0]
+        if not m:
+            raise ValueError(f"Global memory '{global_id}' not found.")
+
+        memory_id = str(uuid.uuid4())
+        summary = f"[From Global {m['global_id'][:8]}] {m.get('summary', '')}".strip()
+        self.runtime.store.store_memory(
+            memory_id=memory_id,
+            context_key=m["context_key"],
+            payload=m["content"],
+            summary=summary,
+        )
+        store.record_usage(m["global_id"])
+        return {
+            "status": "success",
+            "ingested_id": memory_id,
+            "global_id": m["global_id"],
+            "key": m["context_key"],
+            "category": as_category,
+        }
+
 
 class SynapMCPServer:
     """Exposes Synap tools to AI agents via MCP Stdio."""
@@ -794,7 +832,7 @@ class SynapMCPServer:
                         )
                     elif "stale" in msg.lower():
                         code = "INDEX_STALE"
-                        suggestion = "Run `synap reindex` or wait for daemon."
+                        suggestion = "Run `synap index` or wait for daemon."
                     elif "no checkpoint" in msg.lower() or "not found" in msg.lower():
                         code = "NOT_FOUND"
                         suggestion = "Ensure the requested item exists in repository index."
@@ -847,105 +885,18 @@ class SynapMCPServer:
 
         @self.mcp.tool()
         @_wrap
-        def get_status() -> dict[str, Any]:
-            """Get current repository indexing status, active Git commit, branch, and indexed symbol/file counts."""
-            return self.facade.get_status()
-
-        @self.mcp.tool()
-        @_wrap
         def get_session_preamble() -> dict[str, Any]:
             """Call this tool FIRST at session start or beginning of a task. Returns essential repository context: active branch, latest checkpoint, approved lessons (critical negative constraints), architectural hubs (PageRank), git blast radius, and working memory."""
             return self.facade.get_session_preamble()
 
         @self.mcp.tool()
         @_wrap
-        def get_mcp_config(ide: str = "generic", export_path: str = "") -> dict[str, Any]:
-            """Retrieve or export the exact JSON configuration block needed to connect coding agents (Cursor, Claude Code, Windsurf, Cline, Aider) to Synap.
-            ide: Target IDE or tool format ('generic', 'cursor', 'windsurf', 'claude', 'cline', 'aider'). Default is 'generic'.
-            export_path: Optional file path to export/write configuration JSON into."""
-            return self.facade.get_mcp_config(ide=ide, export_path=export_path)
-
-        @self.mcp.tool()
-        @_wrap
-        def search(
-            query: str, max_tokens: int = 4000, summary_only: bool = False
-        ) -> dict[str, Any]:
-            """Search repository context. Set summary_only=True to return lightweight match summaries (progressive disclosure) instead of full context blocks.
+        def search(query: str, summary_only: bool = True, max_tokens: int = 4000) -> dict[str, Any]:
+            """Search repository context. By default returns lightweight match summaries (progressive disclosure) instead of full context blocks (85% token savings).
             query: Natural language query, symbol name, or concept to search.
-            max_tokens: Maximum token budget for returned context (default: 4000).
-            summary_only: If True, returns concise symbol hits and line ranges (85% token savings)."""
-            return self.facade.search(query, max_tokens, summary_only=summary_only)
-
-        @self.mcp.tool()
-        @_wrap
-        def create_checkpoint(
-            doing: str,
-            changed_files: list[str] | None = None,
-            next_step: str = "",
-            blockers: str = "none",
-        ) -> dict[str, Any]:
-            """Save the current agent's thought process, working state, and intentions as a checkpoint.
-            doing: Summary of currently active task or implementation focus.
-            changed_files: Optional list of modified file paths. If omitted, dirty/uncommitted git files are auto-detected.
-            next_step: Immediate next step or milestone to execute.
-            blockers: Any blockers, failures, or constraints encountered (default: 'none')."""
-            return self.facade.create_checkpoint(doing, changed_files, next_step, blockers)
-
-        @self.mcp.tool()
-        @_wrap
-        def restore_checkpoint(checkpoint_id: str = "latest") -> dict[str, Any]:
-            """Restore the latest checkpoint or a specific checkpoint by ID for the current branch to resume context.
-            checkpoint_id: Checkpoint UUID, or 'latest' (default) to restore the most recent checkpoint."""
-            return self.facade.restore_checkpoint(checkpoint_id)
-
-        @self.mcp.tool()
-        @_wrap
-        def list_checkpoints(limit: int = 5) -> dict[str, Any]:
-            """List recent checkpoints for the current branch to inspect prior work, progression, and decisions.
-            limit: Maximum number of recent checkpoints to return (default: 5)."""
-            return self.facade.list_checkpoints(limit=limit)
-
-        @self.mcp.tool()
-        @_wrap
-        def log_decision(content: str, context_info: str = "") -> dict[str, Any]:
-            """Log an architectural or technical decision to the project's persistent decision log.
-            content: The decision made (e.g., 'Use SQLite WAL mode for concurrent queries').
-            context_info: Optional background, trade-offs, or motivation for this decision."""
-            return self.facade.log_decision(content, context_info)
-
-        @self.mcp.tool()
-        @_wrap
-        def verify_system() -> dict[str, Any]:
-            """Verify database integrity, Git repository state, and index consistency."""
-            return self.facade.verify_system()
-
-        @self.mcp.tool()
-        @_wrap
-        def submit_lesson_analysis(lesson_id: str, why_failed: str) -> dict[str, Any]:
-            """Submit an analysis for a pending lesson (e.g., after a revert). Lesson remains pending until human approval.
-            lesson_id: ID of the pending lesson to update.
-            why_failed: Root-cause analysis explaining failure mechanics and prevention."""
-            return self.facade.submit_lesson_analysis(lesson_id, why_failed)
-
-        @self.mcp.tool()
-        @_wrap
-        def get_approved_memory() -> dict[str, Any]:
-            """Retrieve APPROVED memory lessons and negative constraints that MUST be strictly adhered to."""
-            return self.facade.get_approved_memory()
-
-        @self.mcp.tool()
-        @_wrap
-        def get_pending_memory() -> dict[str, Any]:
-            """Retrieve PENDING memory lessons currently awaiting human review."""
-            return self.facade.get_pending_memory()
-
-        @self.mcp.tool()
-        @_wrap
-        def signal_low_context(token_count: int, capacity: int) -> dict[str, Any]:
-            """Signal that the agent is approaching context limits. Triggers a recommended checkpoint if over threshold.
-            token_count: Current number of tokens consumed in conversation context.
-            capacity: Total token capacity limit of the current model context window."""
-            return self.facade.signal_low_context(token_count, capacity)
+            summary_only: If True (default), returns concise symbol hits and line ranges (85% token savings).
+            max_tokens: Maximum token budget for returned context (default: 4000)."""
+            return self.facade.search(query, max_tokens=max_tokens, summary_only=summary_only)
 
         @self.mcp.tool()
         @_wrap
@@ -956,37 +907,10 @@ class SynapMCPServer:
 
         @self.mcp.tool()
         @_wrap
-        def get_neighborhood(
-            symbol: str, file_path: str = "", direction: str = "both", depth: int = 2
-        ) -> dict[str, Any]:
-            """Traverse caller/callee and import dependency graph for a symbol or function.
-            symbol: Target symbol name or symbol ID to traverse from.
-            file_path: Optional file path to disambiguate symbols with identical names across files.
-            direction: Traversal direction: 'upstream' (callers), 'downstream' (callees), or 'both' (default).
-            depth: Graph traversal distance (default: 2, recommended: 1-3)."""
-            return self.facade.get_neighborhood(
-                symbol, file_path=file_path or None, direction=direction, depth=depth
-            )
-
-        @self.mcp.tool()
-        @_wrap
-        def get_callers(symbol: str, file_path: str = "") -> dict[str, Any]:
-            """Find all upstream callers and functions that depend on this symbol (inbound blast radius).
-            symbol: Target symbol name to find incoming callers for.
-            file_path: Optional file path to disambiguate symbols with identical names."""
-            return self.facade.get_neighborhood(
-                symbol=symbol, file_path=file_path or None, direction="upstream", depth=1
-            )
-
-        @self.mcp.tool()
-        @_wrap
-        def get_callees(symbol: str, file_path: str = "") -> dict[str, Any]:
-            """Find all downstream functions, symbols, and imports that this symbol calls or depends upon.
-            symbol: Target symbol name to find outgoing calls for.
-            file_path: Optional file path to disambiguate symbols with identical names."""
-            return self.facade.get_neighborhood(
-                symbol=symbol, file_path=file_path or None, direction="downstream", depth=1
-            )
+        def get_skeleton(file_path: str) -> dict[str, Any]:
+            """Get structural code skeleton of a file (stripping function/method bodies while preserving imports, signatures, types, and docstrings). Saves 80-90% tokens.
+            file_path: Relative repository path of the source file to skeletonize."""
+            return self.facade.get_skeleton(file_path)
 
         @self.mcp.tool()
         @_wrap
@@ -998,18 +922,20 @@ class SynapMCPServer:
 
         @self.mcp.tool()
         @_wrap
-        def get_diff(file_path: str = "", staged: bool = False) -> dict[str, Any]:
-            """Get raw unified git diff of uncommitted changes. Optionally filter by file_path or inspect staged changes.
-            file_path: Optional relative file path to inspect diff for a single file.
-            staged: If True, shows staged changes; otherwise shows unstaged working tree changes."""
-            return self.facade.get_diff(file_path=file_path, staged=staged)
-
-        @self.mcp.tool()
-        @_wrap
-        def get_test_recommendations(file_path: str = "") -> dict[str, Any]:
-            """Recommend specific pytest test files and commands to execute for a modified file or current git diff.
-            file_path: Optional file path to evaluate. If omitted, dirty files in working tree are analyzed."""
-            return self.facade.get_test_recommendations(file_path=file_path)
+        def create_checkpoint(
+            doing: str,
+            next_step: str = "",
+            blockers: str = "none",
+            changed_files: list[str] | None = None,
+        ) -> dict[str, Any]:
+            """Save the current agent's thought process, working state, and intentions as a checkpoint.
+            doing: Summary of currently active task or implementation focus.
+            next_step: Immediate next step or milestone to execute.
+            blockers: Any blockers, failures, or constraints encountered (default: 'none').
+            changed_files: Optional list of modified file paths. If omitted, dirty/uncommitted git files are auto-detected."""
+            return self.facade.create_checkpoint(
+                doing, changed_files=changed_files, next_step=next_step, blockers=blockers
+            )
 
         @self.mcp.tool()
         @_wrap
@@ -1030,16 +956,20 @@ class SynapMCPServer:
 
         @self.mcp.tool()
         @_wrap
-        def get_blast_radius() -> dict[str, Any]:
-            """Analyze the blast radius of current uncommitted git changes, identifying modified symbols and impacted callers and tests."""
-            return self.facade.get_blast_radius()
+        def list_global_memories(query: str = "", tag: str = "", limit: int = 10) -> dict[str, Any]:
+            """Inspect cross-project global developer habits and preferences (~/.synap/global_memory.db). Global memories are never automatically injected into repo prompts.
+            query: Optional search keyword in context_key, content, or summary.
+            tag: Optional tag filter.
+            limit: Maximum number of global memories to return (default: 10)."""
+            return self.facade.list_global_memories(query=query, tag=tag, limit=limit)
 
         @self.mcp.tool()
         @_wrap
-        def get_skeleton(file_path: str) -> dict[str, Any]:
-            """Get structural code skeleton of a file (stripping function/method bodies while preserving imports, signatures, types, and docstrings). Saves 80-90% tokens.
-            file_path: Relative repository path of the source file to skeletonize."""
-            return self.facade.get_skeleton(file_path)
+        def ingest_global_memory(global_id: str, as_category: str = "note") -> dict[str, Any]:
+            """Explicitly promote a cross-project global memory into this repository's local context memory.
+            global_id: Unique global memory identifier (UUID or prefix).
+            as_category: Local category assignment (e.g. 'note', 'habit', 'decision')."""
+            return self.facade.ingest_global_memory(global_id=global_id, as_category=as_category)
 
     async def run(self) -> None:
         await self.mcp.run_stdio_async()

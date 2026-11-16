@@ -81,6 +81,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/synap_git"]
+artifacts = ["src/synap_git/resources/*"]
 
 [tool.ruff]
 line-length = 100

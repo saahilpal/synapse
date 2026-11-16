@@ -251,7 +251,7 @@ def test_linear_migration_ladder_v1_to_v6_covering_indexes(tmp_path: Path) -> No
 
         with store.connect() as conn:
             final_version = conn.execute("PRAGMA user_version").fetchone()[0]
-            assert final_version == 6, f"Expected version 6 after migration from {start_ver}"
+            assert final_version == 7, f"Expected version 7 after migration from {start_ver}"
 
             index_rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='index'"

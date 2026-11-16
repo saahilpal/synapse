@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import pkgutil
 import re
 import tomllib
 from pathlib import Path
@@ -127,3 +129,33 @@ def test_non_git_directory_help_and_version(tmp_path: Path) -> None:
         assert res_help.exit_code == 0
         clean_help = " ".join(re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res_help.output).split())
         assert "Usage: synap" in clean_help or "synap" in clean_help
+
+
+def test_dead_code_validator_removal_and_security_exports() -> None:
+    """Verify that unused InputValidator was removed cleanly and security exports remain valid."""
+    import synap_git.security as sec
+
+    assert hasattr(sec, "SecretRedactor")
+    assert hasattr(sec, "IngestionSanitizer")
+    assert not hasattr(sec, "InputValidator")
+    assert "InputValidator" not in getattr(sec, "__all__", [])
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("synap_git.security.validator")
+
+
+def test_accidental_synap_directory_not_present() -> None:
+    """Verify that accidental untracked .synap directory in src/synap_git/ does not exist."""
+    repo_root = Path(__file__).resolve().parent.parent
+    accidental_dir = repo_root / "src" / "synap_git" / ".synap"
+    assert not accidental_dir.exists(), f"Accidental directory {accidental_dir} must not exist"
+
+
+def test_all_submodules_import_cleanly() -> None:
+    """Verify that removing dead code didn't break any internal module imports across the package."""
+    import synap_git
+
+    for _, modname, _ in pkgutil.walk_packages(synap_git.__path__, prefix=synap_git.__name__ + "."):
+        # Ensure every module imports without error
+        imported = importlib.import_module(modname)
+        assert imported is not None
