@@ -5,6 +5,7 @@ import json
 import math
 import re
 import sqlite3
+import struct
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -12,11 +13,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import numpy as np
 import structlog
 
 from synap_git.storage.sqlite import SynapStore
 
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
+
+HAS_NUMPY: bool = bool(getattr(np, "asarray", None))
 logger = structlog.get_logger()
 
 
@@ -182,38 +188,64 @@ class MemoryLifecycleEngine:
 
         # Stage 2: Cosine thresholding
         if candidate_vector is not None and len(candidate_vector) > 0:
-            q_vec = np.asarray(candidate_vector, dtype=np.float32)
-            q_norm = np.linalg.norm(q_vec)
-            if q_norm > 0:
-                q_vec = q_vec / q_norm
-
             best_sim = -1.0
             best_id = None
-            for mem in existing_memories:
-                mem_id = (
-                    mem.get("decision_id")
-                    or mem.get("lesson_id")
-                    or mem.get("id")
-                    or mem.get("global_id")
-                )
-                mem_vec_raw = mem.get("vector")
-                if mem_vec_raw is None:
-                    continue
-                if isinstance(mem_vec_raw, bytes):
-                    m_vec = np.frombuffer(mem_vec_raw, dtype=np.float32)
-                elif isinstance(mem_vec_raw, list | tuple):
-                    m_vec = np.asarray(mem_vec_raw, dtype=np.float32)
-                else:
-                    continue
 
-                m_norm = np.linalg.norm(m_vec)
-                if m_norm > 0:
-                    m_vec = m_vec / m_norm
+            if not HAS_NUMPY or np is None:
+                q_norm = math.sqrt(sum(x * x for x in candidate_vector)) or 1.0
+                for mem in existing_memories:
+                    mem_id = (
+                        mem.get("decision_id")
+                        or mem.get("lesson_id")
+                        or mem.get("id")
+                        or mem.get("global_id")
+                    )
+                    mem_vec_raw = mem.get("vector")
+                    if mem_vec_raw is None:
+                        continue
+                    if isinstance(mem_vec_raw, bytes):
+                        m_v = struct.unpack(f"{len(mem_vec_raw) // 4}f", mem_vec_raw)
+                    elif isinstance(mem_vec_raw, list | tuple):
+                        m_v = tuple(float(x) for x in mem_vec_raw)
+                    else:
+                        continue
+                    m_norm = math.sqrt(sum(x * x for x in m_v)) or 1.0
+                    dot = sum(a * b for a, b in zip(candidate_vector, m_v, strict=False))
+                    cos_sim = dot / (q_norm * m_norm)
+                    if cos_sim > best_sim:
+                        best_sim = cos_sim
+                        best_id = mem_id
+            else:
+                q_vec = np.asarray(candidate_vector, dtype=np.float32)
+                q_norm = float(np.linalg.norm(q_vec))
+                if q_norm > 0:
+                    q_vec = q_vec / q_norm
 
-                cos_sim = float(np.dot(q_vec, m_vec))
-                if cos_sim > best_sim:
-                    best_sim = cos_sim
-                    best_id = mem_id
+                for mem in existing_memories:
+                    mem_id = (
+                        mem.get("decision_id")
+                        or mem.get("lesson_id")
+                        or mem.get("id")
+                        or mem.get("global_id")
+                    )
+                    mem_vec_raw = mem.get("vector")
+                    if mem_vec_raw is None:
+                        continue
+                    if isinstance(mem_vec_raw, bytes):
+                        m_vec = np.frombuffer(mem_vec_raw, dtype=np.float32)
+                    elif isinstance(mem_vec_raw, list | tuple):
+                        m_vec = np.asarray(mem_vec_raw, dtype=np.float32)
+                    else:
+                        continue
+
+                    m_norm = float(np.linalg.norm(m_vec))
+                    if m_norm > 0:
+                        m_vec = m_vec / m_norm
+
+                    cos_sim = float(np.dot(q_vec, m_vec))
+                    if cos_sim > best_sim:
+                        best_sim = cos_sim
+                        best_id = mem_id
 
             if best_sim >= self.DUPLICATE_COSINE_THRESHOLD:
                 return DeduplicationEvaluation(

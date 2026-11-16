@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
+import struct
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -9,14 +11,19 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+from synap_git.utils.serialization import stable_hash
+
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 try:
     import sqlite_vec
 except ImportError:
     sqlite_vec = None
 
-from synap_git.utils.serialization import stable_hash
+HAS_NUMPY: bool = bool(getattr(np, "asarray", None))
 
 # Row-by-row Python cosine_similarity custom SQL function eliminated in favor of
 # Two-Tier Vector Acceleration (sqlite-vec BLAS + NumPy matrix dot product).
@@ -765,7 +772,10 @@ class SynapStore:
                 "prompt": prompt_version,
             }
         )
-        vec_blob = np.asarray(vector, dtype=np.float32).tobytes()
+        if HAS_NUMPY and np is not None:
+            vec_blob = np.asarray(vector, dtype=np.float32).tobytes()
+        else:
+            vec_blob = struct.pack(f"{len(vector)}f", *vector)
         with self.connect() as conn:
             conn.execute(
                 """
@@ -800,7 +810,10 @@ class SynapStore:
         d = dict(row)
         raw_vec = d.get("vector")
         if isinstance(raw_vec, bytes):
-            d["vector"] = np.frombuffer(raw_vec, dtype=np.float32).tolist()
+            if HAS_NUMPY and np is not None:
+                d["vector"] = np.frombuffer(raw_vec, dtype=np.float32).tolist()
+            else:
+                d["vector"] = list(struct.unpack(f"{len(raw_vec) // 4}f", raw_vec))
         elif isinstance(raw_vec, str):
             try:
                 d["vector"] = json.loads(raw_vec)
@@ -817,7 +830,10 @@ class SynapStore:
         # Tier 1: Try sqlite-vec if available
         if sqlite_vec is not None:
             try:
-                q_blob = np.asarray(query_vector, dtype=np.float32).tobytes()
+                if HAS_NUMPY and np is not None:
+                    q_blob = np.asarray(query_vector, dtype=np.float32).tobytes()
+                else:
+                    q_blob = struct.pack(f"{len(query_vector)}f", *query_vector)
                 with self.connect() as conn:
                     rows = conn.execute(
                         """
@@ -859,6 +875,32 @@ class SynapStore:
             if not rows:
                 return []
 
+            if not HAS_NUMPY or np is None:
+                # Pure Python cosine similarity fallback without NumPy
+                py_q_norm = math.sqrt(sum(x * x for x in query_vector)) or 1.0
+                scored = []
+                for r in rows:
+                    d = dict(r)
+                    raw_vec = d.pop("vector")
+                    if isinstance(raw_vec, bytes):
+                        v_tuple = struct.unpack(f"{len(raw_vec) // 4}f", raw_vec)
+                    elif isinstance(raw_vec, list | tuple):
+                        v_tuple = tuple(float(x) for x in raw_vec)
+                    elif isinstance(raw_vec, str):
+                        try:
+                            v_tuple = tuple(float(x) for x in json.loads(raw_vec))
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                    else:
+                        continue
+                    v_norm = math.sqrt(sum(x * x for x in v_tuple)) or 1.0
+                    dot = sum(a * b for a, b in zip(query_vector, v_tuple, strict=False))
+                    sim = dot / (py_q_norm * v_norm)
+                    d["similarity"] = float(sim)
+                    scored.append(d)
+                scored.sort(key=lambda x: x["similarity"], reverse=True)
+                return scored[:limit]
+
             meta_list: list[dict[str, Any]] = []
             vec_list: list[np.ndarray] = []
             for r in rows:
@@ -894,7 +936,7 @@ class SynapStore:
             return []
 
         q = np.asarray(query_vector, dtype=np.float32)
-        q_norm = np.linalg.norm(q)
+        q_norm = float(np.linalg.norm(q))
         if q_norm > 0:
             q = q / q_norm
         similarities = matrix @ q
