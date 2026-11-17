@@ -1,80 +1,92 @@
 {
-  "timestamp": "2026-11-16T17:05:22Z",
+  "timestamp": "2026-11-17T06:13:09Z",
   "summary": {
     "recall_at_1": 0.3333,
-    "recall_at_3": 0.5,
-    "recall_at_5": 0.5333,
-    "mrr": 0.4194,
-    "latency_p50_ms": 130.55,
-    "latency_p95_ms": 155.94,
-    "avg_tokens": 829.0
+    "recall_at_3": 0.4,
+    "recall_at_5": 0.4667,
+    "mrr": 0.3778,
+    "latency_p50_ms": 177.4,
+    "latency_p95_ms": 207.11,
+    "avg_tokens": 830.67
   },
   "overall_metrics": {
     "total_queries": 30,
     "hit_rate_at_1": 0.3333333333333333,
-    "hit_rate_at_3": 0.5,
-    "hit_rate_at_5": 0.5333333333333333,
-    "mrr": 0.41944444444444445,
-    "symbol_hit_rate_at_1": 0.26666666666666666,
-    "symbol_hit_rate_at_3": 0.36666666666666664,
-    "symbol_hit_rate_at_5": 0.43333333333333335,
-    "symbol_mrr": 0.3205555555555556,
-    "file_hit_rate_at_1": 0.3,
-    "file_hit_rate_at_3": 0.5,
-    "file_hit_rate_at_5": 0.5333333333333333,
-    "file_mrr": 0.4027777777777778,
+    "hit_rate_at_3": 0.4,
+    "hit_rate_at_5": 0.4666666666666667,
+    "mrr": 0.3777777777777778,
+    "symbol_hit_rate_at_1": 0.23333333333333334,
+    "symbol_hit_rate_at_3": 0.23333333333333334,
+    "symbol_hit_rate_at_5": 0.23333333333333334,
+    "symbol_mrr": 0.23333333333333334,
+    "file_hit_rate_at_1": 0.3333333333333333,
+    "file_hit_rate_at_3": 0.4,
+    "file_hit_rate_at_5": 0.4666666666666667,
+    "file_mrr": 0.3777777777777778,
     "latency_ms": {
-      "min": 47.84,
-      "p50": 130.55,
-      "p90": 149.56,
-      "p95": 155.94,
-      "max": 164.48,
-      "mean": 125.04
+      "min": 113.18,
+      "p50": 177.4,
+      "p90": 202.45,
+      "p95": 207.11,
+      "max": 221.07,
+      "mean": 171.0
     },
     "token_usage": {
-      "min": 794,
-      "avg": 829.0,
-      "max": 849
+      "min": 800,
+      "avg": 830.67,
+      "max": 850
     }
   },
   "category_metrics": {
     "architecture": {
       "count": 5,
       "hit_rate_at_1": 0.0,
-      "hit_rate_at_3": 0.2,
+      "hit_rate_at_3": 0.0,
       "hit_rate_at_5": 0.2,
-      "mrr": 0.1,
-      "symbol_hit_rate_at_3": 0.2,
-      "file_hit_rate_at_3": 0.2,
-      "latency_p50_ms": 141.75,
-      "latency_p95_ms": 154.68,
-      "avg_tokens": 834.4
+      "mrr": 0.05,
+      "symbol_hit_rate_at_3": 0.0,
+      "file_hit_rate_at_3": 0.0,
+      "latency_p50_ms": 178.57,
+      "latency_p95_ms": 187.41,
+      "avg_tokens": 838.2
     },
     "debugging": {
       "count": 5,
       "hit_rate_at_1": 0.4,
-      "hit_rate_at_3": 0.4,
-      "hit_rate_at_5": 0.4,
-      "mrr": 0.4,
+      "hit_rate_at_3": 0.6,
+      "hit_rate_at_5": 0.6,
+      "mrr": 0.4666666666666667,
       "symbol_hit_rate_at_3": 0.4,
-      "file_hit_rate_at_3": 0.4,
-      "latency_p50_ms": 128.35,
-      "latency_p95_ms": 134.91,
-      "avg_tokens": 836.8
+      "file_hit_rate_at_3": 0.6,
+      "latency_p50_ms": 191.08,
+      "latency_p95_ms": 207.43,
+      "avg_tokens": 817.2
     },
     "decisions_memory": {
       "count": 5,
-      "hit_rate_at_1": 0.2,
-      "hit_rate_at_3": 0.4,
-      "hit_rate_at_5": 0.6,
-      "mrr": 0.31666666666666665,
+      "hit_rate_at_1": 0.0,
+      "hit_rate_at_3": 0.2,
+      "hit_rate_at_5": 0.4,
+      "mrr": 0.15,
       "symbol_hit_rate_at_3": 0.0,
-      "file_hit_rate_at_3": 0.4,
-      "latency_p50_ms": 129.4,
-      "latency_p95_ms": 129.77,
-      "avg_tokens": 827.8
+      "file_hit_rate_at_3": 0.2,
+      "latency_p50_ms": 173.99,
+      "latency_p95_ms": 187.5,
+      "avg_tokens": 831.4
     },
     "git_conventions": {
+      "count": 5,
+      "hit_rate_at_1": 0.8,
+      "hit_rate_at_3": 0.8,
+      "hit_rate_at_5": 0.8,
+      "mrr": 0.8,
+      "symbol_hit_rate_at_3": 0.2,
+      "file_hit_rate_at_3": 0.8,
+      "latency_p50_ms": 121.53,
+      "latency_p95_ms": 180.77,
+      "avg_tokens": 830.8
+    },
+    "navigation": {
       "count": 5,
       "hit_rate_at_1": 0.2,
       "hit_rate_at_3": 0.2,
@@ -82,33 +94,21 @@
       "mrr": 0.2,
       "symbol_hit_rate_at_3": 0.2,
       "file_hit_rate_at_3": 0.2,
-      "latency_p50_ms": 139.01,
-      "latency_p95_ms": 152.55,
-      "avg_tokens": 822.0
-    },
-    "navigation": {
-      "count": 5,
-      "hit_rate_at_1": 0.6,
-      "hit_rate_at_3": 1.0,
-      "hit_rate_at_5": 1.0,
-      "mrr": 0.8,
-      "symbol_hit_rate_at_3": 0.8,
-      "file_hit_rate_at_3": 1.0,
-      "latency_p50_ms": 131.65,
-      "latency_p95_ms": 161.37,
-      "avg_tokens": 830.2
+      "latency_p50_ms": 174.23,
+      "latency_p95_ms": 196.85,
+      "avg_tokens": 837.4
     },
     "symbol_lookup": {
       "count": 5,
       "hit_rate_at_1": 0.6,
-      "hit_rate_at_3": 0.8,
-      "hit_rate_at_5": 0.8,
-      "mrr": 0.7,
+      "hit_rate_at_3": 0.6,
+      "hit_rate_at_5": 0.6,
+      "mrr": 0.6,
       "symbol_hit_rate_at_3": 0.6,
-      "file_hit_rate_at_3": 0.8,
-      "latency_p50_ms": 136.51,
-      "latency_p95_ms": 141.18,
-      "avg_tokens": 822.8
+      "file_hit_rate_at_3": 0.6,
+      "latency_p50_ms": 197.56,
+      "latency_p95_ms": 217.26,
+      "avg_tokens": 829.0
     }
   },
   "queries": [
@@ -116,9 +116,9 @@
       "id": "sym_synap_store",
       "category": "symbol_lookup",
       "query": "SynapStore",
-      "latency_ms": 137.69999999931315,
-      "tokens_used": 826,
-      "retrieved_count": 2,
+      "latency_ms": 195.69733400021505,
+      "tokens_used": 806,
+      "retrieved_count": 1,
       "top_sources": [
         {
           "rank": 1,
@@ -126,41 +126,34 @@
           "path": "src/synap_git/indexer/engine.py",
           "kind": "class_definition",
           "reason": "structural:dist=1"
-        },
-        {
-          "rank": 2,
-          "name": "store_memory",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
         }
       ],
       "hit_at_1": false,
-      "hit_at_3": true,
-      "hit_at_5": true,
+      "hit_at_3": false,
+      "hit_at_5": false,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
       "file_hit_at_1": false,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 0.5,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.5,
-      "matched_target": "path:src/synap_git/storage/sqlite.py"
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
     },
     {
       "id": "sym_get_neighborhood",
       "category": "symbol_lookup",
       "query": "get_neighborhood",
-      "latency_ms": 136.51237500016578,
-      "tokens_used": 819,
-      "retrieved_count": 6,
+      "latency_ms": 197.55554200037295,
+      "tokens_used": 808,
+      "retrieved_count": 5,
       "top_sources": [
         {
           "rank": 1,
           "name": "get_neighborhood",
-          "path": "src/synap_git/mcp/server.py",
+          "path": "src/synap_git/storage/sqlite.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
@@ -173,24 +166,24 @@
         },
         {
           "rank": 3,
-          "name": "get_neighborhood",
-          "path": "src/synap_git/storage/sqlite.py",
+          "name": "get_symbol",
+          "path": "src/synap_git/api/app.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 4,
-          "name": "get_logger",
-          "path": "src/synap_git/diagnostics/logger.py",
+          "name": "get_events",
+          "path": "src/synap_git/api/app.py",
           "kind": "function_definition",
-          "reason": "structural:dist=1"
+          "reason": "lexical_match"
         },
         {
           "rank": 5,
-          "name": "get_active_commit",
-          "path": "src/synap_git/storage/sqlite.py",
+          "name": "get_outline",
+          "path": "src/synap_git/mcp/server.py",
           "kind": "function_definition",
-          "reason": "structural:dist=2"
+          "reason": "lexical_match"
         }
       ],
       "hit_at_1": true,
@@ -211,8 +204,8 @@
       "id": "sym_classify_intent",
       "category": "symbol_lookup",
       "query": "classify_intent",
-      "latency_ms": 102.8096669979277,
-      "tokens_used": 814,
+      "latency_ms": 176.22687499988388,
+      "tokens_used": 838,
       "retrieved_count": 2,
       "top_sources": [
         {
@@ -224,9 +217,9 @@
         },
         {
           "rank": 2,
-          "name": "_classify_folder",
-          "path": "src/synap_git/indexer/scanner.py",
-          "kind": "function_definition",
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
@@ -248,9 +241,9 @@
       "id": "sym_code_parser_registry",
       "category": "symbol_lookup",
       "query": "CodeParserRegistry",
-      "latency_ms": 142.04924999648938,
-      "tokens_used": 819,
-      "retrieved_count": 5,
+      "latency_ms": 202.01466599974083,
+      "tokens_used": 848,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
@@ -279,13 +272,6 @@
           "path": "src/synap_git/parser/registry.py",
           "kind": "class_definition",
           "reason": "structural:dist=1"
-        },
-        {
-          "rank": 5,
-          "name": "__init__",
-          "path": "src/synap_git/indexer/engine.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
         }
       ],
       "hit_at_1": true,
@@ -306,8 +292,8 @@
       "id": "sym_hybrid_retrieval_engine",
       "category": "symbol_lookup",
       "query": "HybridRetrievalEngine",
-      "latency_ms": 128.5929580044467,
-      "tokens_used": 836,
+      "latency_ms": 221.0713329995997,
+      "tokens_used": 845,
       "retrieved_count": 3,
       "top_sources": [
         {
@@ -315,7 +301,7 @@
           "name": "HybridRetrievalEngine",
           "path": "src/synap_git/retrieval/engine.py",
           "kind": "class_definition",
-          "reason": "lexical_match"
+          "reason": "structural:dist=1"
         },
         {
           "rank": 2,
@@ -326,9 +312,9 @@
         },
         {
           "rank": 3,
-          "name": "TestLessonRetrieval",
-          "path": "tests/test_lesson_lifecycle.py",
-          "kind": "class_definition",
+          "name": "Added",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
@@ -350,467 +336,168 @@
       "id": "nav_tree_sitter_grammars",
       "category": "navigation",
       "query": "where are tree sitter grammars loaded",
-      "latency_ms": 96.32979099842487,
-      "tokens_used": 846,
+      "latency_ms": 131.8872920001013,
+      "tokens_used": 841,
       "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "_tree",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 2,
           "name": "_parse_tree_sitter",
           "path": "src/synap_git/parser/registry.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
+          "rank": 2,
+          "name": "test_web_ui_api_workflows_blast_and_clean_tree",
+          "path": "tests/test_web_ui_workflows_matrix.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        },
+        {
           "rank": 3,
-          "name": "wiki_tree",
-          "path": "src/synap_git/cli/main.py",
+          "name": "parse",
+          "path": "src/synap_git/parser/registry.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 4,
-          "name": "test_web_ui_api_workflows_blast_and_clean_tree",
-          "path": "tests/test_web_ui_workflows_matrix.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
+          "name": "SynapSettings",
+          "path": "src/synap_git/config.py",
+          "kind": "class_definition",
+          "reason": "structural:dist=2"
         }
       ],
-      "hit_at_1": false,
+      "hit_at_1": true,
       "hit_at_3": true,
       "hit_at_5": true,
-      "symbol_hit_at_1": false,
+      "symbol_hit_at_1": true,
       "symbol_hit_at_3": true,
       "symbol_hit_at_5": true,
-      "file_hit_at_1": false,
+      "file_hit_at_1": true,
       "file_hit_at_3": true,
       "file_hit_at_5": true,
-      "reciprocal_rank": 0.5,
-      "symbol_reciprocal_rank": 0.5,
-      "file_reciprocal_rank": 0.5,
+      "reciprocal_rank": 1.0,
+      "symbol_reciprocal_rank": 1.0,
+      "file_reciprocal_rank": 1.0,
       "matched_target": "symbol:_parse_tree_sitter"
     },
     {
       "id": "nav_sqlite_wal",
       "category": "navigation",
       "query": "where is SQLite WAL configured",
-      "latency_ms": 116.70554200100014,
-      "tokens_used": 810,
-      "retrieved_count": 5,
+      "latency_ms": 169.68758400071238,
+      "tokens_used": 842,
+      "retrieved_count": 6,
       "top_sources": [
         {
           "rank": 1,
-          "name": "get_decisions",
-          "path": "src/synap_git/storage/sqlite.py",
+          "name": "is_embedding_model",
+          "path": "src/synap_git/provider/discovery.py",
           "kind": "function_definition",
-          "reason": "lexical_match"
+          "reason": "structural:dist=2"
         },
         {
           "rank": 2,
-          "name": "CodeParserRegistry",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
+          "name": "_is_in_progress_operation",
+          "path": "src/synap_git/indexer/engine.py",
+          "kind": "function_definition",
           "reason": "structural:dist=1"
         },
         {
           "rank": 3,
+          "name": "DiscoveredRuntime",
+          "path": "src/synap_git/provider/discovery.py",
+          "kind": "class_definition",
+          "reason": "structural:dist=2"
+        },
+        {
+          "rank": 4,
           "name": "walk",
           "path": "src/synap_git/parser/registry.py",
           "kind": "function_definition",
           "reason": "structural:dist=2"
         },
         {
-          "rank": 4,
-          "name": "test_wal_corruption_recovery",
-          "path": "tests/test_recovery_robustness.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
           "rank": 5,
-          "name": "connect",
-          "path": "src/synap_git/storage/sqlite.py",
+          "name": "verify_model_exists",
+          "path": "src/synap_git/provider/discovery.py",
           "kind": "function_definition",
-          "reason": "lexical_match"
+          "reason": "structural:dist=2"
         }
       ],
-      "hit_at_1": true,
-      "hit_at_3": true,
-      "hit_at_5": true,
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
-      "symbol_hit_at_5": true,
-      "file_hit_at_1": true,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 1.0,
-      "symbol_reciprocal_rank": 0.2,
-      "file_reciprocal_rank": 1.0,
-      "matched_target": "path:src/synap_git/storage/sqlite.py"
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
     },
     {
       "id": "nav_daemon_lockfile",
       "category": "navigation",
       "query": "where is daemon lockfile and heartbeat managed",
-      "latency_ms": 148.93670799938263,
-      "tokens_used": 841,
-      "retrieved_count": 5,
+      "latency_ms": 200.36283400077082,
+      "tokens_used": 842,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "_read_daemon_heartbeat",
-          "path": "src/synap_git/api/app.py",
+          "name": "inject_managed_block",
+          "path": "src/synap_git/cli/skill_installer.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
           "name": "_read_daemon_heartbeat",
-          "path": "src/synap_git/cli/main.py",
+          "path": "src/synap_git/api/app.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "_delete_heartbeat",
-          "path": "src/synap_git/indexer/daemon.py",
+          "name": "verify_provider_connectivity_and_model",
+          "path": "src/synap_git/provider/discovery.py",
           "kind": "function_definition",
-          "reason": "lexical_match"
+          "reason": "structural:dist=2"
         },
         {
           "rank": 4,
-          "name": "_write_heartbeat",
-          "path": "src/synap_git/indexer/daemon.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "daemon_run",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
       "hit_at_1": false,
-      "hit_at_3": true,
-      "hit_at_5": true,
+      "hit_at_3": false,
+      "hit_at_5": false,
       "symbol_hit_at_1": false,
-      "symbol_hit_at_3": true,
-      "symbol_hit_at_5": true,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
       "file_hit_at_1": false,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 0.5,
-      "symbol_reciprocal_rank": 0.3333333333333333,
-      "file_reciprocal_rank": 0.5,
-      "matched_target": "path:src/synap_git/cli/main.py"
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
     },
     {
       "id": "nav_git_hooks",
       "category": "navigation",
       "query": "where are git hooks installed and uninstalled",
-      "latency_ms": 164.47524999966845,
-      "tokens_used": 839,
-      "retrieved_count": 3,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "hooks_install_cmd",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 2,
-          "name": "hooks_uninstall_cmd",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "upsert_file_and_symbols",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        }
-      ],
-      "hit_at_1": true,
-      "hit_at_3": true,
-      "hit_at_5": true,
-      "symbol_hit_at_1": true,
-      "symbol_hit_at_3": true,
-      "symbol_hit_at_5": true,
-      "file_hit_at_1": true,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 1.0,
-      "symbol_reciprocal_rank": 1.0,
-      "file_reciprocal_rank": 1.0,
-      "matched_target": "symbol:hooks_install_cmd"
-    },
-    {
-      "id": "nav_mcp_server",
-      "category": "navigation",
-      "query": "where is FastMCP server initialized and registered",
-      "latency_ms": 131.64949999918463,
-      "tokens_used": 815,
-      "retrieved_count": 6,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "SynapMCPServer",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "class_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 2,
-          "name": "get_mcp_config",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "mcp_verify",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 4,
-          "name": "get_synap_mcp_config",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "mcp_serve",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        }
-      ],
-      "hit_at_1": true,
-      "hit_at_3": true,
-      "hit_at_5": true,
-      "symbol_hit_at_1": true,
-      "symbol_hit_at_3": true,
-      "symbol_hit_at_5": true,
-      "file_hit_at_1": true,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 1.0,
-      "symbol_reciprocal_rank": 1.0,
-      "file_reciprocal_rank": 1.0,
-      "matched_target": "symbol:SynapMCPServer"
-    },
-    {
-      "id": "arch_daemon_file_mod",
-      "category": "architecture",
-      "query": "how does daemon detect file modifications",
-      "latency_ms": 156.54899999935878,
-      "tokens_used": 826,
-      "retrieved_count": 2,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "upsert_file_and_symbols",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=2"
-        },
-        {
-          "rank": 2,
-          "name": "FileObservation",
-          "path": "src/synap_git/indexer/scanner.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=2"
-        }
-      ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
-      "symbol_hit_at_1": false,
-      "symbol_hit_at_3": false,
-      "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
-      "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
-    },
-    {
-      "id": "arch_token_budgeting",
-      "category": "architecture",
-      "query": "how does token budgeting and graceful folding work",
-      "latency_ms": 141.7474999980186,
-      "tokens_used": 837,
-      "retrieved_count": 2,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "upsert_file_and_symbols",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=2"
-        },
-        {
-          "rank": 2,
-          "name": "_read_and_hash_file",
-          "path": "src/synap_git/indexer/scanner.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=2"
-        }
-      ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
-      "symbol_hit_at_1": false,
-      "symbol_hit_at_3": false,
-      "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
-      "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
-    },
-    {
-      "id": "arch_pagerank_centrality",
-      "category": "architecture",
-      "query": "how does PageRank centrality ranking work",
-      "latency_ms": 147.21004100283608,
-      "tokens_used": 834,
-      "retrieved_count": 5,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "Page",
-          "path": "website/src/app/docs/[[...slug]]/page.tsx",
-          "kind": "function_declaration",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 2,
-          "name": "generate_project_wiki_page_sync",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "ensure_wiki_page",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 4,
-          "name": "get_wiki_page",
-          "path": "src/synap_git/api/app.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "get_checkpoints_page",
-          "path": "src/synap_git/api/app.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        }
-      ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
-      "symbol_hit_at_1": false,
-      "symbol_hit_at_3": false,
-      "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
-      "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
-    },
-    {
-      "id": "arch_skeleton_generation",
-      "category": "architecture",
-      "query": "how are AST skeletons generated",
-      "latency_ms": 62.25149999954738,
-      "tokens_used": 849,
-      "retrieved_count": 6,
-      "top_sources": [
-        {
-          "rank": 1,
-          "name": "get_last_indexed_commit",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 2,
-          "name": "CodeSymbol",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "CodeParserRegistry",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 4,
-          "name": "traverse",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "_parse_tree_sitter",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        }
-      ],
-      "hit_at_1": false,
-      "hit_at_3": true,
-      "hit_at_5": true,
-      "symbol_hit_at_1": false,
-      "symbol_hit_at_3": true,
-      "symbol_hit_at_5": true,
-      "file_hit_at_1": false,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 0.5,
-      "symbol_reciprocal_rank": 0.3333333333333333,
-      "file_reciprocal_rank": 0.5,
-      "matched_target": "path:src/synap_git/parser/registry.py"
-    },
-    {
-      "id": "arch_blast_radius",
-      "category": "architecture",
-      "query": "how does git blast radius calculation work",
-      "latency_ms": 132.33162499818718,
-      "tokens_used": 826,
+      "latency_ms": 182.77383300028305,
+      "tokens_used": 833,
       "retrieved_count": 2,
       "top_sources": [
         {
@@ -843,31 +530,68 @@
       "matched_target": null
     },
     {
-      "id": "dbg_db_locked",
-      "category": "debugging",
-      "query": "OperationalError: database is locked",
-      "latency_ms": 135.81025000166846,
-      "tokens_used": 845,
+      "id": "nav_mcp_server",
+      "category": "navigation",
+      "query": "where is FastMCP server initialized and registered",
+      "latency_ms": 174.23329099983675,
+      "tokens_used": 829,
       "retrieved_count": 3,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "verify_provider_connectivity_and_model",
+          "path": "src/synap_git/provider/discovery.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=2"
+        },
+        {
+          "rank": 2,
+          "name": "_is_binary_file",
+          "path": "src/synap_git/indexer/scanner.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=2"
+        },
+        {
+          "rank": 3,
+          "name": "MCP Tools for AI Agents",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
+    },
+    {
+      "id": "arch_daemon_file_mod",
+      "category": "architecture",
+      "query": "how does daemon detect file modifications",
+      "latency_ms": 113.18424999990384,
+      "tokens_used": 850,
+      "retrieved_count": 2,
       "top_sources": [
         {
           "rank": 1,
           "name": "_is_binary_file",
           "path": "src/synap_git/indexer/scanner.py",
           "kind": "function_definition",
-          "reason": "structural:dist=1"
+          "reason": "structural:dist=2"
         },
         {
           "rank": 2,
-          "name": "AmbiguousSymbolError",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 3,
-          "name": "GitIntegrationError",
-          "path": "src/synap_git/git/state.py",
+          "name": "RuntimeProfile",
+          "path": "src/synap_git/config.py",
           "kind": "class_definition",
           "reason": "structural:dist=1"
         }
@@ -887,12 +611,274 @@
       "matched_target": null
     },
     {
+      "id": "arch_token_budgeting",
+      "category": "architecture",
+      "query": "how does token budgeting and graceful folding work",
+      "latency_ms": 162.62104099951102,
+      "tokens_used": 828,
+      "retrieved_count": 6,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "_read_and_hash_file",
+          "path": "src/synap_git/indexer/scanner.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 2,
+          "name": "Print token-bounded startup context (< 750 tokens)",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 3,
+          "name": "count_tokens",
+          "path": "src/synap_git/provider/base.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 4,
+          "name": "_parse_worker",
+          "path": "src/synap_git/indexer/engine.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 5,
+          "name": "_WatcherHandler",
+          "path": "src/synap_git/indexer/daemon.py",
+          "kind": "class_definition",
+          "reason": "structural:dist=1"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
+    },
+    {
+      "id": "arch_pagerank_centrality",
+      "category": "architecture",
+      "query": "how does PageRank centrality ranking work",
+      "latency_ms": 185.24895900009142,
+      "tokens_used": 821,
+      "retrieved_count": 3,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "rank_embedding_models",
+          "path": "src/synap_git/provider/discovery.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 2,
+          "name": "rank_chat_models",
+          "path": "src/synap_git/provider/discovery.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 3,
+          "name": "get_wiki_page",
+          "path": "src/synap_git/api/app.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
+    },
+    {
+      "id": "arch_skeleton_generation",
+      "category": "architecture",
+      "query": "how are AST skeletons generated",
+      "latency_ms": 178.56620799921075,
+      "tokens_used": 848,
+      "retrieved_count": 6,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "Export token-budgeted prompt pack with AST skeletons (< 8k tokens)",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 2,
+          "name": "Inspect structural AST skeleton of any file (strips bodies, keeps types/docstrings)",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 3,
+          "name": "_extract_module_docstring",
+          "path": "src/synap_git/indexer/wiki.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 4,
+          "name": "CodeSymbol",
+          "path": "src/synap_git/parser/registry.py",
+          "kind": "class_definition",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 5,
+          "name": "_parse_worker",
+          "path": "src/synap_git/indexer/engine.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": true,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": true,
+      "reciprocal_rank": 0.25,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.25,
+      "matched_target": "path:src/synap_git/parser/registry.py"
+    },
+    {
+      "id": "arch_blast_radius",
+      "category": "architecture",
+      "query": "how does git blast radius calculation work",
+      "latency_ms": 187.94612500005314,
+      "tokens_used": 844,
+      "retrieved_count": 3,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "get_blast",
+          "path": "src/synap_git/api/app.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 2,
+          "name": "GitIgnoreSpec",
+          "path": "src/synap_git/indexer/scanner.py",
+          "kind": "class_definition",
+          "reason": "structural:dist=2"
+        },
+        {
+          "rank": 3,
+          "name": "_poll_git_loop",
+          "path": "src/synap_git/indexer/daemon.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
+    },
+    {
+      "id": "dbg_db_locked",
+      "category": "debugging",
+      "query": "OperationalError: database is locked",
+      "latency_ms": 170.56616699937877,
+      "tokens_used": 834,
+      "retrieved_count": 5,
+      "top_sources": [
+        {
+          "rank": 1,
+          "name": "Synapse Engineering & Operational Guidelines",
+          "path": "CLAUDE.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 2,
+          "name": "_is_binary_file",
+          "path": "src/synap_git/indexer/scanner.py",
+          "kind": "function_definition",
+          "reason": "structural:dist=1"
+        },
+        {
+          "rank": 3,
+          "name": "get_decisions",
+          "path": "src/synap_git/storage/sqlite.py",
+          "kind": "function_definition",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 4,
+          "name": "BenchmarkComparison",
+          "path": "website/src/components/ui/benchmark-comparison.tsx",
+          "kind": "function_declaration",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 5,
+          "name": "CodeParserRegistry",
+          "path": "src/synap_git/parser/registry.py",
+          "kind": "class_definition",
+          "reason": "structural:dist=2"
+        }
+      ],
+      "hit_at_1": false,
+      "hit_at_3": true,
+      "hit_at_5": true,
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "symbol_hit_at_5": false,
+      "file_hit_at_1": false,
+      "file_hit_at_3": true,
+      "file_hit_at_5": true,
+      "reciprocal_rank": 0.3333333333333333,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.3333333333333333,
+      "matched_target": "path:src/synap_git/storage/sqlite.py"
+    },
+    {
       "id": "dbg_conn_refused",
       "category": "debugging",
       "query": "ConnectionRefusedError: [Errno 61] Connect call failed",
-      "latency_ms": 125.18012500368059,
-      "tokens_used": 849,
-      "retrieved_count": 6,
+      "latency_ms": 191.08104099996126,
+      "tokens_used": 809,
+      "retrieved_count": 2,
       "top_sources": [
         {
           "rank": 1,
@@ -903,31 +889,10 @@
         },
         {
           "rank": 2,
-          "name": "put_llm_call",
-          "path": "src/synap_git/storage/sqlite.py",
+          "name": "_get_connection",
+          "path": "src/synap_git/storage/global_memory.py",
           "kind": "function_definition",
           "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "retry_failed_wiki_queue",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 4,
-          "name": "GitIntegrationError",
-          "path": "src/synap_git/git/state.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 5,
-          "name": "AmbiguousSymbolError",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=1"
         }
       ],
       "hit_at_1": false,
@@ -948,9 +913,9 @@
       "id": "dbg_ambiguous_symbol",
       "category": "debugging",
       "query": "AmbiguousSymbolError: multiple symbols match query",
-      "latency_ms": 131.33041700348258,
-      "tokens_used": 831,
-      "retrieved_count": 6,
+      "latency_ms": 207.67920799971762,
+      "tokens_used": 802,
+      "retrieved_count": 3,
       "top_sources": [
         {
           "rank": 1,
@@ -961,29 +926,15 @@
         },
         {
           "rank": 2,
-          "name": "query_hybrid",
-          "path": "src/synap_git/indexer/engine.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
           "name": "read_symbol",
           "path": "src/synap_git/mcp/server.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
-          "rank": 4,
-          "name": "upsert_file_and_symbols",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "get_symbols_by_lexical_query",
-          "path": "src/synap_git/storage/sqlite.py",
+          "rank": 3,
+          "name": "evaluate_query",
+          "path": "evals/baseline_benchmark.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         }
@@ -1006,9 +957,9 @@
       "id": "dbg_git_integration",
       "category": "debugging",
       "query": "GitIntegrationError: Not a git repository",
-      "latency_ms": 128.34608299453976,
-      "tokens_used": 823,
-      "retrieved_count": 3,
+      "latency_ms": 206.41341699956683,
+      "tokens_used": 836,
+      "retrieved_count": 2,
       "top_sources": [
         {
           "rank": 1,
@@ -1022,13 +973,6 @@
           "name": "GitRepository",
           "path": "src/synap_git/git/state.py",
           "kind": "class_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "_poll_git_loop",
-          "path": "src/synap_git/indexer/daemon.py",
-          "kind": "function_definition",
           "reason": "lexical_match"
         }
       ],
@@ -1050,20 +994,20 @@
       "id": "dbg_token_encoding",
       "category": "debugging",
       "query": "KeyError: cl100k_base tokenizer initialization failed",
-      "latency_ms": 120.99079100153176,
-      "tokens_used": 836,
-      "retrieved_count": 6,
+      "latency_ms": 160.965541999758,
+      "tokens_used": 805,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "openai_api_key",
-          "path": "src/synap_git/config.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
+          "name": "2.2 Error Handling & Logging",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "gemini_api_key",
+          "name": "openai_api_key",
           "path": "src/synap_git/config.py",
           "kind": "function_definition",
           "reason": "structural:dist=1"
@@ -1077,16 +1021,9 @@
         },
         {
           "rank": 4,
-          "name": "openrouter_api_key",
+          "name": "gemini_api_key",
           "path": "src/synap_git/config.py",
           "kind": "function_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 5,
-          "name": "AmbiguousSymbolError",
-          "path": "src/synap_git/mcp/server.py",
-          "kind": "class_definition",
           "reason": "structural:dist=1"
         }
       ],
@@ -1108,44 +1045,30 @@
       "id": "dec_normal_pragma",
       "category": "decisions_memory",
       "query": "why was normal pragma chosen",
-      "latency_ms": 104.08724999433616,
-      "tokens_used": 832,
-      "retrieved_count": 6,
+      "latency_ms": 183.53258299976005,
+      "tokens_used": 845,
+      "retrieved_count": 3,
       "top_sources": [
         {
           "rank": 1,
-          "name": "_normalize_name",
-          "path": "src/synap_git/retrieval/engine.py",
-          "kind": "function_definition",
+          "name": "Why Synapse?",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "test_aud07_sqlite_wal_normal_pragma",
-          "path": "tests/test_audit_fixes_aug2026.py",
+          "name": "normalize_host",
+          "path": "src/synap_git/provider/discovery.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "test_database_connection_synchronous_pragma",
-          "path": "tests/test_audit_fixes.py",
+          "name": "_normalize_name",
+          "path": "src/synap_git/retrieval/engine.py",
           "kind": "function_definition",
           "reason": "lexical_match"
-        },
-        {
-          "rank": 4,
-          "name": "get_logger",
-          "path": "src/synap_git/diagnostics/logger.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 5,
-          "name": "status",
-          "path": "src/synap_git/indexer/engine.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
         }
       ],
       "hit_at_1": false,
@@ -1166,151 +1089,130 @@
       "id": "dec_token_budget_12pct",
       "category": "decisions_memory",
       "query": "why was 12% token budget chosen",
-      "latency_ms": 122.11504099832382,
-      "tokens_used": 845,
-      "retrieved_count": 6,
+      "latency_ms": 188.49533299999166,
+      "tokens_used": 843,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "count_tokens",
-          "path": "src/synap_git/provider/factory.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=2"
+          "name": "Export token-budgeted prompt pack with AST skeletons (< 8k tokens)",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "count_tokens",
-          "path": "src/synap_git/provider/base.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
+          "name": "Why Synapse?",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "_extract_query_tokens",
-          "path": "src/synap_git/retrieval/engine.py",
-          "kind": "function_definition",
+          "name": "Print token-bounded startup context (< 750 tokens)",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 4,
-          "name": "test_token_budgeting",
-          "path": "tests/test_retrieval_and_budgeting.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "test_small_token_budget_graceful_folding",
-          "path": "tests/test_retrieval_and_budgeting.py",
+          "name": "_extract_query_tokens",
+          "path": "src/synap_git/retrieval/engine.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         }
       ],
       "hit_at_1": false,
-      "hit_at_3": true,
+      "hit_at_3": false,
       "hit_at_5": true,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
       "file_hit_at_1": false,
-      "file_hit_at_3": true,
+      "file_hit_at_3": false,
       "file_hit_at_5": true,
-      "reciprocal_rank": 0.3333333333333333,
+      "reciprocal_rank": 0.25,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.3333333333333333,
+      "file_reciprocal_rank": 0.25,
       "matched_target": "path:src/synap_git/retrieval/engine.py"
     },
     {
       "id": "dec_replace_wiki_with_ast",
       "category": "decisions_memory",
       "query": "why was background wiki generation replaced with AST outlines",
-      "latency_ms": 129.7709999998915,
-      "tokens_used": 794,
-      "retrieved_count": 4,
+      "latency_ms": 154.52875000028143,
+      "tokens_used": 818,
+      "retrieved_count": 3,
       "top_sources": [
         {
           "rank": 1,
-          "name": "enqueue_wiki",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=2"
+          "name": "Why Synapse?",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "generate_project_wiki",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
+          "name": "Export token-budgeted prompt pack with AST skeletons (< 8k tokens)",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "dequeue_wiki",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 4,
-          "name": "generate_module_wiki",
-          "path": "src/synap_git/indexer/wiki.py",
+          "name": "get_wiki_page",
+          "path": "src/synap_git/api/app.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         }
       ],
-      "hit_at_1": true,
-      "hit_at_3": true,
-      "hit_at_5": true,
+      "hit_at_1": false,
+      "hit_at_3": false,
+      "hit_at_5": false,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
-      "file_hit_at_1": true,
-      "file_hit_at_3": true,
-      "file_hit_at_5": true,
-      "reciprocal_rank": 1.0,
+      "file_hit_at_1": false,
+      "file_hit_at_3": false,
+      "file_hit_at_5": false,
+      "reciprocal_rank": 0.0,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 1.0,
-      "matched_target": "path:src/synap_git/storage/sqlite.py"
+      "file_reciprocal_rank": 0.0,
+      "matched_target": null
     },
     {
       "id": "dec_pagerank_hubs",
       "category": "decisions_memory",
       "query": "why was pure python PageRank chosen over networkx",
-      "latency_ms": 129.40487500600284,
-      "tokens_used": 846,
-      "retrieved_count": 6,
+      "latency_ms": 173.98966700056917,
+      "tokens_used": 820,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "_python_dependencies",
-          "path": "src/synap_git/indexer/scanner.py",
+          "name": "_rank_candidates",
+          "path": "src/synap_git/retrieval/engine.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "generate_project_wiki_page_sync",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
+          "name": "Discover top architectural hubs via PageRank",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "ensure_wiki_page",
-          "path": "src/synap_git/indexer/wiki.py",
-          "kind": "function_definition",
+          "name": "Why Synapse?",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 4,
-          "name": "get_wiki_page",
-          "path": "src/synap_git/api/app.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "get_checkpoints_page",
-          "path": "src/synap_git/api/app.py",
+          "name": "generate_project_wiki_page_sync",
+          "path": "src/synap_git/indexer/wiki.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         }
@@ -1333,111 +1235,111 @@
       "id": "mem_three_layer_arch",
       "category": "decisions_memory",
       "query": "what is the 3-layer architecture in memory",
-      "latency_ms": 129.7740000009071,
-      "tokens_used": 822,
-      "retrieved_count": 7,
+      "latency_ms": 137.8375419999429,
+      "tokens_used": 831,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "get_memory_page",
-          "path": "src/synap_git/api/app.py",
-          "kind": "function_definition",
+          "name": "Architecture",
+          "path": "README.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
+          "name": "1. System Architecture Overview",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 3,
           "name": "ArchitectureDiagram",
           "path": "website/src/components/ui/architecture-diagram.tsx",
           "kind": "function_declaration",
           "reason": "lexical_match"
         },
         {
-          "rank": 3,
-          "name": "ThreeLayerExplorer",
-          "path": "website/src/components/ui/three-layer-explorer.tsx",
-          "kind": "function_declaration",
-          "reason": "lexical_match"
-        },
-        {
           "rank": 4,
-          "name": "store_memory",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "ArchitectureComponent",
-          "path": "website/src/components/ui/architecture-diagram.tsx",
-          "kind": "interface_declaration",
+          "name": "Security, Protocol & Architecture Hardening (Audit Remediation)",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
       "hit_at_1": false,
-      "hit_at_3": false,
+      "hit_at_3": true,
       "hit_at_5": true,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
-      "symbol_hit_at_5": true,
+      "symbol_hit_at_5": false,
       "file_hit_at_1": false,
-      "file_hit_at_3": false,
+      "file_hit_at_3": true,
       "file_hit_at_5": true,
-      "reciprocal_rank": 0.25,
-      "symbol_reciprocal_rank": 0.25,
-      "file_reciprocal_rank": 0.25,
-      "matched_target": "symbol:store_memory"
+      "reciprocal_rank": 0.5,
+      "symbol_reciprocal_rank": 0.0,
+      "file_reciprocal_rank": 0.5,
+      "matched_target": "path:AGENTS.md"
     },
     {
       "id": "git_changelog_v260",
       "category": "git_conventions",
       "query": "what changed in v2.6.0",
-      "latency_ms": 139.00591700075893,
-      "tokens_used": 813,
-      "retrieved_count": 3,
+      "latency_ms": 195.06574999923032,
+      "tokens_used": 800,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "IngestionSanitizer",
-          "path": "src/synap_git/security/sanitizer.py",
-          "kind": "class_definition",
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "put_checkpoint",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 3,
-          "name": "index_repository",
-          "path": "src/synap_git/indexer/engine.py",
-          "kind": "function_definition",
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 4,
+          "name": "Changed",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "hit_at_5": true,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
+      "file_hit_at_1": true,
+      "file_hit_at_3": true,
+      "file_hit_at_5": true,
+      "reciprocal_rank": 1.0,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
+      "file_reciprocal_rank": 1.0,
+      "matched_target": "path:CHANGELOG.md"
     },
     {
       "id": "git_commit_conventions",
       "category": "git_conventions",
       "query": "how are commits formatted",
-      "latency_ms": 47.842583000601735,
-      "tokens_used": 839,
-      "retrieved_count": 3,
+      "latency_ms": 120.13383399971644,
+      "tokens_used": 818,
+      "retrieved_count": 2,
       "top_sources": [
         {
           "rank": 1,
@@ -1452,13 +1354,6 @@
           "path": "src/synap_git/git/state.py",
           "kind": "function_definition",
           "reason": "lexical_match"
-        },
-        {
-          "rank": 3,
-          "name": "get_logger",
-          "path": "src/synap_git/diagnostics/logger.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
         }
       ],
       "hit_at_1": false,
@@ -1479,138 +1374,145 @@
       "id": "git_agent_directives",
       "category": "git_conventions",
       "query": "what are the agent operational guidelines",
-      "latency_ms": 64.54437499633059,
-      "tokens_used": 812,
-      "retrieved_count": 2,
+      "latency_ms": 115.55220899936103,
+      "tokens_used": 849,
+      "retrieved_count": 6,
       "top_sources": [
         {
           "rank": 1,
-          "name": "SynapRuntime",
-          "path": "src/synap_git/indexer/engine.py",
-          "kind": "class_definition",
+          "name": "Synapse AI Agent Directives",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "get_logger",
-          "path": "src/synap_git/diagnostics/logger.py",
-          "kind": "function_definition",
-          "reason": "structural:dist=1"
+          "name": "Synapse AI Agent Directives",
+          "path": "CLAUDE.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 3,
+          "name": "Synapse AI Engineer Guidelines & Agent Instructions",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 4,
+          "name": "Synapse Engineering & Operational Guidelines",
+          "path": "CLAUDE.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 5,
+          "name": "MCP Tools for AI Agents",
+          "path": "README.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
         }
       ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "hit_at_5": true,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
+      "file_hit_at_1": true,
+      "file_hit_at_3": true,
+      "file_hit_at_5": true,
+      "reciprocal_rank": 1.0,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
+      "file_reciprocal_rank": 1.0,
+      "matched_target": "path:AGENTS.md"
     },
     {
       "id": "git_verify_standards",
       "category": "git_conventions",
       "query": "how to verify code with pytest and ruff",
-      "latency_ms": 142.00300000084098,
-      "tokens_used": 798,
-      "retrieved_count": 5,
+      "latency_ms": 121.53070800013666,
+      "tokens_used": 837,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
-          "name": "CodeParserRegistry",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=2"
-        },
-        {
-          "rank": 2,
-          "name": "CodeSymbol",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=1"
-        },
-        {
-          "rank": 3,
-          "name": "CodeParseResult",
-          "path": "src/synap_git/parser/registry.py",
-          "kind": "class_definition",
-          "reason": "structural:dist=2"
-        },
-        {
-          "rank": 4,
-          "name": "upsert_file_and_symbols",
-          "path": "src/synap_git/storage/sqlite.py",
-          "kind": "function_definition",
+          "name": "2.1 Code Quality & Formatting",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         },
         {
-          "rank": 5,
-          "name": "_glob_to_regex",
-          "path": "src/synap_git/indexer/scanner.py",
+          "rank": 2,
+          "name": "2. Progressive Code Navigation & Search",
+          "path": "AGENTS.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 3,
+          "name": "2. Progressive Code Navigation & Search",
+          "path": "CLAUDE.md",
+          "kind": "doc_section",
+          "reason": "lexical_match"
+        },
+        {
+          "rank": 4,
+          "name": "verify_model_exists",
+          "path": "src/synap_git/provider/discovery.py",
           "kind": "function_definition",
-          "reason": "structural:dist=2"
+          "reason": "lexical_match"
         }
       ],
-      "hit_at_1": false,
-      "hit_at_3": false,
-      "hit_at_5": false,
+      "hit_at_1": true,
+      "hit_at_3": true,
+      "hit_at_5": true,
       "symbol_hit_at_1": false,
       "symbol_hit_at_3": false,
       "symbol_hit_at_5": false,
-      "file_hit_at_1": false,
-      "file_hit_at_3": false,
-      "file_hit_at_5": false,
-      "reciprocal_rank": 0.0,
+      "file_hit_at_1": true,
+      "file_hit_at_3": true,
+      "file_hit_at_5": true,
+      "reciprocal_rank": 1.0,
       "symbol_reciprocal_rank": 0.0,
-      "file_reciprocal_rank": 0.0,
-      "matched_target": null
+      "file_reciprocal_rank": 1.0,
+      "matched_target": "path:AGENTS.md"
     },
     {
       "id": "git_setup_cli",
       "category": "git_conventions",
       "query": "how to run synap setup and start daemon",
-      "latency_ms": 155.18712499761023,
-      "tokens_used": 848,
-      "retrieved_count": 7,
+      "latency_ms": 123.59920899962162,
+      "tokens_used": 850,
+      "retrieved_count": 4,
       "top_sources": [
         {
           "rank": 1,
           "name": "start",
-          "path": "src/synap_git/indexer/daemon.py",
+          "path": "src/synap_git/cli/main.py",
           "kind": "function_definition",
           "reason": "lexical_match"
         },
         {
           "rank": 2,
-          "name": "run",
-          "path": "src/synap_git/cli/main.py",
+          "name": "start",
+          "path": "src/synap_git/indexer/daemon.py",
           "kind": "function_definition",
           "reason": "structural:dist=1"
         },
         {
           "rank": 3,
           "name": "run",
-          "path": "src/synap_git/mcp/server.py",
+          "path": "src/synap_git/cli/main.py",
           "kind": "function_definition",
           "reason": "structural:dist=1"
         },
         {
           "rank": 4,
-          "name": "start",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
-          "reason": "lexical_match"
-        },
-        {
-          "rank": 5,
-          "name": "daemon_run",
-          "path": "src/synap_git/cli/main.py",
-          "kind": "function_definition",
+          "name": "Refactored",
+          "path": "CHANGELOG.md",
+          "kind": "doc_section",
           "reason": "lexical_match"
         }
       ],
@@ -1620,12 +1522,12 @@
       "symbol_hit_at_1": true,
       "symbol_hit_at_3": true,
       "symbol_hit_at_5": true,
-      "file_hit_at_1": false,
+      "file_hit_at_1": true,
       "file_hit_at_3": true,
       "file_hit_at_5": true,
       "reciprocal_rank": 1.0,
       "symbol_reciprocal_rank": 1.0,
-      "file_reciprocal_rank": 0.5,
+      "file_reciprocal_rank": 1.0,
       "matched_target": "symbol:start"
     }
   ]

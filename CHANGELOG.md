@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-11-17
+
+### Added
+- **Universal 1:1 Plain-English Wiki System**: Expanded wiki documentation to 100% of tracked, non-ignored repository files via type-specific extractors (Source code, Docs/Markdown, Config/build manifests, Data/SQL schemas, Tests, Scripts/Notebooks). Binary, lockfiles, and generated files recorded as 1-line database metadata.
+- **Strict 8th-Grade Reading Level & Standard Template**: Enforced Flesch-Kincaid Grade Level <= 8.5 with active voice, zero filler words, and a fixed 6-part template (`What it does`, `How it works`, `Key parts`, `Connects to`, `Watch out for`, `Recent changes`).
+- **Secret Redaction Engine**: Automated pattern matching and masking of API keys, tokens, passwords, and connection strings during documentation generation (`redact_secrets`).
+- **Wiki Full-Text Search**: Added `wiki_pages_fts` FTS5 index for plain-English documentation pages to directly answer "how does X work" retrieval queries.
+- **Unified Daemon Queue Logging**: Implemented `QueueHandler` + `QueueListener` with `FlushingRotatingFileHandler` writing immediately to `.synap/logs/daemon.log` with standardized component tags (`wiki`, `daemon`, `indexer`, `storage`, `cli`).
+- **Structured Wiki Events**: Real-time progress and duration event streaming (`wiki_job_started`, `wiki_file_progress`, `wiki_file_done`, `wiki_file_skipped`, `wiki_file_failed`, `wiki_job_finished`).
+- **Git Commit History Memory Ingestion**: Ingests commit messages, author metadata, and touched paths into SQLite (`git_commit_history`) for instant answers to "why was X changed".
+- **5-Tier Query Intent Router**: Intent classifier routing queries across Symbol Lookup, Navigation ("where is X"), Architecture ("how does X work"), Debugging / Changes ("why was X changed" / stack traces), and Past Decisions / Conventions.
+- **Honest Token Cost Accounting**: Accurately measures raw file tokens vs token-budgeted Synapse pack size.
+
+### Changed
+- **CLI Subcommand Reduction**: Streamlined non-interactive command surface to `synap mcp`, `synap ctx`, `synap remember`, `synap daemon (start|stop|status)`, `synap init`, `synap doctor` with full `--json` support.
+- **Truthful REPL Output**: Purged all fake sleep delays, fake loops, and placeholder stats. "Done" is printed only after verifying disk files or database rows.
+- **Single-Screen `/help`**: Compacted interactive command palette to 14 essential slash commands (`/init`, `/status`, `/find`, `/remember`, `/forget`, `/wiki`, `/global`, `/ingest`, `/model`, `/skill`, `/logs`, `/doctor`, `/help`, `/quit`).
+
 ## [2.8.0] - 2026-11-16
 
 ### Added

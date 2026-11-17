@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import time
 from collections.abc import Generator
@@ -21,6 +22,29 @@ class DaemonHealth:
     branch: str
 
 
+_SECRET_PATTERNS = [
+    re.compile(
+        r"(?i)(api[_-]?key|token|secret|password|bearer|auth|credential)\s*[:=]\s*['\"]?[^\s,'\"]+"
+    ),
+    re.compile(r"sk-[a-zA-Z0-9]{20,}", re.IGNORECASE),
+]
+
+
+def _sanitize_log_message(msg: str) -> str:
+    """Sanitize error messages to ensure secrets and full file dumps are not logged."""
+    if not msg:
+        return ""
+    if len(msg) > 300:
+        msg = msg[:300] + "... [truncated]"
+    msg = re.sub(
+        r"(?i)(api[_-]?key|token|secret|password|bearer|auth|credential)\s*[:=]\s*['\"]?[^\s,'\"]+",
+        r"\1=[REDACTED]",
+        msg,
+    )
+    msg = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED]", msg)
+    return msg
+
+
 class RuntimeDaemon:
     """Long-running background daemon hosting watcher and Diagnostic UI in one process."""
 
@@ -33,6 +57,7 @@ class RuntimeDaemon:
         self.runtime = SynapRuntime(settings)
         self.git = GitRepository(settings.repository_path)
         self.logger = get_logger("daemon")
+        self.wiki_logger = get_logger("wiki")
         self._stop_event = asyncio.Event()
         self._last_git_state: GitState | None = None
         self._running = False
@@ -460,66 +485,154 @@ class RuntimeDaemon:
                 except (ValueError, OSError):
                     pass
 
+    def _check_wiki_skip_reason(self, file_path: str) -> str | None:
+        try:
+            source_path = self.runtime.wiki._resolve_source_path(file_path)
+            abs_source = self.settings.repository_path / source_path
+            if not abs_source.is_file():
+                return "source_file_missing"
+            target_path = self.runtime.wiki.wiki_dir / f"{source_path}.md"
+            current_sha = self.runtime.wiki._compute_sha256(source_path)
+            manifest = self.runtime.wiki._load_manifest()
+            if (
+                target_path.exists()
+                and manifest.get("files", {}).get(source_path, {}).get("sha256") == current_sha
+            ):
+                return "up_to_date"
+        except Exception:
+            pass
+        return None
+
     async def _wiki_worker_loop(self) -> None:
-        self.logger.info("wiki_worker_started")
+        self.wiki_logger.info("wiki_worker_started")
+        job_active = False
+        job_total = 0
+        processed_count = 0
 
-        while not self._stop_event.is_set():
-            try:
-                # Check queue depth for progress context
+        try:
+            while not self._stop_event.is_set():
                 try:
-                    with self.runtime.store.connect() as conn:
-                        total_pending = conn.execute(
-                            "SELECT COUNT(*) FROM wiki_queue WHERE status = 'pending'"
-                        ).fetchone()[0]
-                except Exception:
-                    total_pending = 0
-
-                task = await asyncio.to_thread(self.runtime.store.dequeue_wiki)
-                if task:
-                    task_id = task["task_id"]
-                    file_path = task["file_path"]
-                    attempts = task["attempts"]
-
-                    self.logger.info("wiki_worker_processing_task", path=file_path)
-
-                    if attempts > 0:
-                        await asyncio.sleep(min(30, 2**attempts))
-
-                    start_time = time.time()
+                    # Check queue depth for progress context
                     try:
-                        await asyncio.to_thread(self.runtime.wiki.ensure_wiki_page, file_path)
+                        with self.runtime.store.connect() as conn:
+                            total_pending = conn.execute(
+                                "SELECT COUNT(*) FROM wiki_queue WHERE status = 'pending'"
+                            ).fetchone()[0]
+                    except Exception:
+                        total_pending = 0
 
-                        await asyncio.to_thread(
-                            self.runtime.store.update_wiki_queue_status,
-                            task_id,
-                            "completed",
-                            attempts + 1,
+                    task = await asyncio.to_thread(self.runtime.store.dequeue_wiki)
+                    if task:
+                        if not job_active:
+                            job_active = True
+                            job_total = total_pending + 1
+                            processed_count = 0
+                            self.wiki_logger.info("wiki_job_started", total=job_total)
+                        else:
+                            job_total = max(job_total, processed_count + total_pending + 1)
+
+                        processed_count += 1
+                        task_id = task["task_id"]
+                        file_path = task["file_path"]
+                        attempts = task["attempts"]
+
+                        self.wiki_logger.info(
+                            "wiki_file_progress",
+                            path=file_path,
+                            n=processed_count,
+                            total=job_total,
                         )
-                        elapsed = time.time() - start_time
-                        self.logger.info(
-                            "wiki_worker_completed_task", path=file_path, elapsed=elapsed
+
+                        if attempts > 0:
+                            await asyncio.sleep(min(30, 2**attempts))
+
+                        skip_reason = await asyncio.to_thread(
+                            self._check_wiki_skip_reason, file_path
                         )
-                    except Exception as ex:
-                        self.logger.error("wiki_worker_task_failed", path=file_path, error=str(ex))
-                        if attempts + 1 >= 3:
+                        if skip_reason is not None:
+                            self.wiki_logger.info(
+                                "wiki_file_skipped",
+                                path=file_path,
+                                reason=skip_reason,
+                            )
                             await asyncio.to_thread(
                                 self.runtime.store.update_wiki_queue_status,
                                 task_id,
-                                "failed",
+                                "completed",
                                 attempts + 1,
                             )
                         else:
-                            await asyncio.to_thread(
-                                self.runtime.store.update_wiki_queue_status,
-                                task_id,
-                                "pending",
-                                attempts + 1,
+                            start_time = time.time()
+                            try:
+                                await asyncio.to_thread(
+                                    self.runtime.wiki.ensure_wiki_page, file_path
+                                )
+                                duration = round(time.time() - start_time, 4)
+                                model = (
+                                    getattr(self.runtime.wiki.provider, "default_model", None)
+                                    or getattr(self.runtime.wiki.provider, "model", None)
+                                    or self.settings.llm_model
+                                    or "none"
+                                )
+                                self.wiki_logger.info(
+                                    "wiki_file_done",
+                                    path=file_path,
+                                    duration=duration,
+                                    model=str(model),
+                                )
+                                await asyncio.to_thread(
+                                    self.runtime.store.update_wiki_queue_status,
+                                    task_id,
+                                    "completed",
+                                    attempts + 1,
+                                )
+                            except Exception as ex:
+                                err_msg = _sanitize_log_message(str(ex))
+                                self.wiki_logger.error(
+                                    "wiki_file_failed",
+                                    path=file_path,
+                                    error=err_msg,
+                                )
+                                if attempts + 1 >= 3:
+                                    await asyncio.to_thread(
+                                        self.runtime.store.update_wiki_queue_status,
+                                        task_id,
+                                        "failed",
+                                        attempts + 1,
+                                    )
+                                else:
+                                    await asyncio.to_thread(
+                                        self.runtime.store.update_wiki_queue_status,
+                                        task_id,
+                                        "pending",
+                                        attempts + 1,
+                                    )
+                    else:
+                        if job_active:
+                            self.wiki_logger.info(
+                                "wiki_job_finished",
+                                processed=processed_count,
+                                total=job_total,
                             )
-                else:
-                    await asyncio.sleep(5.0)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error("wiki_worker_loop_error", error=str(e))
-                await asyncio.sleep(5.0)
-        self.logger.info("wiki_worker_stopped")
+                            job_active = False
+                            job_total = 0
+                            processed_count = 0
+
+                        sleep_time = 0.05 if self.settings.profile == RuntimeProfile.TEST else 1.0
+                        await asyncio.sleep(sleep_time)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    err_msg = _sanitize_log_message(str(e))
+                    self.wiki_logger.error("wiki_worker_loop_error", error=err_msg)
+                    sleep_time = 0.05 if self.settings.profile == RuntimeProfile.TEST else 1.0
+                    await asyncio.sleep(sleep_time)
+        finally:
+            if job_active:
+                self.wiki_logger.info(
+                    "wiki_job_finished",
+                    processed=processed_count,
+                    total=job_total,
+                )
+                job_active = False
+            self.wiki_logger.info("wiki_worker_stopped")

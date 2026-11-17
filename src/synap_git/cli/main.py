@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, date, datetime
@@ -186,6 +187,9 @@ def _jsonable(value: Any) -> Any:
 
 mcp_app = typer.Typer(help="Model Context Protocol (MCP) server commands.", no_args_is_help=True)
 app.add_typer(mcp_app, name="mcp")
+
+daemon_app = typer.Typer(help="Manage background daemon services.", no_args_is_help=True)
+app.add_typer(daemon_app, name="daemon")
 
 memory_app = typer.Typer(help="Manage L3 Agent Memory.", no_args_is_help=True)
 app.add_typer(memory_app, name="memory")
@@ -801,6 +805,7 @@ def start(
             "--foreground", help="Run FastMCP stdio server in foreground after starting daemon."
         ),
     ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Start the Synap daemon in the background."""
     _verify_is_git(path)
@@ -820,10 +825,18 @@ def start(
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip())
             if _is_process_running(pid):
-                console.print(f"[green]✓ Synap daemon is already running (PID {pid}).[/green]")
                 hb = _read_daemon_heartbeat(abs_path)
-                if hb and "port" in hb:
-                    console.print(f"[green]✓ UI available at http://127.0.0.1:{hb['port']}[/green]")
+                port = hb.get("port", 9876) if hb else 9876
+                if json_output:
+                    _emit_json({"ok": True, "status": "running", "pid": pid, "port": port})
+                    if not foreground:
+                        return
+                else:
+                    console.print(f"[green]✓ Synap daemon is already running (PID {pid}).[/green]")
+                    if hb and "port" in hb:
+                        console.print(
+                            f"[green]✓ UI available at http://127.0.0.1:{hb['port']}[/green]"
+                        )
                 is_running = True
                 if not foreground:
                     return
@@ -855,7 +868,10 @@ def start(
                     start_new_session=True,
                 )
         except Exception as e:
-            console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
+            if json_output:
+                _emit_json({"ok": False, "error": str(e)})
+            else:
+                console.print(f"[bold red]✗ Failed to start daemon:[/bold red] {e}")
             raise typer.Exit(1)
 
         success = False
@@ -878,18 +894,28 @@ def start(
                             break
 
         if success:
-            console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
-            if status_val == "starting":
-                console.print(
-                    "[yellow]ℹ Daemon is currently indexing in the background...[/yellow]"
+            if json_output:
+                _emit_json({"ok": True, "status": status_val, "pid": pid, "port": port})
+                if not foreground:
+                    return
+            else:
+                console.print(f"[green]✓ Synap daemon started (PID {pid})[/green]")
+                if status_val == "starting":
+                    console.print(
+                        "[yellow]ℹ Daemon is currently indexing in the background...[/yellow]"
+                    )
+                else:
+                    console.print("[green]✓ Runtime healthy[/green]")
+                console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
+        else:
+            if json_output:
+                _emit_json(
+                    {"ok": False, "error": "Daemon started but did not report healthy status"}
                 )
             else:
-                console.print("[green]✓ Runtime healthy[/green]")
-            console.print(f"[green]✓ UI available at http://127.0.0.1:{port}[/green]")
-        else:
-            console.print(
-                "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
-            )
+                console.print(
+                    "[red]✗ Daemon started but did not report healthy status. Check logs in ~/.config/synap/logs/[/red]"
+                )
             raise typer.Exit(1)
 
         if not foreground:
@@ -931,6 +957,7 @@ def daemon_run(
 @app.command()
 def stop(
     path: Annotated[str, typer.Argument(help="Repository path to stop.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Gracefully terminate background services."""
     import os
@@ -941,13 +968,21 @@ def stop(
     pid_file = abs_path / ".synap" / "daemon.pid"
 
     if not pid_file.exists():
-        console.print("[yellow]No active daemon process found for this repository.[/yellow]")
+        if json_output:
+            _emit_json(
+                {"ok": True, "status": "stopped", "message": "No active daemon process found"}
+            )
+        else:
+            console.print("[yellow]No active daemon process found for this repository.[/yellow]")
         return
 
     try:
         pid = int(pid_file.read_text(encoding="utf-8").strip())
     except Exception:
-        console.print("[red]Invalid PID lockfile found. Cleaning up...[/red]")
+        if json_output:
+            _emit_json({"ok": True, "status": "stopped", "message": "Cleaned up invalid lockfile"})
+        else:
+            console.print("[red]Invalid PID lockfile found. Cleaning up...[/red]")
         try:
             pid_file.unlink()
         except OSError:
@@ -955,16 +990,20 @@ def stop(
         return
 
     if not _is_process_running(pid):
-        console.print(
-            "[yellow]Daemon process is not currently running. Cleaning up stale lockfile...[/yellow]"
-        )
+        if json_output:
+            _emit_json({"ok": True, "status": "stopped", "message": "Cleaned up stale lockfile"})
+        else:
+            console.print(
+                "[yellow]Daemon process is not currently running. Cleaning up stale lockfile...[/yellow]"
+            )
         try:
             pid_file.unlink()
         except OSError:
             pass
         return
 
-    console.print(f"[yellow]Stopping Synap daemon (PID {pid})...[/yellow]")
+    if not json_output:
+        console.print(f"[yellow]Stopping Synap daemon (PID {pid})...[/yellow]")
     try:
         if os.name == "nt":
             import ctypes
@@ -1020,9 +1059,16 @@ def stop(
                 pass
 
     if success:
-        console.print("[green]✓ Synap daemon stopped successfully.[/green]")
+        if json_output:
+            _emit_json({"ok": True, "status": "stopped", "pid": pid})
+        else:
+            console.print("[green]✓ Synap daemon stopped successfully.[/green]")
     else:
-        console.print("[red]✗ Failed to terminate daemon process.[/red]")
+        if json_output:
+            _emit_json({"ok": False, "error": "Failed to terminate daemon process"})
+        else:
+            console.print("[red]✗ Failed to terminate daemon process.[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -1151,6 +1197,7 @@ def status(
         bool, typer.Option("--quiet", "-q", help="Minimal one-line status output.")
     ] = False,
     json_output: Annotated[bool, JSON_OPTION] = False,
+    check_daemon: bool = False,
 ) -> None:
     """Show current repository context status."""
     import sys
@@ -1170,6 +1217,8 @@ def status(
         if limit is not None and limit >= 0:
             out["limit"] = limit
         _emit_json(out)
+        if check_daemon and not daemon_running:
+            raise typer.Exit(1)
         return
 
     if quiet:
@@ -1203,6 +1252,39 @@ def status(
                 live.update(_render_status_content(abs_path, settings, runtime, limit=limit))
         except KeyboardInterrupt:
             pass
+
+
+@daemon_app.command("start")
+def daemon_start(
+    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
+    foreground: Annotated[
+        bool,
+        typer.Option(
+            "--foreground", help="Run FastMCP stdio server in foreground after starting daemon."
+        ),
+    ] = False,
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Start the Synap daemon."""
+    start(path=path, foreground=foreground, json_output=json_output)
+
+
+@daemon_app.command("stop")
+def daemon_stop(
+    path: Annotated[str, typer.Argument(help="Repository path to stop.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Stop the Synap daemon."""
+    stop(path=path, json_output=json_output)
+
+
+@daemon_app.command("status")
+def daemon_status(
+    path: Annotated[str, typer.Argument(help="Repository path to inspect.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
+) -> None:
+    """Check Synap daemon status."""
+    status(path=path, json_output=json_output, check_daemon=True)
 
 
 @app.command()
@@ -1445,15 +1527,6 @@ Follow these operational guidelines:
 """
 
 
-@app.command("preamble")
-def preamble_cmd(
-    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
-    json_output: Annotated[bool, JSON_OPTION] = False,
-) -> None:
-    """Alias for 'synap context'."""
-    context_cmd(path=path, json_output=json_output)
-
-
 @app.command("ctx")
 def ctx_cmd(
     task: Annotated[str, typer.Argument(help="Task or implementation goal.")] = "",
@@ -1461,60 +1534,92 @@ def ctx_cmd(
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Output high-density, token-bounded context preamble for coding agents and tasks."""
-    _verify_is_git(path)
-    settings = _settings(path)
-    runtime = SynapRuntime(settings)
-    runtime.initialize_storage()
+    try:
+        _verify_is_git(path)
+        settings = _settings(path)
+        runtime = SynapRuntime(settings)
+        runtime.initialize_storage()
 
-    from synap_git.mcp.server import SynapMCPFacade
+        from synap_git.mcp.server import SynapMCPFacade
 
-    facade = SynapMCPFacade(runtime)
-    data = facade.get_session_preamble()
+        facade = SynapMCPFacade(runtime)
+        data = facade.get_session_preamble()
 
-    if task.strip():
-        data["task"] = task.strip()
-        try:
-            search_res = facade.search(task.strip(), max_tokens=1500, summary_only=True)
-            data["task_matches"] = search_res.get("matches", [])
-        except Exception:
-            pass
+        if task.strip():
+            data["task"] = task.strip()
+            try:
+                search_res = facade.search(task.strip(), max_tokens=1500, summary_only=True)
+                data["task_matches"] = search_res.get("matches", [])
+            except Exception:
+                pass
 
-    if json_output:
-        typer.echo(json.dumps(data, indent=2))
-        return
+        if json_output:
+            _emit_json(data)
+            return
 
-    compact = data.get("compact_preamble", "")
-    if task.strip():
-        typer.echo(f"# TASK: {task.strip()}\n")
-    typer.echo(compact if compact else json.dumps(data, indent=2))
+        compact = data.get("compact_preamble", "")
+        if task.strip():
+            typer.echo(f"# TASK: {task.strip()}\n")
+        typer.echo(compact if compact else json.dumps(data, indent=2))
+    except Exception as e:
+        if json_output:
+            _emit_json({"ok": False, "error": str(e)})
+        else:
+            console.print(f"[bold red]✗ Failed to generate context preamble:[/bold red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command("remember")
 def remember_cmd(
-    key: Annotated[str, typer.Argument(help="Topic key for this memory (e.g. 'auth_policy').")],
-    content: Annotated[str, typer.Argument(help="Detailed observation or rule to persist.")],
+    key_or_content: Annotated[
+        str, typer.Argument(help="Topic key (e.g. 'auth') or detailed content to persist.")
+    ],
+    content: Annotated[
+        str | None,
+        typer.Argument(help="Detailed observation or rule if a topic key was passed."),
+    ] = None,
     summary: Annotated[str, typer.Option("--summary", "-s", help="Concise summary.")] = "",
     path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
     json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Save an architectural decision or fact into local persistent memory."""
-    from synap_git.mcp.server import SynapMCPFacade
+    try:
+        from synap_git.mcp.server import SynapMCPFacade
 
-    _verify_is_git(path)
-    settings = _settings(path)
-    runtime = SynapRuntime(settings)
-    runtime.initialize_storage()
+        _verify_is_git(path)
+        settings = _settings(path)
+        runtime = SynapRuntime(settings)
+        runtime.initialize_storage()
 
-    facade = SynapMCPFacade(runtime)
-    res = facade.remember(key=key, content=content, summary=summary)
+        if content is None:
+            actual_content = key_or_content.strip()
+            words = [w for w in re.findall(r"\w+", actual_content) if len(w) >= 2]
+            key = "_".join(words[:2]).lower() if words else "general"
+        else:
+            key = key_or_content.strip()
+            actual_content = content.strip()
 
-    if json_output:
-        _emit_json(res)
-        return
+        facade = SynapMCPFacade(runtime)
+        res = facade.remember(key=key, content=actual_content, summary=summary)
 
-    console.print(
-        f"[bold green]✔ Memory recorded[/bold green] under key '[cyan]{key}[/cyan]' (ID: {res['memory_id'][:8]})."
-    )
+        # Verified result check
+        rec = runtime.store.get_recent_memory(context_key=key)
+        if not rec:
+            raise RuntimeError("Verification failed: memory record was not persisted into SQLite.")
+
+        if json_output:
+            _emit_json(res)
+            return
+
+        console.print(
+            f"[bold green]✔ Memory recorded[/bold green] under key '[cyan]{key}[/cyan]' (ID: {res['memory_id'][:8]})."
+        )
+    except Exception as e:
+        if json_output:
+            _emit_json({"ok": False, "error": str(e)})
+        else:
+            console.print(f"[bold red]✗ Failed to record memory:[/bold red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command("recall")
@@ -2723,6 +2828,14 @@ def main(
     if ctx.invoked_subcommand is None:
         repo_path = Path.cwd()
         if (repo_path / ".git").exists() or (repo_path / ".synap").exists():
+            import sys
+
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                from synap_git.cli.tui import start_tui
+
+                start_tui(repo_path)
+                return
+
             try:
                 from synap_git import __version__
 
@@ -2730,51 +2843,22 @@ def main(
                 runtime = SynapRuntime(settings)
                 status = runtime.status()
                 state = runtime.git.state()
+                wiki_dir = repo_path / ".synap" / "wiki"
+                wiki_pages = len(list(wiki_dir.glob("**/*.md"))) if wiki_dir.exists() else 0
 
-                table = Table(
-                    title=f"⚡ Synapse v{__version__} — Git-Aware Context Engine",
-                    border_style="cyan",
-                )
-                table.add_column("Property", style="bold")
-                table.add_column("Value")
-                table.add_row("Branch", f"[bold green]{status.branch}[/bold green]")
-                table.add_row(
-                    "Commit", f"`{status.git_commit[:8] if status.git_commit else 'unknown'}`"
-                )
-                table.add_row(
-                    "Working Tree",
-                    "[red]DIRTY[/red]" if state.is_dirty else "[green]CLEAN[/green]",
-                )
-                table.add_row("Indexed Files", str(status.files))
-                table.add_row("Indexed Symbols", str(status.symbols))
-                console.print(table)
-                console.print("\n[bold]Quick Commands:[/bold]")
                 console.print(
-                    "  [cyan]synap context[/cyan]        Print token-bounded session preamble (< 750 tokens)"
+                    f"⚡ Synapse v{__version__} · {repo_path.name} @ {status.branch} "
+                    f"[{'dirty' if state.is_dirty else 'clean'}]"
                 )
                 console.print(
-                    "  [cyan]synap blast[/cyan]          Analyze blast radius of uncommitted changes"
+                    f"📊 Index: {status.symbols} symbols across {status.files} files · Wiki: {wiki_pages} pages"
                 )
-                console.print(
-                    "  [cyan]synap test[/cyan]           Run tests impacted by blast radius"
+                model_desc = (
+                    f"Local LLM: {settings.llm_provider}:{settings.llm_model}"
+                    if settings.llm_provider
+                    else "Mode A (deterministic Tree-sitter AST, no LLM)"
                 )
-                console.print(
-                    "  [cyan]synap pack[/cyan]           Export token-budgeted prompt pack (< 8k tokens)"
-                )
-                console.print(
-                    "  [cyan]synap explain <sym>[/cyan]  Inspect symbol, callers, dependencies & tests"
-                )
-                console.print(
-                    "  [cyan]synap skeleton <f>[/cyan]  AST skeleton (85% token reduction)"
-                )
-                console.print(
-                    "  [cyan]synap hubs[/cyan]           Top architectural hubs via PageRank"
-                )
-                console.print("  [cyan]synap search <q>[/cyan]    Hybrid structural retrieval")
-                console.print(
-                    "  [cyan]synap doctor[/cyan]         System integrity and diagnostic health check"
-                )
-                console.print("  [dim]Run 'synap --help' for all commands.[/dim]\n")
+                console.print(f"🧠 Runtime: {model_desc}")
                 return
             except Exception:
                 pass
@@ -3391,21 +3475,8 @@ def doctor(
         pre = facade.get_session_preamble()
         console.print(pre.get("compact_preamble", "No context generated."))
 
-
-# Alias aliases
-app.command(name="st", hidden=True)(status)
-app.command(name="sk", hidden=True)(skeleton_cmd)
-app.command(name="doc", hidden=True)(doctor)
-app.command(name="t", hidden=True)(test_cmd)
-app.command(name="ex", hidden=True)(explain_cmd)
-
-
-@app.command()
-def run(
-    path: Annotated[str, typer.Argument(help="Repository path to watch.")] = ".",
-) -> None:
-    """Start the Synap daemon and serve the Diagnostic UI."""
-    start(path)
+    if not overall_healthy:
+        raise typer.Exit(1)
 
 
 @mcp_app.command("serve")
@@ -3436,129 +3507,18 @@ def mcp_serve(
         os._exit(0)
 
 
-@mcp_app.command("start")
-def mcp_start(
-    path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
-) -> None:
-    """Alias for 'synap mcp serve' to run FastMCP stdio server in foreground."""
-    mcp_serve(path)
-
-
-@mcp_app.command("config")
-def mcp_config(
-    path: Annotated[
-        str, typer.Argument(help="Repository path (omit for dynamic global setup).")
-    ] = ".",
-    ide: Annotated[
-        str,
-        typer.Option(
-            "--ide",
-            "-i",
-            help="Target IDE/tool format (generic, cursor, windsurf, claude, cline).",
-        ),
-    ] = "generic",
-    global_setup: Annotated[
-        bool,
-        typer.Option(
-            "--global/--local",
-            "-g/-l",
-            help="Configure pathless global setup (works dynamically across all repositories).",
-        ),
-    ] = True,
-) -> None:
-    """Output the MCP server configuration for IDE setup (Cursor, Windsurf, Claude, Cline, etc.)."""
-    import shutil
-    import sys
-
-    root = _resolve_repo_root(path)
-    synap_bin = shutil.which("synap")
-    if synap_bin:
-        server_cmd = synap_bin
-        server_args = ["mcp", "serve"]
-    else:
-        server_cmd = sys.executable
-        server_args = ["-m", "synap_git.cli", "mcp", "serve"]
-
-    if not global_setup and path != ".":
-        server_args.append(root.as_posix())
-
-    config = {
-        "mcpServers": {
-            "synap": {
-                "command": server_cmd,
-                "args": server_args,
-            }
-        }
-    }
-    _emit_json(config)
-
-
-@mcp_app.command("print-config")
-def mcp_print_config(
-    path: Annotated[
-        str, typer.Option("--path", "-p", help="Repository path (omit for dynamic global setup).")
-    ] = ".",
-    ide: Annotated[
-        str,
-        typer.Option(
-            "--ide",
-            "-i",
-            help="Target IDE format (all, cursor, claude, windsurf).",
-        ),
-    ] = "all",
-    global_setup: Annotated[
-        bool,
-        typer.Option(
-            "--global/--local",
-            "-g/-l",
-            help="Configure pathless global setup (works dynamically across all repositories).",
-        ),
-    ] = True,
-) -> None:
-    """Print the exact MCP JSON snippet directly to stdout for copy-pasting."""
-    import shutil
-    import sys
-
-    root = _resolve_repo_root(path)
-    synap_bin = shutil.which("synap")
-    if synap_bin:
-        server_cmd = synap_bin
-        server_args = ["mcp", "serve"]
-    else:
-        server_cmd = sys.executable
-        server_args = ["-m", "synap_git.cli", "mcp", "serve"]
-
-    if not global_setup and path != ".":
-        server_args.append(root.as_posix())
-
-    ide_choice = ide.lower().strip()
-    if ide_choice not in ("all", "cursor", "claude", "windsurf"):
-        console.print(
-            f"[bold red]Error:[/bold red] Unknown IDE '{ide}'. Choose from: all, cursor, claude, windsurf."
-        )
-        raise typer.Exit(1)
-
-    snippet = {
-        "mcpServers": {
-            "synap": {
-                "command": server_cmd,
-                "args": server_args,
-            }
-        }
-    }
-    _emit_json(snippet)
-
-
 @mcp_app.command("verify")
 def mcp_verify(
     path: Annotated[str, typer.Argument(help="Repository path.")] = ".",
+    json_output: Annotated[bool, JSON_OPTION] = False,
 ) -> None:
     """Verify MCP tools, schemas, and transport stability."""
     import time
 
-    console.print("[bold cyan]Synap MCP Verification[/bold cyan]\n")
+    if not json_output:
+        console.print("[bold cyan]Synap MCP Verification[/bold cyan]\n")
 
-    settings = _settings(path)
+    settings = _settings(path, json_output=json_output)
     runtime = SynapRuntime(settings)
     runtime.bootstrap()
 
@@ -3572,66 +3532,72 @@ def mcp_verify(
     table.add_column("Latency (ms)")
     table.add_column("Details")
 
-    with console.status(
-        "[bold yellow]Verifying MCP transport and tools...[/bold yellow]"
-    ) as status:
+    stage_results: list[dict[str, Any]] = []
 
-        def _simulate_mcp_call(tool_name: str, *args: Any, **kwargs: Any) -> bool:
-            status.update(
-                f"[bold yellow]Verifying stage: [white]{tool_name}[/white]...[/bold yellow]"
+    def _simulate_mcp_call(tool_name: str, *args: Any, **kwargs: Any) -> bool:
+        start = time.monotonic()
+        try:
+            import uuid
+
+            status_info = facade.runtime.status()
+            dirty = status_info.is_dirty
+            warnings = ["Working tree is dirty. Index may be stale."] if dirty else []
+
+            method = getattr(facade, tool_name)
+            data = method(*args, **kwargs)
+
+            response = {
+                "ok": True,
+                "data": data,
+                "warnings": warnings,
+                "trace_id": str(uuid.uuid4()),
+                "dirty_tree": dirty,
+            }
+
+            # Verify strict schema
+            assert "ok" in response
+            assert "data" in response
+            assert "warnings" in response
+            assert "trace_id" in response
+            assert "dirty_tree" in response
+
+            latency = (time.monotonic() - start) * 1000
+
+            if tool_name == "search":
+                assert "trace" in data, "Trace payload missing in search data"
+
+            details = f"keys: {list(data.keys())}"
+            table.add_row(tool_name, "[green]PASS[/green]", f"{latency:.1f}", details)
+            stage_results.append(
+                {"stage": tool_name, "ok": True, "latency_ms": latency, "details": details}
             )
-            start = time.monotonic()
-            try:
-                import uuid
+            return True
+        except Exception as e:
+            latency = (time.monotonic() - start) * 1000
+            table.add_row(tool_name, "[red]FAIL[/red]", f"{latency:.1f}", str(e))
+            stage_results.append(
+                {"stage": tool_name, "ok": False, "latency_ms": latency, "error": str(e)}
+            )
+            return False
 
-                status_info = facade.runtime.status()
-                dirty = status_info.is_dirty
-                warnings = ["Working tree is dirty. Index may be stale."] if dirty else []
+    results = [
+        _simulate_mcp_call("get_status"),
+        _simulate_mcp_call("verify_system"),
+        _simulate_mcp_call("search", "User"),
+        _simulate_mcp_call("create_checkpoint", "Testing MCP", ["test.py"], "Next", "None"),
+        _simulate_mcp_call("restore_checkpoint", "latest"),
+    ]
 
-                method = getattr(facade, tool_name)
-                data = method(*args, **kwargs)
-
-                response = {
-                    "ok": True,
-                    "data": data,
-                    "warnings": warnings,
-                    "trace_id": str(uuid.uuid4()),
-                    "dirty_tree": dirty,
-                }
-
-                # Verify strict schema
-                assert "ok" in response
-                assert "data" in response
-                assert "warnings" in response
-                assert "trace_id" in response
-                assert "dirty_tree" in response
-
-                latency = (time.monotonic() - start) * 1000
-
-                if tool_name == "search":
-                    # Check trace payload exists
-                    assert "trace" in data, "Trace payload missing in search data"
-
-                details = f"keys: {list(data.keys())}"
-                table.add_row(tool_name, "[green]PASS[/green]", f"{latency:.1f}", details)
-                time.sleep(0.1)  # Visual breathing room
-                return True
-            except Exception as e:
-                latency = (time.monotonic() - start) * 1000
-                table.add_row(tool_name, "[red]FAIL[/red]", f"{latency:.1f}", str(e))
-                return False
-
-        results = [
-            _simulate_mcp_call("get_status"),
-            _simulate_mcp_call("verify_system"),
-            _simulate_mcp_call("search", "User"),
-            _simulate_mcp_call("create_checkpoint", "Testing MCP", ["test.py"], "Next", "None"),
-            _simulate_mcp_call("restore_checkpoint", "latest"),
-        ]
+    all_passed = all(results)
+    if json_output:
+        _emit_json({"ok": all_passed, "stages": stage_results})
+        if not all_passed:
+            raise typer.Exit(1)
+        return
 
     console.print(table)
 
-    if all(results):
+    if all_passed:
         console.print("\n[bold green]✓ MCP Protocol Verified. All contracts passed.[/bold green]")
     else:
         console.print("\n[bold red]✗ MCP Protocol Verification Failed.[/bold red]")

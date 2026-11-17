@@ -1,17 +1,93 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import logging
+import queue
 import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from typing import cast
 from uuid import uuid4
 
 import structlog
 
 from synap_git.config import LoggingMode, SynapSettings
+
+_queue_listener: QueueListener | None = None
+_log_queue: queue.Queue[logging.LogRecord] | None = None
+
+_COMPONENT_MAP: dict[str, str] = {
+    "wiki": "wiki",
+    "wiki_engine": "wiki",
+    "wiki_worker": "wiki",
+    "daemon": "daemon",
+    "runtime_daemon": "daemon",
+    "watcher": "daemon",
+    "indexer": "indexer",
+    "engine": "indexer",
+    "scanner": "indexer",
+    "parser": "indexer",
+    "ast": "indexer",
+    "storage": "storage",
+    "store": "storage",
+    "sqlite": "storage",
+    "db": "storage",
+    "database": "storage",
+    "cli": "cli",
+    "main": "cli",
+    "command": "cli",
+}
+
+
+def _normalize_component(name: str) -> str:
+    cleaned = name.lower().strip()
+    if cleaned in _COMPONENT_MAP:
+        return _COMPONENT_MAP[cleaned]
+    if any(cleaned.startswith(prefix) for prefix in ("wiki", "doc")):
+        return "wiki"
+    if any(cleaned.startswith(prefix) for prefix in ("daemon", "watch")):
+        return "daemon"
+    if any(cleaned.startswith(prefix) for prefix in ("index", "scan", "parse")):
+        return "indexer"
+    if any(cleaned.startswith(prefix) for prefix in ("store", "sql", "db")):
+        return "storage"
+    if any(cleaned.startswith(prefix) for prefix in ("cli", "cmd")):
+        return "cli"
+    return cleaned
+
+
+def _ensure_component_processor(
+    logger: structlog.types.WrappedLogger,
+    method_name: str,
+    event_dict: structlog.types.EventDict,
+) -> structlog.types.EventDict:
+    if "component" not in event_dict:
+        subsystem = event_dict.get("subsystem", "daemon")
+        event_dict["component"] = _normalize_component(str(subsystem))
+    return event_dict
+
+
+class FlushingRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that immediately flushes every record to disk."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        super().emit(record)
+        self.flush()
+
+
+def stop_logging() -> None:
+    """Stop the global QueueListener and flush pending log records."""
+    global _queue_listener, _log_queue
+    if _queue_listener is not None:
+        try:
+            _queue_listener.stop()
+        except Exception:
+            pass
+        _queue_listener = None
+    _log_queue = None
 
 
 @dataclass(frozen=True)
@@ -21,11 +97,14 @@ class TraceResult:
 
 
 def configure_logging(settings: SynapSettings) -> None:
-    from logging.handlers import RotatingFileHandler
+    global _queue_listener, _log_queue
+
+    stop_logging()
 
     timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
     shared_processors: list[structlog.typing.Processor] = [
         structlog.contextvars.merge_contextvars,
+        _ensure_component_processor,
         structlog.stdlib.add_log_level,
         timestamper,
         structlog.processors.StackInfoRenderer(),
@@ -46,12 +125,12 @@ def configure_logging(settings: SynapSettings) -> None:
     for h in list(root_logger.handlers):
         root_logger.removeHandler(h)
 
-    # Set up rotating file handler (5MB, 5 backups)
-    file_handler = RotatingFileHandler(
+    # Set up rotating file handler (5MB, 5 backups) with immediate flush
+    file_handler = FlushingRotatingFileHandler(
         log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )
     file_handler.setFormatter(logging.Formatter("%(message)s"))
-    root_logger.addHandler(file_handler)
+    file_handler.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
     # Set up stream handler (stderr)
     stream_handler = logging.StreamHandler(sys.stderr)
@@ -60,7 +139,21 @@ def configure_logging(settings: SynapSettings) -> None:
         stream_handler.setLevel(logging.DEBUG)
     else:
         stream_handler.setLevel(logging.WARNING)
-    root_logger.addHandler(stream_handler)
+
+    # Centralized QueueHandler + QueueListener for thread and process safety
+    log_queue: queue.Queue[logging.LogRecord] = queue.Queue(-1)
+    queue_handler = QueueHandler(log_queue)
+    queue_handler.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    root_logger.addHandler(queue_handler)
+
+    _queue_listener = QueueListener(
+        log_queue,
+        file_handler,
+        stream_handler,
+        respect_handler_level=True,
+    )
+    _queue_listener.start()
+    _log_queue = log_queue
 
     root_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     for quiet_logger in ("markdown_it", "asyncio", "httpcore", "httpx"):
@@ -73,9 +166,16 @@ def configure_logging(settings: SynapSettings) -> None:
         cache_logger_on_first_use=True,
     )
 
+    atexit.register(stop_logging)
 
-def get_logger(subsystem: str) -> structlog.stdlib.BoundLogger:
-    logger = structlog.get_logger("synap").bind(subsystem=subsystem)
+
+def get_logger(
+    subsystem: str = "daemon",
+    *,
+    component: str | None = None,
+) -> structlog.stdlib.BoundLogger:
+    comp = component or _normalize_component(subsystem)
+    logger = structlog.get_logger("synap").bind(component=comp, subsystem=subsystem)
     return cast(structlog.stdlib.BoundLogger, logger)
 
 

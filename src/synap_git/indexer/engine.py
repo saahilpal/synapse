@@ -592,6 +592,7 @@ class SynapRuntime:
     def index_repository(
         self, *, git_state: GitState | None = None, force: bool = False
     ) -> str | None:
+        self.initialize_storage()
         git_state = git_state or self.git.state(force=True)
         branch = git_state.effective_branch
 
@@ -609,8 +610,6 @@ class SynapRuntime:
                     commit=last_indexed,
                 )
                 return last_indexed
-
-        self.initialize_storage()
 
         # Check active commit after storage initialization
         if last_indexed is None:

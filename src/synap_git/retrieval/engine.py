@@ -119,92 +119,104 @@ class QueryIntent(str, Enum):
 def classify_intent_5tier(query: str) -> QueryIntent:
     """
     5-tier query intent router:
-    1. Past Decisions: architectural choices, decisions, history, ADRs.
-    2. Debugging: errors, failures, bugs, reverts, why something failed.
-    3. Architecture: high-level design, overview, conceptual system diagrams.
-    4. Navigation: callers, callees, file paths, imports, references.
-    5. Symbol Lookup: exact symbols, declarations, function/class lookups.
+    1. Symbol lookup (exact symbol / function signature)
+    2. "Where is X" (file path & structural outline)
+    3. "How does X work" (wiki plain-English explanation + AST edges)
+    4. Stack trace / bug analysis (blast radius + recent changes / why changed)
+    5. Architectural & convention queries (decisions + memory + global habits)
     """
-    q_lower = query.lower()
+    q_lower = query.lower().strip()
 
-    # Tier 1: Past Decisions
+    # Tier 5: Decisions & conventions take precedence over generic questions
     decision_markers = (
         "decision",
         "decisions",
-        "why did we",
-        "why was",
-        "rationale",
+        "choose",
+        "chose",
+        "chosen",
+        "choice",
         "tradeoff",
         "trade-off",
         "adr",
-        "past choice",
+        "convention",
+        "conventions",
+        "habit",
+        "habits",
+        "guideline",
+        "rationale",
     )
     if any(m in q_lower for m in decision_markers):
         return QueryIntent.PAST_DECISIONS
 
-    # Tier 2: Debugging
-    debugging_markers = (
-        "fail",
-        "failing",
+    # Tier 4: Stack trace / bug analysis & change rationale
+    bug_markers = (
+        "traceback",
+        "stack trace",
+        "stacktrace",
         "error",
-        "bug",
-        "crash",
         "exception",
+        "crash",
+        "failed",
+        "failing",
+        "fail",
         "broken",
-        "fix",
+        "bug",
         "revert",
         "reverted",
-        "why does",
-        "why did",
-        "issue",
-        "traceback",
+        "why changed",
+        "why change",
+        "what changed",
+        "recent changes",
     )
-    if any(m in q_lower for m in debugging_markers):
+    if any(m in q_lower for m in bug_markers):
+        return QueryIntent.DEBUGGING
+    if ("changed" in q_lower or "change" in q_lower) and ("why" in q_lower or "what" in q_lower):
         return QueryIntent.DEBUGGING
 
-    # Tier 3: Architecture
-    architecture_markers = (
-        "architecture",
-        "overview",
-        "design",
-        "concept",
-        "high level",
-        "system",
-        "pattern",
-        "summary",
-        "structure",
-        "what is",
-        "what are",
-        "what does",
-        "how does",
-        "explain",
-    )
-    if any(m in q_lower for m in architecture_markers):
-        return QueryIntent.ARCHITECTURE
-
-    # Tier 4: Navigation
-    navigation_markers = (
+    # Tier 2: "Where is X" / Navigation (file path & structural outline)
+    where_markers = (
         "where is",
         "where are",
-        "callers",
-        "callees",
-        "imports",
-        "imported",
-        "references",
-        "referenced by",
-        "find file",
+        "where can i find",
         "path to",
-        "dependencies",
-        "/",
-        ".py",
-        ".ts",
-        ".rs",
-        ".go",
+        "location of",
+        "find file",
+        "outline",
+        "outline of",
+        "file path",
+        "directory of",
+        "callers of",
+        "caller of",
+        "callees of",
+        "callee of",
     )
-    if any(m in q_lower for m in navigation_markers):
+    if any(m in q_lower for m in where_markers):
         return QueryIntent.NAVIGATION
 
-    # Tier 5: Symbol Lookup
+    # Tier 3: "How does X work" (wiki plain-English explanation + AST edges)
+    how_markers = (
+        "how does",
+        "how do",
+        "how it works",
+        "how works",
+        "how to use",
+        "walk me through",
+        "explain",
+        "what is",
+        "what does",
+        "what are",
+        "summary of",
+        "overview",
+        "architecture",
+    )
+    if any(m in q_lower for m in how_markers):
+        return QueryIntent.ARCHITECTURE
+
+    # Additional past decisions / rules fallback
+    if any(m in q_lower for m in ("rule", "rules", "standard", "memory")):
+        return QueryIntent.PAST_DECISIONS
+
+    # Tier 1: Symbol lookup (exact symbol / function signature)
     return QueryIntent.SYMBOL_LOOKUP
 
 
@@ -284,10 +296,98 @@ class HybridRetrievalEngine:
         self._hub_ranks: dict[str, int] | None = None
         try:
             self.index_docs()
+            self.index_git_commits()
         except Exception as e:
             import structlog
 
-            structlog.get_logger().warning("doc_indexing_failed", error=str(e))
+            structlog.get_logger().warning("indexing_failed", error=str(e))
+
+    def index_git_commits(self, limit: int = 100) -> int:
+        """
+        Ingest commit messages, author, and timestamp during indexing so queries
+        like 'why was X changed' retrieve commit rationale from SQLite.
+        """
+        if not (self.repo_path / ".git").exists():
+            return 0
+        import subprocess
+
+        try:
+            res = subprocess.run(
+                ["git", "log", f"-n{limit}", "--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e"],
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception:
+            return 0
+
+        records = []
+        raw_commits = res.stdout.strip().split("\x1e")
+        for raw in raw_commits:
+            parts = raw.strip().split("\x1f")
+            if len(parts) >= 4:
+                commit_hash = parts[0].strip()
+                author = parts[1].strip()
+                timestamp = parts[2].strip()
+                subject = parts[3].strip()
+                body = parts[4].strip() if len(parts) > 4 else ""
+                full_msg = f"{subject}\n{body}".strip() if body else subject
+                records.append((commit_hash, author, timestamp, full_msg, subject))
+
+        if not records:
+            return 0
+
+        with self.store.connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS git_commit_history (
+                    commit_hash TEXT PRIMARY KEY,
+                    author TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    summary TEXT NOT NULL
+                )
+                """
+            )
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO git_commit_history (commit_hash, author, timestamp, message, summary)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                records,
+            )
+        return len(records)
+
+    def get_commit_rationale(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Retrieve commit rationale from SQLite for change-related queries."""
+        query_words = [
+            w.lower()
+            for w in re.findall(r"\w+", query)
+            if len(w) >= 3
+            and w.lower() not in {"why", "was", "did", "the", "for", "and", "changed", "change"}
+        ]
+        try:
+            with self.store.connect() as conn:
+                tbl_check = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='git_commit_history'"
+                ).fetchone()
+                if not tbl_check:
+                    return []
+                cur = conn.execute(
+                    "SELECT commit_hash, author, timestamp, message, summary FROM git_commit_history ORDER BY timestamp DESC LIMIT 100"
+                )
+                rows = [dict(row) for row in cur.fetchall()]
+                if not query_words:
+                    return rows[:limit]
+                matched: list[dict[str, Any]] = []
+                for r in rows:
+                    msg_lower = str(r["message"]).lower()
+                    if any(w in msg_lower for w in query_words):
+                        matched.append(r)
+                return matched[:limit]
+        except Exception:
+            return []
 
     def index_docs(self) -> int:
         """
@@ -419,10 +519,11 @@ class HybridRetrievalEngine:
         # Ensure documentation files are indexed into symbols_fts
         try:
             self.index_docs()
+            self.index_git_commits()
         except Exception as e:
             import structlog
 
-            structlog.get_logger().warning("doc_indexing_failed", error=str(e))
+            structlog.get_logger().warning("indexing_failed", error=str(e))
 
         # 5-tier query intent routing
         intent_5tier = classify_intent_5tier(query)
@@ -522,20 +623,81 @@ class HybridRetrievalEngine:
         grounding_sources = []
         trace_elements = []
 
-        # Ingestion of Past Decisions if intent matches
+        # Tier 4: Git Commit Rationale for bug analysis / why changed
+        if intent_5tier == QueryIntent.DEBUGGING:
+            commit_rationale = self.get_commit_rationale(query, limit=5)
+            if commit_rationale:
+                commit_blocks = ["# RECENT GIT COMMIT RATIONALE (Why changes occurred)"]
+                for c in commit_rationale:
+                    commit_blocks.append(
+                        f"- Commit `{c['commit_hash'][:8]}` by {c['author']} ({c['timestamp'][:10]}): {c['summary']}"
+                    )
+                    if c["message"] != c["summary"]:
+                        body_preview = c["message"][len(c["summary"]) :].strip()
+                        if body_preview:
+                            commit_blocks.append(f"  {body_preview[:200]}")
+                commit_str = "\n".join(commit_blocks)
+                c_toks = len(self.tokenizer.encode(commit_str))
+                if tokens_used + c_toks <= retrieval_budget:
+                    packed_blocks.append(commit_str)
+                    tokens_used += c_toks
+
+        # Tier 5: Decisions + Memory + Global Habits
         if intent_5tier == QueryIntent.PAST_DECISIONS:
             decisions = self.store.get_decisions(limit=5)
+            recent_memories = self.store.get_recent_memory(limit=5)
+            global_memories: list[dict[str, Any]] = []
+            try:
+                from synap_git.storage.global_memory import GlobalMemoryStore
+
+                global_memories = GlobalMemoryStore().list_memories(limit=5)
+            except Exception:
+                pass
+
+            arch_blocks: list[str] = []
             if decisions:
-                dec_blocks = ["# PAST ARCHITECTURAL DECISIONS"]
+                arch_blocks.append("# ARCHITECTURAL DECISIONS")
                 for d in decisions:
-                    dec_blocks.append(
+                    arch_blocks.append(
                         f"- [{d['decision_id'][:8]}] {d['content']} (Context: {d.get('context', 'none')})"
                     )
-                dec_str = "\n".join(dec_blocks)
-                dec_toks = len(self.tokenizer.encode(dec_str))
-                if tokens_used + dec_toks <= retrieval_budget:
-                    packed_blocks.append(dec_str)
-                    tokens_used += dec_toks
+            if recent_memories:
+                arch_blocks.append("# AGENT RECENT MEMORIES")
+                for m in recent_memories:
+                    arch_blocks.append(
+                        f"- [{m.get('context_key', 'note')}]: {m.get('summary') or m.get('payload', '')}"
+                    )
+            if global_memories:
+                arch_blocks.append("# GLOBAL HABITS & CONVENTIONS")
+                for gm in global_memories:
+                    arch_blocks.append(
+                        f"- [{gm.get('category', 'habit')}] {gm.get('context_key')}: {gm.get('summary') or gm.get('content', '')}"
+                    )
+
+            if arch_blocks:
+                arch_str = "\n".join(arch_blocks)
+                arch_toks = len(self.tokenizer.encode(arch_str))
+                if tokens_used + arch_toks <= retrieval_budget:
+                    packed_blocks.append(arch_str)
+                    tokens_used += arch_toks
+
+        # Tier 3: Wiki Plain-English Explanation
+        if intent_5tier == QueryIntent.ARCHITECTURE:
+            wiki_dir = self.repo_path / ".synap" / "wiki"
+            if wiki_dir.exists():
+                wiki_blocks: list[str] = ["# REPOSITORY WIKI & SYSTEM EXPLANATION"]
+                for wfile in list(wiki_dir.glob("**/*.md"))[:3]:
+                    try:
+                        wtext = wfile.read_text(encoding="utf-8", errors="replace")
+                        wiki_blocks.append(f"## Wiki: {wfile.name}\n{wtext[:1000]}")
+                    except Exception:
+                        pass
+                if len(wiki_blocks) > 1:
+                    w_str = "\n".join(wiki_blocks)
+                    w_toks = len(self.tokenizer.encode(w_str))
+                    if tokens_used + w_toks <= retrieval_budget:
+                        packed_blocks.append(w_str)
+                        tokens_used += w_toks
 
         included_files = set()
         for cand, score in ranked:
@@ -820,12 +982,31 @@ class HybridRetrievalEngine:
 
         t_llm = time.perf_counter()
 
+        # Real token cost accounting: measure raw file tokens vs Synapse context pack size
+        raw_file_tokens = 0
+        for rel_p in included_files:
+            full_content = _get_full_file(repo_path, rel_p)
+            if full_content:
+                raw_file_tokens += len(self.tokenizer.encode(full_content))
+
+        raw_file_tokens = max(raw_file_tokens, tokens_used)
+        savings_tokens = max(0, raw_file_tokens - tokens_used)
+        savings_percent = round((savings_tokens / max(1, raw_file_tokens)) * 100, 1)
+
+        token_cost_accounting = {
+            "raw_file_tokens": raw_file_tokens,
+            "pack_tokens": tokens_used,
+            "savings_tokens": savings_tokens,
+            "savings_percent": savings_percent,
+        }
+
         token_allocation = {
             "max_tokens": max_tokens,
             "reserved_buffer": reserved_buffer,
             "retrieval_budget": retrieval_budget,
             "tokens_used": tokens_used,
             "remaining": retrieval_budget - tokens_used,
+            "token_cost_accounting": token_cost_accounting,
         }
 
         timeline = {
@@ -843,6 +1024,7 @@ class HybridRetrievalEngine:
             "nodes_explored": len(combined),
             "tokens_used": tokens_used,
             "token_allocation": token_allocation,
+            "token_cost_accounting": token_cost_accounting,
             "timeline": timeline,
             "elements": [e.__dict__ for e in trace_elements[:40]],
             "structural_hops": structural_hops[:20],

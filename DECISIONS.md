@@ -127,3 +127,39 @@ AI coding agents require instructions to use Synapse effectively. Past implement
      ```
    - If sentinels exist, replace only the bounded block; never overwrite human text before or after.
    - Install automatically on `synap init` or via `/skill sync` into `.claude/skills/synap/SKILL.md`, `CLAUDE.md`, `AGENTS.md`, and `.cursor/rules/synap.mdc`.
+
+
+---
+
+## ADR-007: Second-Pass System Transformation (Wiki, Logger, Truthful CLI, Git Memory, Query Router)
+
+### Top 5 Major Improvements Ranked by User-Visible Impact
+
+1. **Universal 1:1 Plain-English Wiki System & Retrievable Knowledge Base (Item 1)**:
+   - Expand wiki coverage from code-only to 100% of non-ignored repository files (Source, Docs/text, Config/build, Data/SQL, Tests, Scripts/templates/notebooks; Binary/lockfile/generated recorded in DB).
+   - Mirrored relative paths: `src/a/b.py` -> `.synap/wiki/src/a/b.py.md`. Zero README or index files.
+   - Enforce 8th-grade reading level, short sentences, active voice, and fixed 6-part template (`What it does`, `How it works`, `Key parts`, `Connects to`, `Watch out for`, `Recent changes`).
+   - Deterministic fact extraction first (AST, imports, git log) + LLM summary with validation (no empty sections, no invented symbols, reading level) and facts-only fallback marked "auto-extracted, no summary".
+   - Full-text indexing of wiki markdown pages so "how does X work" queries return plain-English documentation directly.
+
+2. **Unified Queue-Based Rotating Logger & Live Wiki Event Streaming (Item 3)**:
+   - Root cause fixed: centralized `QueueHandler` + `QueueListener` in `src/synap_git/diagnostics/logger.py` with immediate auto-flushing to `.synap/logs/daemon.log`.
+   - Every component (indexer, wiki, discovery, daemon, memory) logs through the same pipeline tagged with `component`.
+   - Standardized structured Wiki events: `wiki_job_started`, `wiki_file_progress` (n/total), `wiki_file_done` (duration, model), `wiki_file_skipped` (reason), `wiki_file_failed` (error), `wiki_job_finished`.
+   - Live tail in `/logs` with component filter. `/status` displays the last job summary and any failed files truthfully from real state.
+
+3. **Streamlined Truthful CLI & Interactive Slash REPL (Item 2)**:
+   - Audit and prune duplicate/overlapping subcommands down to a clean, non-confusing surface with exactly one command per intent.
+   - REPL with at most 12 top-level slash commands: `/init`, `/status`, `/find`, `/remember`, `/forget`, `/wiki`, `/global`, `/ingest`, `/model`, `/skill`, `/logs`, `/doctor`, `/help`, `/quit`.
+   - Running `synap` in a repo prints 3-line truthful status, then prompt. If no `.synap/`, prompt to initialize once. Plain text runs `/find`.
+   - Remove ALL fake output: no fake sleeps, no placeholder numbers, no decorative banners. "Done" only after checking filesystem or SQLite rows.
+   - Clean non-interactive CLI: `synap mcp`, `synap ctx "<task>"`, `synap remember`, `synap daemon start|stop|status` with `--json`.
+
+4. **Git Commit History Memory Ingestion & Change Grounding (Item 4)**:
+   - Ingest Git commit messages, authors, and touched files into memory (`git_commits` table).
+   - Enables agents to ask "why was this changed" or "what changed recently in auth" and receive exact commit rationale and context instead of guessing.
+   - Prefetch context from current branch and uncommitted git diff into the preamble and `/ctx`.
+
+5. **Question-Type Query Router & Honest Token Cost Accounting (Item 4)**:
+   - Route queries across 5 specialized paths: symbol lookup, "where is X", "how does X work", stack trace / bug blast radius, and architectural / convention queries.
+   - Real token cost accounting: benchmark and report actual tokens an agent would read without Synapse (raw full files) vs token-budgeted Synapse context pack.

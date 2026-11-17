@@ -10,17 +10,40 @@ from synap_git.indexer.engine import SynapRuntime
 from synap_git.provider.base import LLMResponse
 
 
-class FakeWikiProvider:
+class ValidTemplateWikiProvider:
     default_model = "test-local"
 
     def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> LLMResponse:
         target = user_prompt.split("Target: ", 1)[1].split("\n", 1)[0]
-        return LLMResponse(
-            f"## Behavioral Summary\nRuntime behavior for {target}.\n\n## Edge Cases & Gotchas\nWatch out for race conditions in {target}.",
-            10,
-            10,
-            0,
+        # Valid template conforming to 8th-grade reading level and verified symbols
+        content = (
+            f"# {target}\n\n"
+            f"**What it does:** Runs tests for `{target}`. It checks basic flow.\n\n"
+            "**How it works**\n"
+            "1. Starts the process.\n"
+            "2. Finishes the work.\n\n"
+            "**Key parts**\n"
+            "- `hello`: Returns simple greeting.\n\n"
+            "**Watch out for:** Keep inputs valid to avoid errors.\n"
         )
+        return LLMResponse(content, 10, 10, 0)
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
+
+
+class HallucinatingWikiProvider:
+    default_model = "test-local"
+
+    def generate(self, system_prompt: str, user_prompt: str, max_tokens: int) -> LLMResponse:
+        # Hallucinates a symbol not in facts: `invented_fake_symbol_123`
+        content = (
+            "# target\n\n"
+            "**What it does:** Invents symbols.\n\n"
+            "**Key parts**\n"
+            "- `invented_fake_symbol_123`: Fake function.\n"
+        )
+        return LLMResponse(content, 10, 10, 0)
 
     def count_tokens(self, text: str) -> int:
         return len(text.split())
@@ -32,7 +55,9 @@ def _repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
-    (repo / ".env.example").write_text("SYNAP_LLM_PROVIDER=ollama\n")
+    (repo / ".env.example").write_text(
+        "SYNAP_LLM_PROVIDER=ollama\nSYNAP_SECRET_KEY=super_secret_token_12345\n"
+    )
     (repo / "main.py").write_text(
         '"""Main application entry point."""\n\n'
         'def hello(name: str = "world") -> str:\n'
@@ -102,23 +127,31 @@ def test_zero_llm_deterministic_generation(tmp_path: Path) -> None:
     assert not runtime.wiki.validate()
     assert runtime.wiki.status()["state"] == "fresh"
 
-    # Verify main.py.md content
+    # Verify main.py.md follows the fixed template and has fallback note
     main_doc = (runtime.wiki.wiki_dir / "main.py.md").read_text(encoding="utf-8")
-    assert "Main application entry point." in main_doc
+    assert "*Note: Auto-extracted structural skeleton, no LLM summary.*" in main_doc
+    assert "**What it does:**" in main_doc
+    assert "**How it works**" in main_doc
+    assert "**Key parts**" in main_doc
     assert "hello" in main_doc
-    assert "def hello" in main_doc
-    assert "Public Symbols & Interfaces" in main_doc
-    assert "Imports & Dependencies" in main_doc
-    assert "Callers & Callees" in main_doc
-    assert "Architectural Decisions" in main_doc
+    assert "Return greeting" in main_doc
+    # main.py has no dependencies, so Connects to is skipped per template rules
+    assert "**Connects to:**" not in main_doc
+    assert "**Watch out for:**" in main_doc
+    assert "**Recent changes:**" in main_doc
 
-    # Verify src/pkg/service.py.md content
+    # Verify src/pkg/service.py.md content, connections, and decisions
     service_doc = (runtime.wiki.wiki_dir / "src/pkg/service.py.md").read_text(encoding="utf-8")
-    assert "Service implementation." in service_doc
+    assert "*Note: Auto-extracted structural skeleton, no LLM summary.*" in service_doc
     assert "CoreService" in service_doc
-    assert "class CoreService" in service_doc
-    assert "import os" in service_doc
     assert "Use CoreService for processing" in service_doc
+    assert "**Connects to:**" in service_doc
+    assert "os" in service_doc
+
+    # Verify folder summary renders on demand without creating files
+    folder_summary = runtime.wiki.get_folder_summary("src/pkg")
+    assert "service.py" in folder_summary
+    assert not (runtime.wiki.wiki_dir / "src/pkg/README.md").exists()
 
 
 def test_deletion_of_orphaned_pages_and_empty_dirs(tmp_path: Path) -> None:
@@ -200,16 +233,95 @@ def test_path_traversal_rejection(tmp_path: Path) -> None:
         runtime.wiki.ensure_wiki_page("/absolute/path.py")
 
 
-def test_local_llm_augmentation(tmp_path: Path) -> None:
+def test_local_llm_synthesis_and_validation(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     runtime = SynapRuntime(SynapSettings(repository_path=repo, profile=RuntimeProfile.TEST))
     runtime.bootstrap(force=True)
-    runtime.wiki.provider = FakeWikiProvider()  # type: ignore[assignment]
+    runtime.wiki.provider = ValidTemplateWikiProvider()  # type: ignore[assignment]
 
     result = runtime.wiki.generate(full=True)
     assert result["generated"] >= 3
 
     main_doc = (runtime.wiki.wiki_dir / "main.py.md").read_text(encoding="utf-8")
-    assert "Behavioral Summary" in main_doc
-    assert "Edge Cases & Gotchas" in main_doc
-    assert "Public Symbols & Interfaces" in main_doc
+    assert "**What it does:**" in main_doc
+    assert "**How it works**" in main_doc
+    assert "**Key parts**" in main_doc
+    # Should not have the fallback note since LLM synthesis succeeded
+    assert "Auto-extracted structural skeleton" not in main_doc
+
+
+def test_local_llm_validation_failure_fallback(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    runtime = SynapRuntime(SynapSettings(repository_path=repo, profile=RuntimeProfile.TEST))
+    runtime.bootstrap(force=True)
+    # LLM hallucinates non-existent symbols -> validation fails and falls back to skeleton
+    runtime.wiki.provider = HallucinatingWikiProvider()  # type: ignore[assignment]
+
+    runtime.wiki.generate(full=True)
+    main_doc = (runtime.wiki.wiki_dir / "main.py.md").read_text(encoding="utf-8")
+    assert "*Note: Auto-extracted structural skeleton, no LLM summary.*" in main_doc
+    assert "invented_fake_symbol_123" not in main_doc
+
+
+def test_metadata_only_files_no_markdown_file(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    # Add a binary file, a lockfile, and a minified bundle
+    (repo / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+    (repo / "package-lock.json").write_text('{"name": "test-pkg", "lockfileVersion": 3}')
+    (repo / "bundle.min.js").write_text("var a=1;console.log(a);")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add metadata files"], cwd=repo, check=True, capture_output=True
+    )
+
+    runtime = SynapRuntime(SynapSettings(repository_path=repo, profile=RuntimeProfile.TEST))
+    runtime.bootstrap(force=True)
+    runtime.wiki.provider = None
+
+    runtime.wiki.generate(full=True)
+
+    # Markdown files must NOT exist for metadata-only files
+    assert not (runtime.wiki.wiki_dir / "logo.png.md").exists()
+    assert not (runtime.wiki.wiki_dir / "package-lock.json.md").exists()
+    assert not (runtime.wiki.wiki_dir / "bundle.min.js.md").exists()
+
+    # But 1-line metadata entries must exist in SQLite wiki_pages
+    with runtime.store.connect() as conn:
+        rows = conn.execute(
+            "SELECT path, file_type, is_metadata, summary FROM wiki_pages WHERE is_metadata = 1 ORDER BY path"
+        ).fetchall()
+        meta_paths = {r["path"] for r in rows}
+        assert "logo.png" in meta_paths
+        assert "package-lock.json" in meta_paths
+        assert "bundle.min.js" in meta_paths
+
+
+def test_type_specific_extractors_and_secret_redaction(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    runtime = SynapRuntime(SynapSettings(repository_path=repo, profile=RuntimeProfile.TEST))
+    runtime.bootstrap(force=True)
+    runtime.wiki.provider = None
+
+    runtime.wiki.generate(full=True)
+
+    env_doc = (runtime.wiki.wiki_dir / ".env.example.md").read_text(encoding="utf-8")
+    # Secret values must be strictly redacted
+    assert "super_secret_token_12345" not in env_doc
+    assert "SYNAP_LLM_PROVIDER" in env_doc
+    assert "**What it does:**" in env_doc
+    assert "**Watch out for:**" in env_doc
+
+
+def test_fts5_plain_english_retrieval(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    runtime = SynapRuntime(SynapSettings(repository_path=repo, profile=RuntimeProfile.TEST))
+    runtime.bootstrap(force=True)
+    runtime.wiki.provider = None
+
+    runtime.wiki.generate(full=True)
+
+    # Search for plain-English query in FTS5
+    results = runtime.wiki.search_wiki("greeting return")
+    assert len(results) > 0
+    matched_paths = [r["path"] for r in results]
+    assert "main.py" in matched_paths
