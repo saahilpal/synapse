@@ -588,6 +588,29 @@ class SynapStore:
                 symbols_data,
             )
 
+            # Ensure symbols_fts has sub-token identifier indexing
+            try:
+                from synap_git.retrieval.engine import tokenize_identifier
+
+                fts_data = [
+                    (
+                        sym["symbol_id"],
+                        " ".join(tokenize_identifier(sym["name"])),
+                        sym["kind"],
+                        json.dumps(sym.get("metadata") or {}),
+                    )
+                    for sym in symbols
+                ]
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO symbols_fts (symbol_id, name, kind, body)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    fts_data,
+                )
+            except Exception:
+                pass
+
         return file_id
 
     def get_file_by_path(self, path: str) -> dict[str, Any] | None:
@@ -657,7 +680,7 @@ class SynapStore:
                     ORDER BY rank ASC
                     LIMIT ?
                 )
-                SELECT s.*, f.path as source_path, tm.rank
+                SELECT s.*, f.path as source_path, f.content_hash as content_hash, tm.rank
                 FROM top_matches tm
                 JOIN symbols s ON tm.symbol_id = s.symbol_id
                 JOIN files f ON s.file_id = f.file_id

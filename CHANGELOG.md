@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-17
+
+### Added
+- **Unix Domain Socket IPC Daemon (`socket_ipc.py`)**: High-performance local AF_UNIX IPC server and client for sub-15ms warm query roundtrips. Includes automatic OS socket path shortening (safeguarding the 104-108 char `sockaddr_un` limit on macOS/Linux) and transparent in-process fallback.
+- **Fast Incremental Git Status & Diff Indexing (`engine.py`)**: Incremental file modification and deletion tracking using `git status --porcelain` and `git diff --name-only HEAD`, reducing zero-change poll latency to sub-26ms and single-file reindex to sub-150ms.
+- **Sub-Token Casing-Invariant Hybrid Retrieval (`retrieval/engine.py`)**: Automated decomposition of `camelCase` and `snake_case` identifiers into constituent tokens (`tokenize_identifier`) allowing exact symbol stem matching in FTS5 lexical ranking alongside dense vectors.
+- **Stack Trace Parser & Frame Prioritization (`retrieval/engine.py`)**: Automatic regex extraction of file paths, line numbers, and function names from multi-language runtime stack traces (Python, JS/TS, Go), instantly surfacing offending symbols during agent debugging sessions.
+- **Content-Hash Staleness Verification & Honest Empties**: Real-time content SHA-256 verification against the index to detect modified files before query generation, coupled with confidence thresholds that return truthful empty result sets instead of low-relevance hallucinations.
+- **Authoritative CLI Schema Registry (`cli/registry.py`)**: Single declarative registry defining commands, arguments, types, and TUI slash commands, permanently resolving CLI-to-documentation command drift.
+- **Reproducible Benchmark Suite & Zero-Telemetry Stats (`cli/bench.py`, `cli/stats.py`)**: Built-in `synap bench` command saving verified metrics to `bench/numbers.json`, paired with local, zero-telemetry agent metrics tracking (`synap stats`).
+- **End-to-End Agent Compatibility across 10 Platforms (`cli/skill_installer.py`, `docs/COMPATIBILITY.md`)**: Automated configuration and idempotent sentinel injection (`<!-- SYNAP_MANAGED_START: v3.0 -->`) supporting Claude Code, Cursor, Cline, Roo Code, Aider, Windsurf, GitHub Copilot CLI, Continue, Zed, and OpenCode (7 tested end-to-end, 3 generated).
+- **Strictly Bounded SKILL.md (<600 tokens)**: Compact agent reference measuring exactly 560 tokens (`tiktoken o200k_base`), well within prompt budget limits.
+
+### Changed
+- **Grounded Engineering Wiki Engine (`wiki.py`)**: Fixed critical `.cursorrules` defect by routing configuration rules, dockerfiles, and test suites to dedicated grounded extractors; eliminated all generic filler boilerplate ("Imports needed files...", "Provides helper utilities...") with strict identifier citation and reading-level validation (FKGL <= 8.5).
+- **Synchronized Interactive TUI (`cli/tui.py`)**: Rebuilt the command palette and tab auto-completer directly against `cli/registry.py`, ensuring complete consistency across all commands and aliases (`/remember`, `/status`, `/find`, `/bench`, `/stats`, etc.).
+- **Streamlined MCP Surface**: Consolidated MCP tools to 8 core primitives with sub-150-token preamble overhead and explicit error envelopes.
+
 ## [2.9.0] - 2026-11-17
 
 ### Added

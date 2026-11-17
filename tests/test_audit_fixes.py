@@ -282,7 +282,12 @@ async def test_wiki_generation_retries_and_failure(
                 raise TimeoutError("Simulated network timeout")
             # Succeed on the 3rd attempt if asked
             if self.calls == 3:
-                return LLMResponse("Success content", 10, 10, 0)
+                return LLMResponse(
+                    "# fileA.py\n\n**What it does:** Runs function `a`.\n\n**Key parts**\n- `a`: Helper.\n",
+                    10,
+                    10,
+                    0,
+                )
             raise RuntimeError("Unexpected call")
 
         def generate_embedding(self, text: str) -> list[float]:

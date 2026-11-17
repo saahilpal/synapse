@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Iterable
 from pathlib import Path
@@ -16,28 +17,14 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from synap_git import __version__
+from synap_git.cli.registry import generate_tui_slash_commands, get_slash_commands
 from synap_git.config import SynapSettings
 from synap_git.diagnostics.logger import get_logger
 from synap_git.storage.global_memory import GlobalMemoryStore
 
 logger = get_logger("tui")
 
-SLASH_COMMANDS: list[tuple[str, str]] = [
-    ("/init", "Initialize .synap/ repository context storage & index"),
-    ("/status", "Truthful status of repo, branch, daemon & symbols"),
-    ("/find", "<query> Interactive hybrid search across symbols & docs"),
-    ("/remember", "<key> <content> Save architectural decision or fact"),
-    ("/forget", "<key> Remove memory item by key"),
-    ("/wiki", "[status|generate|show] Structural markdown wiki engine"),
-    ("/global", "[query] Query cross-repo developer memories"),
-    ("/ingest", "<id> Promote global memory into repository"),
-    ("/model", "[probe|set <model>] Auto-discovery or model override"),
-    ("/skill", "[sync|export] Install/update SKILL.md and rules"),
-    ("/logs", "[-n <lines>] View recent background daemon activity"),
-    ("/doctor", "[--fix] Run health diagnostics and auto-repair"),
-    ("/help", "Show concise slash-command cheatsheet"),
-    ("/quit", "Exit the interactive REPL"),
-]
+SLASH_COMMANDS: list[tuple[str, str]] = generate_tui_slash_commands()
 
 SUBCOMMAND_HINTS: dict[str, list[tuple[str, str]]] = {
     "/wiki": [
@@ -55,6 +42,18 @@ SUBCOMMAND_HINTS: dict[str, list[tuple[str, str]]] = {
     ],
     "/doctor": [
         ("--fix", "Attempt automatic repair of storage and permissions"),
+    ],
+    "/mcp": [
+        ("verify", "Verify MCP tools and simulated calls"),
+        ("config", "Print JSON configuration for IDEs"),
+    ],
+    "/stats": [
+        ("--json", "Output cumulative metrics as JSON"),
+        ("--reset", "Reset local token efficiency metrics"),
+    ],
+    "/selftest": [
+        ("--agent", "Verify agent SKILL.md simulation workflow"),
+        ("--verbose", "Verbose diagnostic output"),
     ],
 }
 
@@ -224,21 +223,8 @@ class SynapInteractiveREPL:
         if not text.startswith("/"):
             parts = text.split()
             first_word = parts[0].lower()
-            known_bare_commands = {
-                "init",
-                "status",
-                "find",
-                "remember",
-                "forget",
-                "wiki",
-                "global",
-                "ingest",
-                "model",
-                "skill",
-                "logs",
-                "doctor",
-                "help",
-            }
+            known_bare_commands = {cmd.lstrip("/") for cmd, _ in SLASH_COMMANDS}
+            known_bare_commands.update({"exit", "quit", "q", "memory", "search"})
             if first_word in known_bare_commands:
                 text = "/" + text
             else:
@@ -264,12 +250,31 @@ class SynapInteractiveREPL:
             self._cmd_init()
         elif cmd == "/status":
             self._cmd_status()
-        elif cmd == "/find":
+        elif cmd in ("/find", "/search"):
             self._cmd_find(args)
         elif cmd == "/remember":
             self._cmd_remember(args)
         elif cmd == "/forget":
             self._cmd_forget(args)
+        elif cmd == "/memory":
+            self.console.print(
+                "[yellow]Note:[/yellow] '/memory' is deprecated. "
+                "Use [bold cyan]/remember[/bold cyan] to store memories or [bold cyan]/forget[/bold cyan] to remove them."
+            )
+            if args and args[0].lower() in ("remember", "record"):
+                self._cmd_remember(args[1:])
+            elif args and args[0].lower() in ("forget", "delete", "remove"):
+                self._cmd_forget(args[1:])
+        elif cmd == "/ctx":
+            self._cmd_ctx(args)
+        elif cmd == "/stats":
+            self._cmd_stats(args)
+        elif cmd == "/selftest":
+            self._cmd_selftest(args)
+        elif cmd == "/bench":
+            self._cmd_bench(args)
+        elif cmd == "/mcp":
+            self._cmd_mcp(args)
         elif cmd == "/wiki":
             self._cmd_wiki(args)
         elif cmd == "/global":
@@ -288,7 +293,7 @@ class SynapInteractiveREPL:
             self._print_error(
                 f"Unknown command: '{cmd}'",
                 "Command is not in the recognized set of slash commands.",
-                "Type /help to see all 14 available commands.",
+                "Type /help to see all available commands.",
             )
 
         return True
@@ -306,28 +311,86 @@ class SynapInteractiveREPL:
         table.add_column("Syntax", style="yellow", no_wrap=True)
         table.add_column("Description", style="white")
 
-        table.add_row("/init", "/init", "Initialize context storage & index repository")
-        table.add_row("/status", "/status", "Truthful status of git, daemon & indexed symbols")
-        table.add_row("/find", "/find <query>", "Hybrid search across symbols, docs & files")
-        table.add_row(
-            "/remember", "/remember <k> <v>", "Save architectural decision or operational fact"
-        )
-        table.add_row("/forget", "/forget <key>", "Remove memory item by key")
-        table.add_row(
-            "/wiki", "/wiki [status|generate|show]", "1:1 structural markdown wiki engine"
-        )
-        table.add_row("/global", "/global [query]", "Query cross-repo developer memories")
-        table.add_row("/ingest", "/ingest <id>", "Promote global memory into this repository")
-        table.add_row(
-            "/model", "/model [probe|set <m>]", "Probe local LLM runtimes or set model override"
-        )
-        table.add_row("/skill", "/skill [sync|export]", "Sync or export agent SKILL.md rules")
-        table.add_row("/logs", "/logs [-n <lines>]", "View recent background daemon activity")
-        table.add_row("/doctor", "/doctor [--fix]", "Health diagnostics and auto-repair")
-        table.add_row("/help", "/help", "Show this command cheatsheet")
-        table.add_row("/quit", "/quit or /exit", "Exit the interactive REPL")
+        for slash_cmd, syntax, desc in get_slash_commands():
+            table.add_row(slash_cmd, syntax, desc)
 
         self.console.print(table)
+
+    def _cmd_ctx(self, args: list[str]) -> None:
+        try:
+            task = " ".join(args).strip()
+            from synap_git.mcp.server import SynapMCPFacade
+
+            facade = SynapMCPFacade(self.runtime)
+            data = facade.get_session_preamble()
+            if task:
+                self.console.print(f"[bold cyan]# TASK:[/bold cyan] {task}\n")
+            compact = data.get("compact_preamble", "")
+            self.console.print(compact if compact else json.dumps(data, indent=2))
+        except Exception as e:
+            self._print_error(
+                "Failed to generate context", str(e), "Run /init or /doctor to check index health."
+            )
+
+    def _cmd_stats(self, args: list[str]) -> None:
+        try:
+            from synap_git.cli.stats import stats_cmd
+
+            json_output = "--json" in args
+            reset = "--reset" in args
+            stats_cmd(path=self.repo_path.as_posix(), json_output=json_output, reset=reset)
+        except Exception as e:
+            self._print_error(
+                "Failed to retrieve stats", str(e), "Verify .synap/ directory exists."
+            )
+
+    def _cmd_selftest(self, args: list[str]) -> None:
+        try:
+            from synap_git.cli.selftest import selftest_cmd
+
+            agent = "--agent" in args or not args
+            verbose = "-v" in args or "--verbose" in args
+            selftest_cmd(agent=agent, verbose=verbose)
+        except Exception as e:
+            self._print_error(
+                "Self-test encountered an error", str(e), "Check environment health with /doctor."
+            )
+
+    def _cmd_bench(self, args: list[str]) -> None:
+        try:
+            from synap_git.cli.bench import bench_cmd
+
+            bench_cmd()
+        except Exception as e:
+            self._print_error(
+                "Benchmark failed", str(e), "Run with quick mode or check commit logs."
+            )
+
+    def _cmd_mcp(self, args: list[str]) -> None:
+        try:
+            sub = args[0].lower() if args else "status"
+            if sub == "verify":
+                from synap_git.mcp.server import SynapMCPFacade
+
+                facade = SynapMCPFacade(self.runtime)
+                pre = facade.get_session_preamble()
+                self.console.print(
+                    f"[green]✔ MCP Facade verified. Active branch: {pre.get('branch')}[/green]"
+                )
+            elif sub == "config":
+                cfg = {
+                    "mcpServers": {
+                        "synap": {
+                            "command": "synap",
+                            "args": ["mcp", "serve"],
+                        }
+                    }
+                }
+                self.console.print_json(json.dumps(cfg))
+            else:
+                self.console.print("[cyan]MCP Commands:[/cyan] /mcp verify, /mcp config")
+        except Exception as e:
+            self._print_error("MCP operation failed", str(e), "Run 'synap mcp verify' on CLI.")
 
     def _cmd_init(self) -> None:
         try:

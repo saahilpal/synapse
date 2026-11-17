@@ -60,6 +60,63 @@ def _normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "", name).lower()
 
 
+def tokenize_identifier(identifier: str) -> list[str]:
+    """
+    Split camelCase, PascalCase, and snake_case into sub-tokens,
+    returning sub-tokens and the original identifier.
+    e.g. 'parse_ast' -> ['parse', 'ast', 'parse_ast']
+         'SynapRuntime' -> ['synap', 'runtime', 'SynapRuntime']
+    """
+    if not identifier:
+        return []
+    raw_parts = re.split(r"[^a-zA-Z0-9]+", identifier)
+    tokens: list[str] = []
+    for part in raw_parts:
+        if not part:
+            continue
+        s1 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", part)
+        s2 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s1)
+        sub_parts = [p.lower() for p in s2.split("_") if p]
+        for sp in sub_parts:
+            if sp not in tokens:
+                tokens.append(sp)
+    if identifier not in tokens:
+        tokens.append(identifier)
+    return tokens
+
+
+def extract_stack_trace_info(query: str) -> dict[str, Any]:
+    r"""
+    Regex parse `File "...", line \d+` and exception class names from query for targeted error retrieval.
+    """
+    frames: list[dict[str, Any]] = []
+    for match in re.finditer(
+        r'File\s+["\']([^"\']+)["\'],\s+line\s+(\d+)(?:,\s+in\s+([a-zA-Z_]\w*))?',
+        query,
+    ):
+        frames.append(
+            {
+                "file": match.group(1),
+                "line": int(match.group(2)),
+                "function": match.group(3) if match.group(3) else None,
+            }
+        )
+
+    exceptions = list(
+        dict.fromkeys(
+            re.findall(r"\b([A-Z][a-zA-Z0-9_]*(?:Error|Exception|Warning|Fault))\b", query)
+        )
+    )
+
+    return {
+        "frames": frames,
+        "files": [f["file"] for f in frames],
+        "lines": [f["line"] for f in frames],
+        "exceptions": exceptions,
+        "has_stack_trace": bool(frames or exceptions),
+    }
+
+
 def _split_into_subtokens(text: str) -> list[str]:
     """
     Split camelCase, PascalCase, and snake_case into sub-tokens while preserving >= 2 char tokens
@@ -78,9 +135,11 @@ def _extract_query_tokens(query: str) -> set[str]:
     """
     tokens: set[str] = set()
     for raw in query.split():
-        cleaned = re.sub(r"^[^\w]+|[^\w]+$", "", raw).lower()
-        if len(cleaned) >= 2:
-            tokens.add(cleaned)
+        cleaned = re.sub(r"^[^\w]+|[^\w]+$", "", raw)
+        for tok in tokenize_identifier(cleaned):
+            if len(tok) >= 2:
+                tokens.add(tok)
+                tokens.add(tok.lower())
         sub_tokens = _split_into_subtokens(raw)
         for tok in sub_tokens:
             if len(tok) >= 2:
@@ -294,6 +353,9 @@ class HybridRetrievalEngine:
         self.trace_store = trace_store
         self._pagerank_cache: dict[str, float] | None = None
         self._hub_ranks: dict[str, int] | None = None
+        self._query_cache: dict[
+            tuple[str, str, str, int], tuple[str, list[dict[str, Any]], dict[str, Any]]
+        ] = {}
         try:
             self.index_docs()
             self.index_git_commits()
@@ -301,6 +363,22 @@ class HybridRetrievalEngine:
             import structlog
 
             structlog.get_logger().warning("indexing_failed", error=str(e))
+
+    def get_index_version(self) -> str:
+        """Derive an index version identifier from active commit and file counts."""
+        commit = self.store.get_last_indexed_commit() or "unindexed"
+        try:
+            with self.store.connect() as conn:
+                row = conn.execute("SELECT COUNT(*), MAX(updated_at) FROM files").fetchone()
+                cnt = row[0] if row else 0
+                max_up = row[1] if row and row[1] else ""
+                return f"{commit}:{cnt}:{max_up}"
+        except Exception:
+            return commit
+
+    def clear_query_cache(self) -> None:
+        """Clear the query result cache."""
+        self._query_cache.clear()
 
     def index_git_commits(self, limit: int = 100) -> int:
         """
@@ -529,9 +607,66 @@ class HybridRetrievalEngine:
         intent_5tier = classify_intent_5tier(query)
         intent = _classify_intent_fast(query)
 
+        # Cache check keyed by (query, intent, index_version)
+        index_version = self.get_index_version()
+        cache_key = (query.strip(), str(intent_5tier), index_version, max_tokens)
+        if cache_key in self._query_cache:
+            c_ans, c_src, c_trace = self._query_cache[cache_key]
+            res_trace = dict(c_trace)
+            res_trace["cached"] = True
+            res_trace["index_version"] = index_version
+            return c_ans, c_src, res_trace
+
+        # Stack trace extraction for targeted error retrieval
+        stack_info = extract_stack_trace_info(query)
+        if stack_info["has_stack_trace"]:
+            intent_5tier = QueryIntent.DEBUGGING
+
         # 2. Lexical Matches (BM25) with sub-tokenization & short identifier preservation
         query_words = _extract_query_tokens(query)
+        for exc in stack_info["exceptions"]:
+            query_words.add(exc)
+            query_words.add(exc.lower())
+
         lexical_candidates: dict[str, dict[str, Any]] = {}
+
+        # If stack trace frames exist, retrieve symbols at target files/lines
+        if stack_info["frames"]:
+            with self.store.connect() as conn:
+                for frame in stack_info["frames"]:
+                    fpath = frame["file"]
+                    fline = frame["line"]
+                    matched_rows = conn.execute(
+                        """
+                        SELECT s.*, f.path as source_path, f.content_hash
+                        FROM symbols s
+                        JOIN files f ON s.file_id = f.file_id
+                        WHERE (f.path = ? OR f.path LIKE ? OR ? LIKE '%' || f.path)
+                          AND ? BETWEEN s.start_line AND s.end_line
+                        """,
+                        (fpath, f"%{fpath}", fpath, fline),
+                    ).fetchall()
+                    if not matched_rows:
+                        matched_rows = conn.execute(
+                            """
+                            SELECT s.*, f.path as source_path, f.content_hash
+                            FROM symbols s
+                            JOIN files f ON s.file_id = f.file_id
+                            WHERE f.path = ? OR f.path LIKE ? OR ? LIKE '%' || f.path
+                            LIMIT 10
+                            """,
+                            (fpath, f"%{fpath}", fpath),
+                        ).fetchall()
+                    for r in matched_rows:
+                        sym_dict = dict(r)
+                        sid = sym_dict["symbol_id"]
+                        if sid not in lexical_candidates:
+                            lexical_candidates[sid] = {
+                                **sym_dict,
+                                "reason": "stack_trace_target",
+                                "lexical_rank": 0,
+                            }
+
         symbols = self.store.get_symbols_by_lexical_query(query_words)
         for rank, sym in enumerate(symbols):
             sid = sym["symbol_id"]
@@ -615,6 +750,82 @@ class HybridRetrievalEngine:
         retrieval_budget = (
             max(100, max_tokens - reserved_buffer) if max_tokens > 100 else max_tokens
         )
+
+        # Staleness verification: verify result file content hash against current file hash before serving
+        stale_files: list[str] = []
+        with self.store.connect() as conn:
+            all_content_hashes = {
+                row["path"]: row["content_hash"]
+                for row in conn.execute("SELECT path, content_hash FROM files").fetchall()
+            }
+        for cand in combined.values():
+            cpath = cand.get("source_path", cand.get("path", ""))
+            stored_hash = cand.get("content_hash") or all_content_hashes.get(cpath)
+            disk_file = self.repo_path / cpath
+            if disk_file.exists() and disk_file.is_file():
+                try:
+                    cur_hash = hashlib.sha256(disk_file.read_bytes()).hexdigest()
+                    if stored_hash and cur_hash != stored_hash:
+                        cand["is_stale"] = True
+                        cand["modified_since_index"] = True
+                        if cpath not in stale_files:
+                            stale_files.append(cpath)
+                except Exception:
+                    pass
+
+        # Honest empties: when confidence is below threshold, return empty match with nearest candidate suggestions
+        confidence_threshold = 0.005
+        top_score = ranked[0][1] if ranked else 0.0
+
+        has_real_match = any(
+            c.get("reason", "").startswith("lexical")
+            or "semantic" in c.get("reason", "")
+            or c.get("reason") == "stack_trace_target"
+            for c, _ in ranked
+        )
+        is_empty = (not ranked) or (top_score < confidence_threshold) or (not has_real_match)
+        nearest_suggestions = [c["name"] for c, _ in ranked[:5]]
+
+        if is_empty:
+            empty_trace = {
+                "trace_id": trace_id,
+                "query": query,
+                "nodes_explored": len(combined),
+                "tokens_used": 0,
+                "token_allocation": {
+                    "max_tokens": max_tokens,
+                    "reserved_buffer": reserved_buffer,
+                    "retrieval_budget": retrieval_budget,
+                    "tokens_used": 0,
+                    "remaining": retrieval_budget,
+                },
+                "token_cost_accounting": {
+                    "raw_file_tokens": 0,
+                    "pack_tokens": 0,
+                    "savings_tokens": 0,
+                    "savings_percent": 0.0,
+                },
+                "timeline": {
+                    "total_ms": (time.perf_counter() - t_start) * 1000,
+                },
+                "elements": [],
+                "structural_hops": [],
+                "dirty_tree_warning": is_dirty,
+                "latency_ms": (time.perf_counter() - t_start) * 1000,
+                "empty_match": True,
+                "confidence": top_score,
+                "suggestions": nearest_suggestions,
+                "stale_files": stale_files,
+                "cached": False,
+                "index_version": index_version,
+            }
+            if nearest_suggestions:
+                empty_msg = f"No high-confidence matches found for query '{query}'. Nearest suggestions: {', '.join(nearest_suggestions)}"
+            else:
+                empty_msg = f"No matches found for query '{query}'."
+
+            self._query_cache[cache_key] = (empty_msg, [], empty_trace)
+            return empty_msg, [], empty_trace
 
         # 5. Token-Aware Context Packing with Contextual Chunk Enrichment
         packed_blocks = []
@@ -730,8 +941,9 @@ class HybridRetrievalEngine:
                 scope = metadata_raw.get("scope", "")
 
             symbol_repr = f"{scope}.{name}" if scope else name
+            stale_warning = " [MODIFIED SINCE INDEX]" if cand.get("is_stale") else ""
             enrichment_header = (
-                f"# File: {path} | Module: {module} | Symbol: {symbol_repr} ({kind})"
+                f"# File: {path}{stale_warning} | Module: {module} | Symbol: {symbol_repr} ({kind})"
             )
 
             snippet = _get_snippet(repo_path, path, start, end)
@@ -1030,6 +1242,9 @@ class HybridRetrievalEngine:
             "structural_hops": structural_hops[:20],
             "dirty_tree_warning": is_dirty,
             "latency_ms": (t_llm - t_start) * 1000,
+            "stale_files": stale_files,
+            "cached": False,
+            "index_version": index_version,
         }
 
         if self.trace_store:
@@ -1038,6 +1253,11 @@ class HybridRetrievalEngine:
                 summary=f"Retrieval for query: {query}",
                 details=trace,
             )
+
+        self._query_cache[cache_key] = (answer_content, grounding_sources, trace)
+        if len(self._query_cache) > 256:
+            oldest = next(iter(self._query_cache))
+            del self._query_cache[oldest]
 
         return answer_content, grounding_sources, trace
 
@@ -1055,6 +1275,8 @@ class HybridRetrievalEngine:
 
         # Precompute query sub-tokens and normalized words
         query_subtokens = set(_split_into_subtokens(query))
+        for qw in query.split():
+            query_subtokens.update(tokenize_identifier(qw))
         query_normalized = {_normalize_name(w) for w in query.split() if len(w) >= 2}
         query_asks_for_test = any(w in query.lower() for w in ("test", "fixture", "mock", "assert"))
 
@@ -1063,6 +1285,7 @@ class HybridRetrievalEngine:
             sid = cand["symbol_id"]
             cand_name = cand.get("name", "")
             cand_path = cand.get("source_path", cand.get("path", ""))
+            reason = cand.get("reason", "")
 
             # Intent-based weights
             lexical_w = 1.0
@@ -1131,8 +1354,11 @@ class HybridRetrievalEngine:
             # Name match boost: Casing-invariant and sub-token matching
             cand_norm = _normalize_name(cand_name)
             cand_subtokens = set(_split_into_subtokens(cand_name))
+            cand_subtokens.update(tokenize_identifier(cand_name))
 
-            if cand_norm and (
+            if reason == "stack_trace_target":
+                score += 0.50
+            elif cand_norm and (
                 cand_norm in query_normalized
                 or any(cand_norm == _normalize_name(qw) for qw in query.split())
             ):

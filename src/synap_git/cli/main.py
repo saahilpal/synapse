@@ -15,6 +15,9 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from synap_git.cli.bench import bench_cmd
+from synap_git.cli.selftest import selftest_cmd
+from synap_git.cli.stats import stats_cmd
 from synap_git.config import LoggingMode, RuntimeMode, RuntimeProfile, SynapSettings
 from synap_git.diagnostics.logger import configure_logging
 from synap_git.git.state import GitRepository
@@ -4370,3 +4373,51 @@ def wiki_show(
 
     content = wiki_path.read_text(encoding="utf-8")
     console.print(Markdown(content))
+
+
+# Register core and developer commands
+app.command("bench", help="Run multi-repo Git-history grounding and token-efficiency benchmark.")(
+    bench_cmd
+)
+app.command("stats", help="Show local cumulative token efficiency and avoided token metrics.")(
+    stats_cmd
+)
+app.command("selftest", help="Run end-to-end self-test suite verifying agent SKILL.md workflows.")(
+    selftest_cmd
+)
+
+
+@app.command("find")
+def find_cmd(
+    query: Annotated[str, typer.Argument(help="Search query.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+    max_tokens: Annotated[
+        int, typer.Option("--max-tokens", help="Maximum context window tokens.")
+    ] = 4000,
+) -> None:
+    """Execute a hybrid structural search across the repository."""
+    search(query=query, path=path, max_tokens=max_tokens)
+
+
+@app.command("forget")
+def forget_cmd(
+    key: Annotated[str, typer.Argument(help="Memory key to remove.")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Repository path.")] = ".",
+) -> None:
+    """Remove a memory item by key from local persistent memory."""
+    runtime = SynapRuntime(_settings(path))
+    with runtime.store.connect() as conn:
+        cur = conn.execute("DELETE FROM agent_memory WHERE context_key = ?", (key,))
+        if cur.rowcount > 0:
+            console.print(
+                f"[bold yellow]✔ Removed memory[/bold yellow] with key '[cyan]{key}[/cyan]'."
+            )
+        else:
+            console.print(f"[yellow]No memory found under key[/yellow] '{key}'.")
+
+
+# Shorthand aliases supported in documentation
+app.command("sk", hidden=True)(skeleton_cmd)
+app.command("ex", hidden=True)(explain_cmd)
+app.command("t", hidden=True)(test_cmd)
+app.command("doc", hidden=True)(doctor)

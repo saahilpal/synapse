@@ -163,3 +163,54 @@ AI coding agents require instructions to use Synapse effectively. Past implement
 5. **Question-Type Query Router & Honest Token Cost Accounting (Item 4)**:
    - Route queries across 5 specialized paths: symbol lookup, "where is X", "how does X work", stack trace / bug blast radius, and architectural / convention queries.
    - Real token cost accounting: benchmark and report actual tokens an agent would read without Synapse (raw full files) vs token-budgeted Synapse context pack.
+
+---
+
+## ADR-008: Pass 3 — Unified Registry, Grounded Fact-Citing Wiki, and Multi-Repo Benchmark
+
+### Context & Step 0 Audit Findings
+
+1. **Defect in Wiki Generation on `.cursorrules` & Rules/Dotfiles**:
+   - `.cursorrules` has no file extension and was misclassified by `_classify_file()` as `source_code`.
+   - Without AST symbols, it hit the code fallback which hardcoded:
+     `"Imports needed files and helper tools."`, `"Runs code through public functions and classes."`, `"Sends back results to callers."`
+   - `_validate_page()` passed it because it only checked balanced fences, non-empty sections, reading level $\le 8.5$, and backticked code spans. Because the generic sentences contained no backticks and had short words, they passed all checks despite being 100% hallucinated.
+   - Root cause: Missing file classification for dotfile rules (`.cursorrules`, `.windsurfrules`, `.clinerules`, `.cursor/rules/*`), hardcoded fallback sentences instead of actual line/heading/directive extraction, and lack of a specificity ground-truth check in `_validate_page`.
+
+2. **Documentation & Command Registry Drift**:
+   - `README.md` still documented deprecated/renamed commands (`synap install`, `synap blast`, `synap skeleton`, `synap pack`, `synap context`).
+   - `SKILL.md` advised agents to call MCP tools that were not registered in `src/synap_git/mcp/server.py` (`restore_checkpoint`, `log_decision`, `get_callers`).
+   - The TUI hints and CLI subcommand options lacked a single programmatic source of truth.
+
+3. **Ungrounded Token Measurements**:
+   - Token comparison tables previously relied on estimates rather than an automated benchmark script executing real tokenizers (`tiktoken o200k_base`) against an explicit naive agent baseline.
+
+### Top 5 Major Improvements Ranked by Impact
+
+1. **Unified Schema-Driven Command & Tool Registry (`src/synap_git/cli/registry.py`)**:
+   - A single authoritative registry defines every command, argument, option, help description, exit codes, and output schema.
+   - Automatically generates `--help`, `/help`, shell completions, the README command table, and the SKILL.md command section.
+   - CI check enforces that no documentation or tool definition references an unregistered command.
+
+2. **Grounded, Fact-Citing Wiki Engine with Specificity Validation (`src/synap_git/indexer/wiki.py`)**:
+   - Support rule files, dotfiles, YAML workflows, Dockerfiles, and config files with dedicated fact extractors.
+   - Eliminate hardcoded generic fallbacks. Every sentence in "How it works" and "Key parts" MUST cite an extracted fact (heading, key, symbol, import, or git commit).
+   - `_validate_page()` enforces a specificity test: rejects generic boilerplate sentences.
+   - Permanent regression tests in `tests/test_wiki_grounding.py` for `.cursorrules`, Dockerfiles, YAML workflows, and test files.
+
+3. **Multi-Repo Git-History Benchmark (`synap bench` -> `bench/numbers.json`)**:
+   - Automated benchmark using recent git commits across 3 distinct repositories (Synapse itself, a TypeScript repository, and a Python/mixed repository).
+   - Generates queries from commit subjects + hand-crafted queries per type (symbol lookup, "where is X", "how does X work", stack trace, architecture).
+   - Measures Recall@5, Recall@10, MRR, nDCG@10, p50/p95 latency, and token consumption using `tiktoken` (`o200k_base`) comparing Synapse pack tokens vs. a naive keyword ripgrep + full file read agent.
+   - All numbers in README, SKILL.md, and documentation are strictly sourced from `bench/numbers.json`.
+
+4. **Speed & Latency Optimization (2x+ Speedup)**:
+   - Lazy imports across CLI entry points to achieve `<60ms` import time (`python -X importtime`).
+   - Fast Unix domain socket IPC client (`.synap/daemon.sock`) to communicate with the warm background daemon, falling back to direct in-process execution.
+   - Incremental indexing driven by `git status` / `git diff --name-only` + SHA-256 hashes instead of recursive directory tree walking.
+   - Sub-token identifier indexing in FTS5 (splitting `camelCase` and `snake_case`) for instant symbol search.
+
+5. **Token-Efficient Agent Output & Compact Protocol**:
+   - Compact default line format (`path:line symbol — one-line why`) with `--budget` density packing and confidence indicator.
+   - Progressive L0-L3 detail expansion.
+   - Streamlined `SKILL.md` with an always-loaded section strictly under 600 tokens and on-demand detail references.

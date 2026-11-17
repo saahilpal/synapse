@@ -7,9 +7,15 @@ import os
 import re
 import subprocess
 import tempfile
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    yaml = None
 
 from synap_git.config import SynapSettings
 from synap_git.diagnostics.logger import get_logger
@@ -118,6 +124,29 @@ _PYTHON_BUILTINS = {
     "self",
     "cls",
 }
+
+_GENERIC_BOILERPLATE_PATTERNS = [
+    r"imports\s+needed\s+files",
+    r"runs\s+code\s+through\s+public",
+    r"runs\s+code\s+through",
+    r"sends\s+back\s+results\s+to\s+callers",
+    r"sends\s+back\s+results",
+    r"reads\s+settings\s+and\s+environment",
+    r"sets\s+runtime\s+options\s+for\s+the\s+system",
+    r"sets\s+runtime\s+options",
+    r"outlines\s+architecture\s+conventions",
+    r"provides\s+code\s+examples\s+and\s+reference",
+    r"provides\s+code\s+examples",
+    r"sets\s+up\s+test\s+fixtures\s+and\s+required\s+mocks",
+    r"executes\s+test\s+scenarios\s+against\s+target",
+    r"executes\s+test\s+scenarios",
+    r"asserts\s+expected\s+outcomes\s+and\s+error\s+handling",
+    r"asserts\s+expected\s+outcomes",
+    r"parses\s+command\s+line\s+arguments\s+and\s+environment",
+    r"executes\s+automated\s+task\s+pipeline",
+    r"creates\s+persistent\s+tables\s+and\s+defines\s+column",
+    r"enforces\s+indices,\s+primary\s+keys",
+]
 
 
 def count_syllables(word: str) -> int:
@@ -449,8 +478,30 @@ class WikiEngine:
         ):
             return "metadata"
 
-        # Tests
+        # Agent / IDE Rules & prompt files
         path_slash = f"/{rel_path}"
+        if (
+            name_lower
+            in {
+                ".cursorrules",
+                ".windsurfrules",
+                ".clinerules",
+                "cursorrules",
+                "windsurfrules",
+                "clinerules",
+            }
+            or "/.cursor/rules/" in path_slash
+            or rel_path.startswith(".cursor/rules/")
+            or "/.windsurf/rules/" in path_slash
+            or rel_path.startswith(".windsurf/rules/")
+            or "/.cline/rules/" in path_slash
+            or rel_path.startswith(".cline/rules/")
+            or suffix in {".cursorrules", ".windsurfrules", ".clinerules", ".mdc", ".prompt"}
+            or ("rules" in name_lower and suffix in {"", ".txt"})
+        ):
+            return "config_rules"
+
+        # Tests
         if (
             "/tests/" in path_slash
             or "/test/" in path_slash
@@ -499,7 +550,18 @@ class WikiEngine:
             return "config_build"
 
         # Docs & text
-        if suffix in {".md", ".rst", ".txt", ".adoc"}:
+        if suffix in {".md", ".rst", ".txt", ".adoc"} or name_lower in {
+            "readme",
+            "license",
+            "copying",
+            "notice",
+            "authors",
+            "contributing",
+            "changelog",
+            "architecture",
+            "design",
+            "faq",
+        }:
             return "docs_text"
 
         # Scripts, templates, HTML/CSS, notebooks
@@ -518,6 +580,16 @@ class WikiEngine:
             ".j2",
         }:
             return "scripts_templates"
+
+        # Handle extensionless files
+        if suffix == "":
+            try:
+                first_bytes = abs_path.read_bytes()[:256]
+                if first_bytes.startswith(b"#!"):
+                    return "scripts_templates"
+            except OSError:
+                pass
+            return "docs_text"
 
         # Default to source code
         return "source_code"
@@ -727,66 +799,434 @@ class WikiEngine:
         except Exception:
             pass
 
-        # 2. Config & Build Extractor
+        # 2. Agent & IDE Rules / Instructions Extractor
+        if file_type == "config_rules":
+            redacted_content = redact_secrets(content)
+            headings: list[str] = []
+            list_items: list[str] = []
+            directives: list[str] = []
+
+            for line in redacted_content.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # Headings
+                h_match = re.match(r"^#+\s+(.+)$", stripped)
+                if h_match:
+                    h_text = h_match.group(1).strip()
+                    headings.append(h_text)
+                    all_known_symbols.add(h_text)
+                    continue
+                # List items
+                li_match = re.match(r"^[-*+]\s+(.+)$|^\d+\.\s+(.+)$", stripped)
+                if li_match:
+                    item_text = (li_match.group(1) or li_match.group(2)).strip()
+                    list_items.append(item_text)
+                    for sym in re.findall(r"`([^`]+)`", item_text):
+                        all_known_symbols.add(sym.strip())
+                    continue
+                # Directives / Instructions
+                if re.match(
+                    r"^(always|never|must|do not|ensure|enforce|use|run|follow|keep|avoid|prefer|don't|check|verify|rule:|directive:|instructions:)\b",
+                    stripped,
+                    re.IGNORECASE,
+                ):
+                    directives.append(stripped)
+                    for sym in re.findall(r"`([^`]+)`", stripped):
+                        all_known_symbols.add(sym.strip())
+
+            for sym in re.findall(r"`([^`]+)`", redacted_content):
+                all_known_symbols.add(sym.strip())
+
+            key_parts: list[tuple[str, str]] = []
+            for h in headings[:5]:
+                key_parts.append((h, f"Rule part for {h}."))
+                all_known_symbols.add(h)
+
+            seen_items: set[str] = set()
+            for item in directives + list_items:
+                clean_item = item.strip()
+                if clean_item in seen_items:
+                    continue
+                seen_items.add(clean_item)
+                bt = re.findall(r"`([^`]+)`", clean_item)
+                if bt:
+                    sym = bt[0].strip()
+                else:
+                    words = clean_item.split()
+                    sym = (
+                        " ".join(words[:2])
+                        if len(words) >= 2
+                        else (words[0] if words else "directive")
+                    )
+                sym = sym.strip("`:- ")
+                all_known_symbols.add(sym)
+                desc = clean_item
+                if len(desc) > 80:
+                    desc = desc[:77] + "..."
+                key_parts.append((sym, desc))
+                if len(key_parts) >= 15:
+                    break
+
+            title = headings[0] if headings else path
+            what_it_does = f"Sets agent rules and guide steps for `{title}`."
+
+            how_it_works: list[str] = []
+            if headings:
+                how_it_works.append(
+                    f"Groups rules under parts: {', '.join(f'`{h}`' for h in headings[:3])}."
+                )
+            if directives:
+                how_it_works.append(f"Sets code rule: {directives[0]}.")
+                if len(directives) > 1:
+                    how_it_works.append(f"Sets test rule: {directives[1]}.")
+            elif list_items:
+                how_it_works.append(f"Sets guide rule: {list_items[0]}.")
+                if len(list_items) > 1:
+                    how_it_works.append(f"Sets step order: {list_items[1]}.")
+            if not how_it_works:
+                if git_log:
+                    how_it_works.append(
+                        f"Maintains project rules updated in commit `{git_log[0]}`."
+                    )
+                else:
+                    how_it_works.append(f"Sets work rules for `{path}`.")
+
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
+
+            return {
+                "path": path,
+                "file_type": "config_rules",
+                "is_metadata": False,
+                "what_it_does": what_it_does,
+                "summary": what_it_does,
+                "how_it_works": how_it_works,
+                "key_parts": key_parts[:20],
+                "connects_to": [
+                    f"`{p}`" for p in all_repo_paths if "rule" in p.lower() and p != path
+                ][:5],
+                "watch_out_for": "Keep rules updated with team standards.",
+                "recent_changes": git_log,
+                "all_known_symbols": all_known_symbols,
+                "all_repo_paths": all_repo_paths,
+            }
+
+        # 3. Config & Build Extractor
         if file_type == "config_build":
             redacted_content = redact_secrets(content)
-            config_keys: list[tuple[str, str]] = []
+            config_keys = []
+            how_it_works = []
             what_it_does = f"Configures settings and build options for `{path}`."
-            if path == ".env.example" or path.endswith(".env"):
-                what_it_does = "Sample settings file for app options."
+            watch_out = "Changes here can break startup. Check that required keys stay set."
+
+            for sym in re.findall(r"`([^`]+)`", redacted_content):
+                all_known_symbols.add(sym.strip())
+
+            # A. Dockerfile / Containerfile
+            if "dockerfile" in path.lower() or "containerfile" in path.lower():
+                what_it_does = f"Builds app image and sets run tools for `{path}`."
+                watch_out = "Rebuild image when changing base tools or packages."
+                stages: list[str] = []
+                base_images: list[str] = []
+                commands: list[str] = []
+                env_vars: list[str] = []
+                ports: list[str] = []
+
                 for line in redacted_content.splitlines():
                     trimmed = line.strip()
-                    if trimmed and not trimmed.startswith("#") and "=" in trimmed:
-                        k, _ = trimmed.split("=", 1)
-                        config_keys.append((k.strip(), f"Sets {k.strip()} option."))
-            elif path.endswith(".gitignore"):
-                what_it_does = "Tells git which files and folders to ignore."
-                for line in redacted_content.splitlines():
-                    trimmed = line.strip()
-                    if trimmed and not trimmed.startswith("#"):
-                        config_keys.append((trimmed, f"Ignores path {trimmed}."))
+                    if not trimmed or trimmed.startswith("#"):
+                        continue
+                    m_from = re.match(r"^FROM\s+([^\s]+)(?:\s+[aA][sS]\s+([^\s]+))?", trimmed)
+                    if m_from:
+                        base_img = m_from.group(1)
+                        stage_name = m_from.group(2)
+                        base_images.append(base_img)
+                        all_known_symbols.add(base_img)
+                        if stage_name:
+                            stages.append(stage_name)
+                            all_known_symbols.add(stage_name)
+                            config_keys.append(
+                                (stage_name, f"Image build stage from `{base_img}`.")
+                            )
+                        else:
+                            config_keys.append((base_img, f"Base image `{base_img}`."))
+                    m_env = re.match(r"^ENV\s+([a-zA-Z_][a-zA-Z0-9_]*)[=\s]", trimmed)
+                    if m_env:
+                        k = m_env.group(1)
+                        env_vars.append(k)
+                        all_known_symbols.add(k)
+                        config_keys.append((k, f"Sets env var `{k}`."))
+                    m_port = re.match(r"^EXPOSE\s+([0-9]+(?:\/[a-zA-Z]+)?)", trimmed)
+                    if m_port:
+                        p_val = m_port.group(1)
+                        ports.append(p_val)
+                        all_known_symbols.add(p_val)
+                        all_known_symbols.add(f"EXPOSE {p_val}")
+                        config_keys.append((f"EXPOSE {p_val}", f"Opens port `{p_val}`."))
+                    m_cmd = re.match(r"^(RUN|CMD|ENTRYPOINT)\s+(.+)", trimmed)
+                    if m_cmd:
+                        cmd_type = m_cmd.group(1)
+                        cmd_val = m_cmd.group(2).strip()
+                        commands.append(cmd_val[:40])
+                        config_keys.append((cmd_type, f"Runs `{cmd_val[:50]}`."))
+
+                if stages:
+                    how_it_works.append(
+                        f"Builds image stage `{stages[0]}` from base image `{base_images[0]}`."
+                    )
+                elif base_images:
+                    how_it_works.append(f"Builds container using base image `{base_images[0]}`.")
+                if env_vars:
+                    how_it_works.append(
+                        f"Sets run env vars: {', '.join(f'`{e}`' for e in env_vars[:3])}."
+                    )
+                if ports:
+                    how_it_works.append(
+                        f"Opens network ports: {', '.join(f'`{p}`' for p in ports[:3])}."
+                    )
+                if commands:
+                    how_it_works.append(
+                        f"Runs image build steps: {', '.join(f'`{c}`' for c in commands[:2])}."
+                    )
+
+            # B. YAML workflows & configs
+            elif path.endswith(".yaml") or path.endswith(".yml"):
+                watch_out = "Failing checks block merges. Test in branch before merge."
+                parsed_yaml = None
+                if yaml is not None:
+                    try:
+                        parsed_yaml = yaml.safe_load(redacted_content)
+                    except Exception:
+                        pass
+
+                job_names: list[str] = []
+                service_names: list[str] = []
+                step_commands: list[str] = []
+                env_vars_yml: list[str] = []
+                triggers: list[str] = []
+
+                if isinstance(parsed_yaml, dict):
+                    if "name" in parsed_yaml and isinstance(parsed_yaml["name"], str):
+                        wf_name = str(parsed_yaml["name"])
+                        all_known_symbols.add(wf_name)
+                        what_it_does = f"Runs automated build checks for `{wf_name}`."
+                    # On triggers
+                    on_sect = parsed_yaml.get("on") or parsed_yaml.get(True)
+                    if isinstance(on_sect, list):
+                        triggers.extend([str(t) for t in on_sect])
+                    elif isinstance(on_sect, dict):
+                        triggers.extend([str(k) for k in on_sect.keys()])
+                    elif isinstance(on_sect, str):
+                        triggers.append(on_sect)
+                    for t in triggers:
+                        all_known_symbols.add(t)
+
+                    jobs = parsed_yaml.get("jobs", {})
+                    if isinstance(jobs, dict):
+                        for j_name, j_data in jobs.items():
+                            job_names.append(str(j_name))
+                            all_known_symbols.add(str(j_name))
+                            config_keys.append((str(j_name), f"Workflow job `{j_name}`."))
+                            if isinstance(j_data, dict):
+                                steps = j_data.get("steps", [])
+                                if isinstance(steps, list):
+                                    for st in steps:
+                                        if isinstance(st, dict):
+                                            if "run" in st:
+                                                first_cmd = str(st["run"]).splitlines()[0].strip()
+                                                step_commands.append(first_cmd)
+                                                for word in re.findall(
+                                                    r"\b[a-zA-Z0-9_-]+\b", first_cmd
+                                                )[:3]:
+                                                    all_known_symbols.add(word)
+                                            elif "uses" in st:
+                                                action = str(st["uses"]).split("@")[0]
+                                                step_commands.append(str(st["uses"]))
+                                                all_known_symbols.add(action)
+                                srvs = j_data.get("services", {})
+                                if isinstance(srvs, dict):
+                                    for s_name in srvs.keys():
+                                        service_names.append(str(s_name))
+                                        all_known_symbols.add(str(s_name))
+                                        config_keys.append(
+                                            (str(s_name), f"Container service `{s_name}`.")
+                                        )
+
+                    services = parsed_yaml.get("services", {})
+                    if isinstance(services, dict):
+                        for s_name, s_data in services.items():
+                            service_names.append(str(s_name))
+                            all_known_symbols.add(str(s_name))
+                            config_keys.append((str(s_name), f"Container service `{s_name}`."))
+                            if isinstance(s_data, dict) and "ports" in s_data:
+                                for p in s_data["ports"]:
+                                    all_known_symbols.add(str(p))
+
+                    top_env = parsed_yaml.get("env", {})
+                    if isinstance(top_env, dict):
+                        for ev in top_env.keys():
+                            env_vars_yml.append(str(ev))
+                            all_known_symbols.add(str(ev))
+                            config_keys.append((str(ev), f"Sets env var `{ev}`."))
+
+                    if not config_keys:
+                        for k in list(parsed_yaml.keys())[:15]:
+                            config_keys.append((str(k), f"Config section for `{k}`."))
+                            all_known_symbols.add(str(k))
+
+                if not job_names and not config_keys:
+                    for line in redacted_content.splitlines():
+                        m_k = re.match(r"^([a-zA-Z0-9_-]+):", line)
+                        if m_k:
+                            k = m_k.group(1)
+                            config_keys.append((k, f"Config entry `{k}`."))
+                            all_known_symbols.add(k)
+
+                if job_names:
+                    how_it_works.append(
+                        f"Runs workflow jobs: {', '.join(f'`{j}`' for j in job_names[:3])}."
+                    )
+                elif service_names:
+                    how_it_works.append(
+                        f"Starts container services: {', '.join(f'`{s}`' for s in service_names[:3])}."
+                    )
+                if step_commands:
+                    clean_cmds = [c.split()[0] if len(c) > 25 else c for c in step_commands[:3]]
+                    how_it_works.append(
+                        f"Runs test and lint commands: {', '.join(f'`{c}`' for c in clean_cmds)}."
+                    )
+                if triggers:
+                    how_it_works.append(
+                        f"Starts on code events: {', '.join(f'`{t}`' for t in triggers[:3])}."
+                    )
+                if env_vars_yml:
+                    how_it_works.append(
+                        f"Sets workflow variables: {', '.join(f'`{e}`' for e in env_vars_yml[:3])}."
+                    )
+
+            # C. TOML configs
+            elif path.endswith(".toml"):
+                try:
+                    parsed_toml = tomllib.loads(redacted_content)
+                    sections = list(parsed_toml.keys())
+                    for s in sections[:15]:
+                        config_keys.append((s, f"Configuration table `[{s}]`."))
+                        all_known_symbols.add(s)
+                    if "project" in parsed_toml and isinstance(parsed_toml["project"], dict):
+                        p_name = parsed_toml["project"].get("name")
+                        if p_name:
+                            what_it_does = (
+                                f"Project manifest and package configuration for `{p_name}`."
+                            )
+                            all_known_symbols.add(str(p_name))
+                    how_it_works.append(
+                        f"Defines project configuration sections: {', '.join(f'`{s}`' for s in sections[:3])}."
+                    )
+                except Exception:
+                    pass
+
+            # D. JSON configs
             elif path.endswith(".json"):
                 try:
                     obj = json.loads(redacted_content)
                     if isinstance(obj, dict):
-                        for k in list(obj.keys())[:15]:
-                            config_keys.append((k, f"Top-level config section for {k}."))
+                        sections = list(obj.keys())
+                        for k in sections[:15]:
+                            config_keys.append((k, f"Top-level config section for `{k}`."))
+                            all_known_symbols.add(k)
+                        if "scripts" in obj and isinstance(obj["scripts"], dict):
+                            scripts = list(obj["scripts"].keys())
+                            for sc in scripts:
+                                all_known_symbols.add(sc)
+                            how_it_works.append(
+                                f"Defines automation scripts: {', '.join(f'`{sc}`' for sc in scripts[:3])}."
+                            )
+                        how_it_works.append(
+                            f"Configures settings for sections: {', '.join(f'`{k}`' for k in sections[:3])}."
+                        )
                 except Exception:
                     pass
-            elif path.endswith(".toml") or path.endswith(".ini") or path.endswith(".cfg"):
+
+            # E. .env files
+            elif path == ".env.example" or path.endswith(".env"):
+                what_it_does = f"Sample settings file for app options in `{path}`."
+                env_keys = []
                 for line in redacted_content.splitlines():
-                    match = re.match(r"^\s*(\[[\w.-]+\]|[\w.-]+\s*=)", line)
-                    if match:
-                        raw_k = match.group(1).strip("[] =")
-                        config_keys.append((raw_k, f"Sets {raw_k} setting."))
-            elif "Dockerfile" in path:
-                what_it_does = "Defines container image build steps and runtime environment."
-                for line in redacted_content.splitlines():
-                    if re.match(r"^(FROM|RUN|CMD|ENTRYPOINT|EXPOSE|ENV)\s", line):
-                        cmd = line.split()[0]
-                        config_keys.append((cmd, f"Executes container {cmd} instruction."))
-            elif "Makefile" in path:
-                what_it_does = "Provides build targets and automation recipes for make."
+                    trimmed = line.strip()
+                    if trimmed and not trimmed.startswith("#") and "=" in trimmed:
+                        k, _ = trimmed.split("=", 1)
+                        k = k.strip()
+                        env_keys.append(k)
+                        config_keys.append((k, f"Sets `{k}` option."))
+                        all_known_symbols.add(k)
+                if env_keys:
+                    how_it_works.append(
+                        f"Sets setup keys: {', '.join(f'`{k}`' for k in env_keys[:3])}."
+                    )
+                    if len(env_keys) > 3:
+                        how_it_works.append(
+                            f"Configures extra keys: {', '.join(f'`{k}`' for k in env_keys[3:6])}."
+                        )
+
+            # F. Makefile
+            elif "makefile" in path.lower():
+                what_it_does = f"Build targets and task recipes for `{path}`."
+                targets = []
                 for line in redacted_content.splitlines():
                     m = re.match(r"^([\w.-]+):", line)
                     if m:
                         target = m.group(1)
-                        config_keys.append((target, f"Build recipe target for {target}."))
+                        targets.append(target)
+                        config_keys.append((target, f"Build recipe target `{target}`."))
+                        all_known_symbols.add(target)
+                if targets:
+                    how_it_works.append(
+                        f"Sets build targets: {', '.join(f'`{t}`' for t in targets[:3])}."
+                    )
+
+            # G. .gitignore
+            elif path.endswith(".gitignore"):
+                what_it_does = f"Tells git which files and folders to skip for `{path}`."
+                patterns = []
+                for line in redacted_content.splitlines():
+                    trimmed = line.strip()
+                    if trimmed and not trimmed.startswith("#"):
+                        patterns.append(trimmed)
+                        config_keys.append((trimmed, f"Ignores pattern `{trimmed}`."))
+                        all_known_symbols.add(trimmed)
+                if patterns:
+                    how_it_works.append(
+                        f"Skips path patterns: {', '.join(f'`{p}`' for p in patterns[:3])}."
+                    )
+
+            # General fallback for how_it_works
+            if not how_it_works:
+                if config_keys:
+                    how_it_works.append(
+                        f"Configures settings for keys: {', '.join(f'`{k}`' for k, _ in config_keys[:3])}."
+                    )
+                elif git_log:
+                    how_it_works.append(
+                        f"Tracks configuration revisions updated in commit `{git_log[0]}`."
+                    )
+                else:
+                    how_it_works.append(f"Provides configuration settings for `{path}`.")
 
             for k, _ in config_keys:
                 all_known_symbols.add(k)
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
 
-            watch_out = "Changes here can break startup. Check that required keys stay set."
             return {
                 "path": path,
                 "file_type": "config_build",
                 "is_metadata": False,
                 "what_it_does": what_it_does,
                 "summary": what_it_does,
-                "how_it_works": [
-                    "Reads settings and environment variables.",
-                    "Sets runtime options for the system.",
-                ],
+                "how_it_works": how_it_works,
                 "key_parts": config_keys[:20],
                 "connects_to": [f"`{p}`" for p in all_repo_paths if "config" in p and p != path][
                     :5
@@ -797,13 +1237,18 @@ class WikiEngine:
                 "all_repo_paths": all_repo_paths,
             }
 
-        # 3. Docs & Text Extractor
+        # 4. Docs & Text Extractor
         if file_type == "docs_text":
-            headings: list[str] = []
+            headings = []
+            list_items = []
             for line in lines:
                 h_match = re.match(r"^#+\s+(.+)$", line)
                 if h_match:
                     headings.append(h_match.group(1).strip())
+                li_match = re.match(r"^[-*+]\s+(.+)$|^\d+\.\s+(.+)$", line.strip())
+                if li_match:
+                    list_items.append((li_match.group(1) or li_match.group(2)).strip())
+
             title = headings[0] if headings else path
             what_it_does = (
                 f"Documentation file explaining {title}. Intended for developers and users."
@@ -811,6 +1256,29 @@ class WikiEngine:
             key_parts = [(h, "Document section header.") for h in headings[1:10]]
             for h in headings:
                 all_known_symbols.add(h)
+            for sym in re.findall(r"`([^`]+)`", content):
+                all_known_symbols.add(sym.strip())
+
+            how_it_works = []
+            if headings:
+                how_it_works.append(
+                    f"Structured around primary sections: {', '.join(f'`{h}`' for h in headings[:3])}."
+                )
+            if len(headings) > 1:
+                how_it_works.append(
+                    f"Details architecture and workflow guidelines for `{headings[1]}`."
+                )
+            elif list_items:
+                how_it_works.append(f"Outlines key operational steps: {list_items[0]}.")
+            if git_log:
+                how_it_works.append(f"Documents codebase context updated in commit `{git_log[0]}`.")
+            if not how_it_works:
+                how_it_works.append(f"Provides project documentation for `{path}`.")
+
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
+
             linked_paths = [p for p in all_repo_paths if p in content and p != path]
             return {
                 "path": path,
@@ -818,10 +1286,7 @@ class WikiEngine:
                 "is_metadata": False,
                 "what_it_does": what_it_does,
                 "summary": what_it_does,
-                "how_it_works": [
-                    "Outlines architecture conventions and operational guidelines.",
-                    "Provides code examples and reference workflows.",
-                ],
+                "how_it_works": how_it_works,
                 "key_parts": key_parts,
                 "connects_to": [f"`{p}`" for p in linked_paths[:5]],
                 "watch_out_for": "Keep documentation synchronized when updating related code.",
@@ -830,7 +1295,7 @@ class WikiEngine:
                 "all_repo_paths": all_repo_paths,
             }
 
-        # 4. Data, SQL, Schemas Extractor
+        # 5. Data, SQL, Schemas Extractor
         if file_type == "data_schema":
             tables: list[str] = []
             for line in lines:
@@ -843,16 +1308,34 @@ class WikiEngine:
             key_parts = [(tbl, f"Database table `{tbl}`.") for tbl in tables]
             for t in tables:
                 all_known_symbols.add(t)
+
+            how_it_works = []
+            if tables:
+                how_it_works.append(
+                    f"Defines database schema tables: {', '.join(f'`{t}`' for t in tables[:3])}."
+                )
+                if len(tables) > 3:
+                    how_it_works.append(
+                        f"Manages relational structures for {', '.join(f'`{t}`' for t in tables[3:6])}."
+                    )
+            if git_log:
+                how_it_works.append(
+                    f"Maintains schema definition updated in commit `{git_log[0]}`."
+                )
+            if not how_it_works:
+                how_it_works.append(f"Specifies schema structure for `{path}`.")
+
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
+
             return {
                 "path": path,
                 "file_type": "data_schema",
                 "is_metadata": False,
                 "what_it_does": what_it_does,
                 "summary": what_it_does,
-                "how_it_works": [
-                    "Creates persistent tables and defines column types.",
-                    "Enforces indices, primary keys, and relational constraints.",
-                ],
+                "how_it_works": how_it_works,
                 "key_parts": key_parts,
                 "connects_to": [
                     f"`{p}`" for p in all_repo_paths if "sqlite" in p or "storage" in p
@@ -863,44 +1346,130 @@ class WikiEngine:
                 "all_repo_paths": all_repo_paths,
             }
 
-        # 5. Tests Extractor
+        # 6. Tests Extractor
         if file_type == "test":
-            test_funcs: list[str] = []
-            for line in lines:
-                m = re.match(r"^\s*def\s+(test_[\w]+)", line)
-                if m:
-                    test_funcs.append(m.group(1))
-            what_it_does = (
-                f"Runs automated tests verifying behavior and contract requirements for `{path}`."
-            )
-            key_parts = [(fn, "Test case verifying expected behavior.") for fn in test_funcs]
-            for fn in test_funcs:
-                all_known_symbols.add(fn)
-            tested_modules = [
+            test_cases: list[str] = []
+            fixtures: list[str] = []
+            target_modules: list[str] = []
+            key_parts = []
+
+            try:
+                tree = ast.parse(content)
+                for node in ast.iter_child_nodes(tree):
+                    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                        if node.name.startswith("test_"):
+                            test_cases.append(node.name)
+                            all_known_symbols.add(node.name)
+                        for dec in node.decorator_list:
+                            dec_name = ""
+                            if isinstance(dec, ast.Name):
+                                dec_name = dec.id
+                            elif isinstance(dec, ast.Attribute):
+                                dec_name = dec.attr
+                            elif isinstance(dec, ast.Call):
+                                if isinstance(dec.func, ast.Name):
+                                    dec_name = dec.func.id
+                                elif isinstance(dec.func, ast.Attribute):
+                                    dec_name = dec.func.attr
+                            if "fixture" in dec_name.lower():
+                                fixtures.append(node.name)
+                                all_known_symbols.add(node.name)
+                                break
+                    elif isinstance(node, ast.ClassDef):
+                        if node.name.startswith("Test"):
+                            test_cases.append(node.name)
+                            all_known_symbols.add(node.name)
+                            for subnode in node.body:
+                                if isinstance(
+                                    subnode, ast.FunctionDef | ast.AsyncFunctionDef
+                                ) and subnode.name.startswith("test_"):
+                                    all_known_symbols.add(subnode.name)
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module and not node.module.startswith("test"):
+                            target_modules.append(node.module)
+                            all_known_symbols.add(node.module)
+                            py_path = node.module.replace(".", "/") + ".py"
+                            if py_path in all_repo_paths:
+                                target_modules.append(py_path)
+                            for alias in node.names:
+                                all_known_symbols.add(alias.name)
+                                target_modules.append(alias.name)
+            except Exception:
+                for line in lines:
+                    m = re.match(r"^\s*def\s+(test_[\w]+)", line)
+                    if m:
+                        fn = m.group(1)
+                        test_cases.append(fn)
+                        all_known_symbols.add(fn)
+
+            for sym in re.findall(r"`([^`]+)`", content):
+                all_known_symbols.add(sym.strip())
+
+            tested_repo_files = [
                 p
                 for p in all_repo_paths
                 if p in content and p != path and not p.startswith("tests/")
             ]
+            for trf in tested_repo_files:
+                target_modules.append(trf)
+
+            for tc in test_cases[:15]:
+                key_parts.append((tc, f"Test case for `{tc}`."))
+            for fix in fixtures[:5]:
+                key_parts.append((fix, f"Test fixture for `{fix}`."))
+            for tm in target_modules[:3]:
+                if not any(k[0] == tm for k in key_parts):
+                    key_parts.append((tm, f"Target component `{tm}`."))
+
+            what_it_does = f"Runs automated tests for `{path}`."
+            if target_modules:
+                what_it_does = f"Runs automated tests for `{target_modules[0]}`."
+
+            how_it_works = []
+            if test_cases:
+                how_it_works.append(
+                    f"Runs test cases: {', '.join(f'`{t}`' for t in test_cases[:3])}."
+                )
+            if fixtures:
+                how_it_works.append(
+                    f"Sets up test fixtures: {', '.join(f'`{f}`' for f in fixtures[:3])}."
+                )
+            if target_modules:
+                how_it_works.append(
+                    f"Tests target module {', '.join(f'`{m}`' for m in target_modules[:2])}."
+                )
+            if len(test_cases) > 3:
+                how_it_works.append(
+                    f"Checks test assertions across {', '.join(f'`{t}`' for t in test_cases[3:6])}."
+                )
+            if not how_it_works:
+                if git_log:
+                    how_it_works.append(
+                        f"Maintains test suite history updated in commit `{git_log[0]}`."
+                    )
+                else:
+                    how_it_works.append(f"Runs validation tests for `{path}`.")
+
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
+
             return {
                 "path": path,
                 "file_type": "test",
                 "is_metadata": False,
                 "what_it_does": what_it_does,
                 "summary": what_it_does,
-                "how_it_works": [
-                    "Sets up test fixtures and required mocks.",
-                    "Executes test scenarios against target functions and classes.",
-                    "Asserts expected outcomes and error handling.",
-                ],
+                "how_it_works": how_it_works,
                 "key_parts": key_parts[:20],
-                "connects_to": [f"`{p}`" for p in tested_modules[:5]],
-                "watch_out_for": "Tests mock external services; end-to-end network errors may not be covered.",
+                "connects_to": [f"`{p}`" for p in target_modules[:5]],
+                "watch_out_for": "Keep test cases updated when changing target code.",
                 "recent_changes": git_log,
                 "all_known_symbols": all_known_symbols,
                 "all_repo_paths": all_repo_paths,
             }
 
-        # 6. Scripts & Templates Extractor
+        # 7. Scripts & Templates Extractor
         if file_type == "scripts_templates":
             what_it_does = f"Script or template automating tasks in `{path}`."
             cmd_steps: list[str] = []
@@ -908,16 +1477,28 @@ class WikiEngine:
                 s_line = line.strip()
                 if s_line and not s_line.startswith("#"):
                     cmd_steps.append(s_line[:60])
+
+            how_it_works = []
+            if cmd_steps:
+                how_it_works.append(
+                    f"Executes automation commands: {', '.join(f'`{c}`' for c in cmd_steps[:2])}."
+                )
+            if git_log:
+                how_it_works.append(f"Maintains script history updated in commit `{git_log[0]}`.")
+            if not how_it_works:
+                how_it_works.append(f"Automates operations defined in `{path}`.")
+
+            for item in how_it_works:
+                for sym in re.findall(r"`([^`]+)`", item):
+                    all_known_symbols.add(sym.strip())
+
             return {
                 "path": path,
                 "file_type": "scripts_templates",
                 "is_metadata": False,
                 "what_it_does": what_it_does,
                 "summary": what_it_does,
-                "how_it_works": [
-                    "Parses command line arguments and environment variables.",
-                    "Executes automated task pipeline.",
-                ],
+                "how_it_works": how_it_works,
                 "key_parts": [(cmd_steps[0], "Primary command step.")] if cmd_steps else [],
                 "connects_to": [],
                 "watch_out_for": "Ensure required interpreter and environment dependencies are installed.",
@@ -926,7 +1507,7 @@ class WikiEngine:
                 "all_repo_paths": all_repo_paths,
             }
 
-        # 7. Source Code Extractor (Python, JS, TS, Go, Rust, etc.)
+        # 8. Source Code Extractor (Python, JS, TS, Go, Rust, etc.)
         raw_lang = file_entry.get("language") if file_entry else None
         language = str(raw_lang) if raw_lang else (abs_path.suffix.lstrip(".") or "unknown")
 
@@ -967,13 +1548,14 @@ class WikiEngine:
                 pass
 
         public_parts: list[tuple[str, str]] = []
-        for s in symbols:
-            name = s["name"]
+        for sym_entry in symbols:
+            name = sym_entry["name"]
             all_known_symbols.add(name)
             if name.startswith("_") and not name.startswith("__init__"):
                 continue
             summary = (
-                symbol_docstrings.get(name) or f"Public {s['kind'].replace('_definition', '')}."
+                symbol_docstrings.get(name)
+                or f"Public {sym_entry['kind'].replace('_definition', '')}."
             )
             public_parts.append((name, summary))
 
@@ -994,14 +1576,49 @@ class WikiEngine:
         ]
         for imp in direct_imports[:5]:
             connects_list.append(f"Imports `{imp}`")
+            for imp_token in re.findall(r"\b[a-zA-Z0-9_]+\b", imp):
+                all_known_symbols.add(imp_token)
         for cl in callers[:3]:
             connects_list.append(f"Used by `{cl['caller_file']}` via `{cl['caller_symbol']}`")
+            all_known_symbols.add(cl["caller_symbol"])
         for ca in callees[:3]:
             connects_list.append(f"Calls `{ca['callee_symbol']}` in `{ca['callee_file']}`")
+            all_known_symbols.add(ca["callee_symbol"])
 
         watch_out = (
             decisions[0] if decisions else "Check caller files before changing function names."
         )
+
+        how_it_works = []
+        if public_parts:
+            how_it_works.append(
+                f"Sets up code parts: {', '.join(f'`{p[0]}`' for p in public_parts[:3])}."
+            )
+        if direct_imports:
+            how_it_works.append(
+                f"Uses tools from: {', '.join(f'`{imp}`' for imp in direct_imports[:3])}."
+            )
+        if callers:
+            how_it_works.append(
+                f"Invoked by `{callers[0]['caller_symbol']}` in `{callers[0]['caller_file']}`."
+            )
+        elif callees:
+            how_it_works.append(
+                f"Sends tasks to `{callees[0]['callee_symbol']}` in `{callees[0]['callee_file']}`."
+            )
+        elif len(public_parts) > 3:
+            how_it_works.append(
+                f"Runs extra helper code in {', '.join(f'`{p[0]}`' for p in public_parts[3:6])}."
+            )
+        if len(how_it_works) < 3:
+            if git_log:
+                how_it_works.append(f"Tracks updates from commit `{git_log[0]}`.")
+            else:
+                how_it_works.append(f"Implements source logic for `{path}`.")
+
+        for item in how_it_works:
+            for sym in re.findall(r"`([^`]+)`", item):
+                all_known_symbols.add(sym.strip())
 
         return {
             "path": path,
@@ -1009,11 +1626,7 @@ class WikiEngine:
             "is_metadata": False,
             "what_it_does": what_it_does,
             "summary": what_it_does,
-            "how_it_works": [
-                "Imports needed files and helper tools.",
-                "Runs code through public functions and classes.",
-                "Sends back results to callers.",
-            ],
+            "how_it_works": how_it_works,
             "key_parts": public_parts[:20],
             "connects_to": connects_list,
             "watch_out_for": watch_out,
@@ -1044,7 +1657,8 @@ class WikiEngine:
         if facts["key_parts"]:
             parts.append("**Key parts**")
             for sym, desc in facts["key_parts"]:
-                parts.append(f"- `{sym}`: {desc}")
+                clean_sym = str(sym).strip("`")
+                parts.append(f"- `{clean_sym}`: {desc}")
             parts.append("")
 
         if facts["connects_to"]:
@@ -1093,12 +1707,18 @@ class WikiEngine:
             if not section_content:
                 errors.append(f"Empty section under {m.group(1)}.")
 
-        # 3. Reading level <= 8.5
+        # 3. Reject generic boilerplate sentences
+        for bp_pattern in _GENERIC_BOILERPLATE_PATTERNS:
+            m_bp = re.search(bp_pattern, text, re.IGNORECASE)
+            if m_bp:
+                errors.append(f"Generic boilerplate detected: '{m_bp.group(0)}'.")
+
+        # 4. Reading level <= 8.5
         fkgl = flesch_kincaid_grade_level(text)
         if fkgl > 8.5:
             errors.append(f"Reading level too high: {fkgl} > 8.5.")
 
-        # 4. Verified symbols and paths
+        # 5. Verified symbols and paths
         code_spans = re.findall(r"`([^`]+)`", text)
         known_symbols = facts["all_known_symbols"] | _PYTHON_BUILTINS
         known_paths = facts["all_repo_paths"]
@@ -1119,6 +1739,32 @@ class WikiEngine:
             if " " in token or "=" in token or ":" in token:
                 continue
             errors.append(f"Unevidenced symbol or path: `{token}`.")
+
+        # 6. Specificity check: The page must cite file-specific identifiers, directives, or headings
+        if not facts.get("is_metadata", False):
+            specific_candidates: set[str] = set()
+            for k, _ in facts.get("key_parts", []):
+                cleaned_k = str(k).strip("`- ")
+                if cleaned_k:
+                    specific_candidates.add(cleaned_k)
+            for s in facts.get("all_known_symbols", set()):
+                s_str = str(s).strip()
+                if (
+                    s_str.lower()
+                    not in {"python", "bash", "json", "yaml", "toml", "sql", "git", "unknown"}
+                    and not (" " in s_str and any(c.isdigit() for c in s_str[:8]))
+                    and s_str
+                ):
+                    specific_candidates.add(s_str)
+
+            if specific_candidates:
+                cited = any(
+                    bool(re.search(rf"\b{re.escape(cand)}\b", text)) for cand in specific_candidates
+                )
+                if not cited:
+                    errors.append(
+                        "Page lacks specificity: must cite file-specific identifiers, directives, or headings."
+                    )
 
         return errors
 

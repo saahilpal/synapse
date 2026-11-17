@@ -69,6 +69,7 @@ class RuntimeDaemon:
         self._last_fs_event_time: float = 0.0
         self._observer: Any = None
         self._ui_server: Any = None
+        self._ipc_server: Any = None
 
         if debounce_seconds is not None:
             self._debounce_seconds = debounce_seconds
@@ -200,12 +201,28 @@ class RuntimeDaemon:
                 self.logger.warning("watchdog_observer_init_failed", error=str(e))
                 self._observer = None
 
+            # Launch Unix Domain Socket IPC server
+            try:
+                from synap_git.indexer.socket_ipc import DaemonServer
+
+                sock_path = self.settings.repository_path / ".synap" / "daemon.sock"
+                self._ipc_server = DaemonServer(self.runtime, sock_path)
+                await self._ipc_server.start()
+            except Exception as e:
+                self.logger.warning("ipc_server_start_failed", error=str(e))
+                self._ipc_server = None
+
             # Launch Uvicorn and Wiki Worker in background
             server_task = asyncio.create_task(self._ui_server.serve())
             wiki_worker_task = asyncio.create_task(self._wiki_worker_loop())
 
             await self._poll_git_loop()
         finally:
+            if hasattr(self, "_ipc_server") and self._ipc_server is not None:
+                try:
+                    await self._ipc_server.stop()
+                except Exception:
+                    pass
             if self._observer:
                 try:
                     self._observer.stop()
@@ -270,8 +287,9 @@ class RuntimeDaemon:
         import socket
 
         port = start_port
-        while port < start_port + 100:
+        while port < start_port + 500:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
                     s.bind(("127.0.0.1", port))
                     return port
@@ -381,6 +399,13 @@ class RuntimeDaemon:
             pid_file.unlink(missing_ok=True)
         except Exception as e:
             self.logger.warning("daemon_delete_pid_failed", error=str(e))
+
+        # Cleanup IPC socket file as well
+        sock_file = self.settings.repository_path / ".synap" / "daemon.sock"
+        try:
+            sock_file.unlink(missing_ok=True)
+        except Exception as e:
+            self.logger.warning("daemon_delete_sock_failed", error=str(e))
 
     async def _poll_git_loop(self) -> None:
         backstop_interval = 30.0

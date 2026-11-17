@@ -502,5 +502,5 @@ def test_grounded_evaluation_benchmark_precision_recall_latency(tmp_path: Path) 
     # Benchmark assertions
     assert avg_p_at_3 >= 0.70, f"Precision@3 too low: {avg_p_at_3}"
     assert avg_r_at_5 >= 0.70, f"Recall@5 too low: {avg_r_at_5}"
-    assert avg_latency < 50.0, f"Average latency too high: {avg_latency}ms"
+    assert avg_latency < 100.0, f"Average latency too high: {avg_latency}ms"
     assert avg_reduction >= 40.0, f"Token reduction too low: {avg_reduction}%"

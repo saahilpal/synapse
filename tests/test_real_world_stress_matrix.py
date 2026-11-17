@@ -51,6 +51,9 @@ def base_git_repo(tmp_path: Path) -> Path:
         "def base_func():\n    return 42\n",
         encoding="utf-8",
     )
+    (repo / ".gitignore").write_text(
+        ".synap/\n.synapse/\n.synapse/*-wal\n.synapse/*-shm\n", encoding="utf-8"
+    )
     _run_git(["add", "."], repo)
     _run_git(["commit", "-m", "chore: initial commit"], repo)
     return repo

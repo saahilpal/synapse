@@ -604,11 +604,20 @@ class SynapRuntime:
         if self.store.path.exists():
             last_indexed = self.store.get_last_indexed_commit()
             if last_indexed == git_state.head_commit and not force:
-                self.logger.info(
-                    "index_repository_skipped",
-                    branch=branch,
-                    commit=last_indexed,
-                )
+                if not git_state.is_dirty:
+                    self.logger.info(
+                        "index_repository_skipped",
+                        branch=branch,
+                        commit=last_indexed,
+                    )
+                    return last_indexed
+                changed = self.index_incremental_changes()
+                if not changed:
+                    self.logger.info(
+                        "index_repository_skipped",
+                        branch=branch,
+                        commit=last_indexed,
+                    )
                 return last_indexed
 
         # Check active commit after storage initialization
@@ -1145,6 +1154,211 @@ class SynapRuntime:
         )
         return git_state.head_commit
 
+    def index_incremental_changes(self, file_paths: list[str] | None = None) -> list[str]:
+        """
+        Fast Incremental Git Indexing:
+        Uses `git status --porcelain` and `git diff --name-only` + file content hashes
+        to index only changed files instead of recursively walking the entire directory tree.
+        Target: single-file reindex under 300ms.
+        """
+        t_start = time.perf_counter()
+        self.initialize_storage()
+        repo_path = self.settings.repository_path
+
+        modified_or_added: set[str] = set()
+        deleted: set[str] = set()
+
+        if file_paths is not None:
+            for fp in file_paths:
+                p = repo_path / fp
+                if p.exists() and p.is_file():
+                    modified_or_added.add(fp)
+                else:
+                    deleted.add(fp)
+        else:
+            # 1. git status --porcelain
+            try:
+                res_status = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                for line in res_status.stdout.splitlines():
+                    if not line.strip():
+                        continue
+                    status = line[:2]
+                    path_part = line[3:].strip()
+                    if " -> " in path_part:
+                        old_p, new_p = path_part.split(" -> ")
+                        deleted.add(old_p.strip('"'))
+                        modified_or_added.add(new_p.strip('"'))
+                    elif "D" in status:
+                        deleted.add(path_part.strip('"'))
+                    else:
+                        modified_or_added.add(path_part.strip('"'))
+            except Exception as e:
+                self.logger.debug("git_status_porcelain_failed", error=str(e))
+
+            # 2. git diff --name-only HEAD
+            try:
+                res_diff = subprocess.run(
+                    ["git", "diff", "--name-only", "HEAD"],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
+                if res_diff.returncode == 0:
+                    for line in res_diff.stdout.splitlines():
+                        lp = line.strip().strip('"')
+                        if lp:
+                            if (repo_path / lp).exists():
+                                modified_or_added.add(lp)
+                            else:
+                                deleted.add(lp)
+            except Exception as e:
+                self.logger.debug("git_diff_name_only_failed", error=str(e))
+
+        scanner = RepositoryScanner(
+            repository_path=repo_path,
+            max_file_bytes=self.settings.max_file_bytes,
+        )
+
+        filtered_changes: list[str] = []
+        for rel_p in modified_or_added:
+            p = repo_path / rel_p
+            if not p.exists() or not p.is_file():
+                continue
+            if scanner._excluded(p):
+                continue
+            try:
+                if p.stat().st_size > self.settings.max_file_bytes:
+                    continue
+            except OSError:
+                continue
+            if _is_binary_file(p):
+                continue
+            filtered_changes.append(rel_p)
+
+        # Handle deletions
+        with self.store.connect() as conn:
+            for rel_p in deleted:
+                row = conn.execute("SELECT file_id FROM files WHERE path = ?", (rel_p,)).fetchone()
+                if row:
+                    fid = row["file_id"]
+                    conn.execute(
+                        "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?) OR target_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                        (fid, fid),
+                    )
+                    conn.execute("DELETE FROM symbols WHERE file_id = ?", (fid,))
+                    conn.execute("DELETE FROM files WHERE file_id = ?", (fid,))
+                else:
+                    conn.execute("DELETE FROM files WHERE path = ?", (rel_p,))
+                if self.settings.enable_file_wiki:
+                    self.store.set_wiki_status(rel_p, None, "stale")
+
+        reindexed_files: list[str] = []
+        parsed_results: list[tuple[str, str, list[str]]] = []
+        symbols_to_embed: list[tuple[str, list[dict[str, Any]], str]] = []
+
+        # Get blob OIDs for changed files
+        git_oids: dict[str, str] = {}
+        if filtered_changes:
+            try:
+                res_tree = subprocess.run(
+                    ["git", "ls-tree", "HEAD"] + filtered_changes,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
+                if res_tree.returncode == 0:
+                    for line in res_tree.stdout.splitlines():
+                        parts = line.split("\t", 1)
+                        if len(parts) == 2:
+                            meta = parts[0].split()
+                            if len(meta) >= 3:
+                                git_oids[parts[1]] = meta[2]
+            except Exception:
+                pass
+
+        # Check content hashes against store
+        with self.store.connect() as conn:
+            stored_hashes = {
+                row["path"]: row["content_hash"]
+                for row in conn.execute("SELECT path, content_hash FROM files").fetchall()
+            }
+
+        for rel_path in filtered_changes:
+            p = repo_path / rel_path
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                self.logger.warning("failed_to_read_file", path=rel_path, error=str(e))
+                continue
+
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            # Skip if content hash hasn't changed
+            if stored_hashes.get(rel_path) == content_hash:
+                continue
+
+            file_id_hash = hashlib.sha256((rel_path + content_hash).encode("utf-8")).hexdigest()
+
+            parse_result = self.parser_registry.parse(p, relative_path=rel_path, text=content)
+            symbols_list = [
+                {
+                    "symbol_id": sym.stable_id,
+                    "name": sym.name,
+                    "kind": sym.kind,
+                    "start_line": sym.start_line,
+                    "end_line": sym.end_line,
+                    "ast_hash": sym.ast_hash,
+                    "metadata": sym.metadata,
+                }
+                for sym in parse_result.symbols
+            ]
+
+            self.store.upsert_file_and_symbols(
+                file_id=file_id_hash,
+                path=rel_path,
+                git_oid=git_oids.get(rel_path, ""),
+                content_hash=content_hash,
+                language=parse_result.language,
+                symbols=symbols_list,
+            )
+            symbols_to_embed.append((file_id_hash, symbols_list, content_hash))
+
+            if self.settings.enable_file_wiki:
+                self.store.set_wiki_status(rel_path, None, "stale")
+                self.store.enqueue_wiki(rel_path)
+
+            with self.store.connect() as conn:
+                conn.execute(
+                    "DELETE FROM edges WHERE source_symbol IN (SELECT symbol_id FROM symbols WHERE file_id = ?)",
+                    (file_id_hash,),
+                )
+
+            parsed_results.append((file_id_hash, rel_path, list(parse_result.imports)))
+            reindexed_files.append(rel_path)
+
+        if symbols_to_embed:
+            self._generate_embeddings(symbols_to_embed)
+
+        if parsed_results:
+            self._resolve_and_insert_edges(parsed_results)
+
+        elapsed = time.perf_counter() - t_start
+        self.logger.info(
+            "fast_incremental_indexing_completed",
+            reindexed=len(reindexed_files),
+            elapsed_ms=round(elapsed * 1000, 2),
+        )
+        return reindexed_files
+
+    def reindex_file(self, rel_path: str) -> list[str]:
+        """Reindex a single file incrementally."""
+        return self.index_incremental_changes([rel_path])
+
     def _resolve_and_insert_edges(self, parsed_results: list[tuple[str, str, list[str]]]) -> None:
         if not parsed_results:
             return
@@ -1354,6 +1568,16 @@ class SynapRuntime:
             is_dirty=is_dirty,
             synthesize_answer=synthesize_answer,
         )
+
+    def retrieve(
+        self,
+        query: str,
+        *,
+        max_tokens: int = 4000,
+        synthesize_answer: bool = True,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        """Alias for query_hybrid."""
+        return self.query_hybrid(query, max_tokens=max_tokens, synthesize_answer=synthesize_answer)
 
     def doctor(self, *, auto_recover: bool = False) -> dict[str, Any]:
         self.initialize_storage(auto_recover=auto_recover)
